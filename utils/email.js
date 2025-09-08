@@ -1,13 +1,15 @@
 const nodemailer = require('nodemailer');
 
-// Simple, direct Gmail transporter
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.SMTP_EMAIL,
-    pass: process.env.SMTP_PASSWORD
-  }
-});
+// Create transporter function (don't create at module load)
+const createTransporter = () => {
+  return nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: process.env.SMTP_EMAIL,
+      pass: process.env.SMTP_PASSWORD
+    }
+  });
+};
 
 const sendEmail = async (options) => {
   console.log('\n📧 =================================');
@@ -18,9 +20,9 @@ const sendEmail = async (options) => {
   console.log('📧 SMTP Password exists:', !!process.env.SMTP_PASSWORD);
   console.log('📧 =================================');
   
-  // CRITICAL: Check if environment variables exist
+  // Check if environment variables exist
   if (!process.env.SMTP_EMAIL || !process.env.SMTP_PASSWORD) {
-    const error = 'CRITICAL ERROR: SMTP_EMAIL or SMTP_PASSWORD not set in Railway environment variables';
+    const error = 'SMTP_EMAIL or SMTP_PASSWORD not set in environment variables';
     console.error('❌', error);
     throw new Error(error);
   }
@@ -33,34 +35,28 @@ const sendEmail = async (options) => {
   };
 
   try {
-    console.log('🔄 Attempting to send email...');
-    console.log('📧 Mail Options:', JSON.stringify(mailOptions, null, 2));
+    console.log('🔄 Creating transporter and sending email...');
+    const transporter = createTransporter();
     
     const result = await transporter.sendMail(mailOptions);
     
-    console.log('✅ NODEMAILER SAYS EMAIL SENT SUCCESSFULLY!');
+    console.log('✅ EMAIL SENT SUCCESSFULLY!');
     console.log('📨 Message ID:', result.messageId);
-    console.log('📧 Response:', result.response);
     console.log('📧 =================================');
     
-    // IMPORTANT: Even if nodemailer says success, Gmail might reject it
-    // Let's be explicit about what we return
     return {
       success: true,
       messageId: result.messageId,
-      response: result.response,
-      warning: 'Email sent via nodemailer - check inbox to confirm delivery'
+      response: result.response
     };
     
   } catch (error) {
     console.error('\n❌ EMAIL SEND FAILED:');
-    console.error('❌ Error Code:', error.code);
+    console.error('❌ Error Code:', error.code || 'Unknown');
     console.error('❌ Error Message:', error.message);
-    console.error('❌ Full Error:', JSON.stringify(error, null, 2));
     console.error('📧 =================================');
     
-    // Throw the error so the calling function knows it failed
-    throw new Error(`Email sending failed: ${error.message} (Code: ${error.code || 'Unknown'})`);
+    throw new Error(`Email sending failed: ${error.message}`);
   }
 };
 
