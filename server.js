@@ -19,17 +19,14 @@ app.use(
     crossOriginResourcePolicy: { policy: "cross-origin" },
   })
 );
-// Generate array of allowed origins for localhost:3000-3010
-const allowedOrigins = [];
-for (let port = 3000; port <= 3010; port++) {
-  allowedOrigins.push(`http://localhost:${port}`);
-}
+// CORS allowed origins
+const allowedOrigins = [
+  'http://localhost:3000',
+  'https://leave-management-frontend-nine.vercel.app'
+];
 
 // Add any additional origins from environment
-if (
-  process.env.FRONTEND_URL &&
-  !allowedOrigins.includes(process.env.FRONTEND_URL)
-) {
+if (process.env.FRONTEND_URL && !allowedOrigins.includes(process.env.FRONTEND_URL)) {
   allowedOrigins.push(process.env.FRONTEND_URL);
 }
 
