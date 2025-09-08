@@ -261,53 +261,30 @@ app.post("/api/debug/test-write", async (req, res) => {
   }
 });
 
-// Test email sending endpoint
+// Test email sending endpoint - SIMPLE VERSION
 app.post("/api/debug/test-email", async (req, res) => {
+  console.log('\n🧪 EMAIL TEST ENDPOINT CALLED');
+  
   try {
-    const { email: testEmail } = req.body;
-    const targetEmail = testEmail || process.env.SMTP_EMAIL || 'test@example.com';
-    
-    console.log('\n🧪 EMAIL TEST ENDPOINT CALLED');
+    const targetEmail = req.body.email || process.env.SMTP_EMAIL || 'qazisanaullah612@gmail.com';
     console.log('🎯 Target email:', targetEmail);
     
+    // Import fresh every time to avoid caching issues
+    delete require.cache[require.resolve('./utils/email')];
     const { sendEmail } = require('./utils/email');
     
-    const testEmailOptions = {
+    const result = await sendEmail({
       email: targetEmail,
-      subject: 'Test Email from Leave Management System',
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-          <h2 style="color: #2563eb;">🧪 Email Test Successful!</h2>
-          <p>This is a test email from your Leave Management System.</p>
-          <div style="background: #f0f9ff; padding: 15px; border-radius: 8px; margin: 20px 0;">
-            <h3>Test Details:</h3>
-            <ul>
-              <li><strong>Environment:</strong> ${process.env.NODE_ENV}</li>
-              <li><strong>Timestamp:</strong> ${new Date().toISOString()}</li>
-              <li><strong>SMTP Host:</strong> ${process.env.SMTP_HOST}</li>
-              <li><strong>From Email:</strong> ${process.env.FROM_EMAIL}</li>
-            </ul>
-          </div>
-          <p>If you received this email, your email configuration is working correctly! 🎉</p>
-          <p style="color: #666; font-size: 12px; margin-top: 30px;">
-            This is an automated test email from Leave Management System.
-          </p>
-        </div>
-      `
-    };
+      subject: '🧪 URGENT TEST - Leave Management Email System',
+      html: '<h1>🎉 SUCCESS!</h1><p>If you received this, your email system is working!</p>'
+    });
     
-    const result = await sendEmail(testEmailOptions);
+    console.log('✅ Test email completed successfully');
     
     res.status(200).json({
-      message: "✅ Test email sent successfully",
+      message: "✅ Test email completed - check your inbox!",
       target_email: targetEmail,
       result: result,
-      smtp_config: {
-        host: process.env.SMTP_HOST,
-        port: process.env.SMTP_PORT,
-        from_email: process.env.FROM_EMAIL,
-        from_name: process.env.FROM_NAME
-      },
       timestamp: new Date().toISOString()
     });
     
@@ -317,13 +294,10 @@ app.post("/api/debug/test-email", async (req, res) => {
     res.status(500).json({
       message: "❌ Test email failed",
       error: error.message,
-      smtp_config: {
-        host: process.env.SMTP_HOST || 'Not set',
-        port: process.env.SMTP_PORT || 'Not set',
-        smtp_email_exists: !!process.env.SMTP_EMAIL,
+      environment_check: {
+        smtp_email: process.env.SMTP_EMAIL || 'NOT SET',
         smtp_password_exists: !!process.env.SMTP_PASSWORD,
-        from_email_exists: !!process.env.FROM_EMAIL,
-        from_name_exists: !!process.env.FROM_NAME
+        node_env: process.env.NODE_ENV
       },
       timestamp: new Date().toISOString()
     });
