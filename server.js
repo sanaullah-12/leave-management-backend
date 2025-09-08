@@ -76,8 +76,15 @@ app.use("/uploads", express.static("uploads"));
 const connectDB = async () => {
   try {
     const connectionString = process.env.MONGODB_URI || "mongodb://localhost:27017/leave-management";
-    console.log("Attempting to connect to MongoDB...");
+    console.log("🔍 MONGODB CONNECTION DEBUG:");
+    console.log("Environment:", process.env.NODE_ENV);
+    console.log("MONGODB_URI exists:", !!process.env.MONGODB_URI);
     console.log("Connection string:", connectionString.replace(/\/\/[^:]*:[^@]*@/, '//***:***@')); // Hide credentials
+    console.log("Platform:", process.platform);
+    console.log("Current time:", new Date().toISOString());
+    
+    console.log("📡 Attempting to connect to MongoDB Atlas...");
+    const startTime = Date.now();
     
     await mongoose.connect(connectionString, {
       useNewUrlParser: true,
@@ -90,16 +97,38 @@ const connectDB = async () => {
       w: 'majority'
     });
     
-    console.log("✅ MongoDB connected successfully");
-    console.log("Database:", process.env.MONGODB_URI ? "Remote MongoDB Atlas" : "Local MongoDB");
+    const connectionTime = Date.now() - startTime;
+    console.log("✅ MongoDB connected successfully!");
+    console.log(`Connection time: ${connectionTime}ms`);
+    console.log("Database name:", mongoose.connection.db.databaseName);
+    console.log("Connection host:", mongoose.connection.host);
+    console.log("Connection ready state:", mongoose.connection.readyState);
     
   } catch (error) {
-    console.error("❌ MongoDB connection failed:", error.message);
-    console.error("Full error:", error);
+    console.error("❌ MongoDB connection failed:");
+    console.error("Error name:", error.name);
+    console.error("Error message:", error.message);
+    console.error("Error code:", error.code);
+    console.error("Error codeName:", error.codeName);
     
-    // Retry connection after 5 seconds
-    console.log("🔄 Retrying connection in 5 seconds...");
-    setTimeout(connectDB, 5000);
+    if (error.reason) {
+      console.error("Error reason:", error.reason);
+    }
+    
+    // More specific error handling
+    if (error.message.includes('ENOTFOUND')) {
+      console.error("🌐 DNS lookup failed - check network connectivity");
+    } else if (error.message.includes('authentication failed')) {
+      console.error("🔐 Authentication failed - check username/password");
+    } else if (error.message.includes('timeout')) {
+      console.error("⏰ Connection timeout - network or firewall issue");
+    }
+    
+    console.error("Full error object:", JSON.stringify(error, null, 2));
+    
+    // Retry connection after 10 seconds (increased for Railway)
+    console.log("🔄 Retrying connection in 10 seconds...");
+    setTimeout(connectDB, 10000);
   }
 };
 
@@ -136,6 +165,43 @@ app.get("/api/health", async (req, res) => {
       error: error.message 
     });
   }
+});
+
+// Debug endpoint for Railway troubleshooting
+app.get("/api/debug", (req, res) => {
+  res.status(200).json({
+    message: "🔍 Railway Debug Information",
+    environment: {
+      NODE_ENV: process.env.NODE_ENV,
+      PORT: process.env.PORT,
+      MONGODB_URI_exists: !!process.env.MONGODB_URI,
+      MONGODB_URI_preview: process.env.MONGODB_URI ? 
+        process.env.MONGODB_URI.replace(/\/\/[^:]*:[^@]*@/, '//***:***@') : 
+        'Not set',
+      JWT_SECRET_exists: !!process.env.JWT_SECRET,
+      ALLOWED_ORIGINS_exists: !!process.env.ALLOWED_ORIGINS,
+    },
+    database: {
+      connection_state: mongoose.connection.readyState,
+      connection_states: {
+        0: 'disconnected',
+        1: 'connected', 
+        2: 'connecting',
+        3: 'disconnecting'
+      },
+      current_state: mongoose.connection.readyState === 1 ? 'connected' : 
+                     mongoose.connection.readyState === 2 ? 'connecting' :
+                     mongoose.connection.readyState === 3 ? 'disconnecting' : 'disconnected',
+      host: mongoose.connection.host || 'N/A',
+      database_name: mongoose.connection.name || 'N/A'
+    },
+    system: {
+      platform: process.platform,
+      uptime: Math.floor(process.uptime()),
+      memory_usage: process.memoryUsage(),
+      timestamp: new Date().toISOString()
+    }
+  });
 });
 
 // Simple test endpoint
