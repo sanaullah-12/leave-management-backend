@@ -14,10 +14,13 @@ const notificationRoutes = require("./routes/notifications");
 const app = express();
 
 // CORS configuration (before other middlewares)
-const allowedOrigins = [
-  'http://localhost:3000',
-  'https://leave-management-frontend-nine.vercel.app'
-];
+const allowedOrigins = ['http://localhost:3000']; // Always allow localhost for development
+
+// Add origins from environment variable
+if (process.env.ALLOWED_ORIGINS) {
+  const envOrigins = process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim());
+  allowedOrigins.push(...envOrigins);
+}
 
 app.use(
   cors({
@@ -25,11 +28,11 @@ app.use(
       // Allow requests with no origin (like mobile apps, Postman, etc.)
       if (!origin) return callback(null, true);
       
-      // Only allow explicitly listed origins
       if (allowedOrigins.includes(origin)) {
         return callback(null, true);
       } else {
         console.log(`CORS blocked origin: ${origin}`);
+        console.log(`Allowed origins: ${allowedOrigins.join(', ')}`);
         return callback(new Error(`Not allowed by CORS. Origin: ${origin}`));
       }
     },
