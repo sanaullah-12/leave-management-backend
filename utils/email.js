@@ -26,7 +26,7 @@ const sendEmail = async (options) => {
       console.log('📋 Please follow EMAIL_SETUP_GUIDE.md to configure Gmail SMTP');
       console.log('🔧 Current config uses placeholder values - emails won\'t be delivered\n');
       
-      return { messageId: 'email-not-configured', error: 'Real email delivery not configured' };
+      throw new Error('EMAIL_NOT_CONFIGURED: Real email delivery not configured - check SMTP environment variables');
     }
 
     // Check for test email service
