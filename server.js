@@ -82,11 +82,10 @@ const connectDB = async () => {
     await mongoose.connect(connectionString, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
-      serverSelectionTimeoutMS: 10000, // 10 seconds
+      serverSelectionTimeoutMS: 30000, // 30 seconds for Atlas
       socketTimeoutMS: 45000, // 45 seconds
       bufferCommands: false,
       maxPoolSize: 10,
-      authSource: 'admin',
       retryWrites: true,
       w: 'majority'
     });
