@@ -217,7 +217,7 @@ router.post('/invite-employee', authenticateToken, async (req, res) => {
     console.log('🚀 Sending invitation email to:', email);
     
     try {
-      const emailResult = await sendInvitationEmail(
+      await sendInvitationEmail(
         {
           ...employee.toObject(),
           company: req.user.company.name
@@ -226,29 +226,6 @@ router.post('/invite-employee', authenticateToken, async (req, res) => {
         req.user.name,
         'employee'
       );
-
-      // Check if email sending failed
-      if (emailResult && emailResult.error) {
-        console.error('❌ Email sending failed:', emailResult.error);
-        
-        // Still return success but with email warning
-        return res.status(201).json({
-          message: 'Employee invitation created successfully, but email delivery failed',
-          warning: 'Email could not be sent. Please share the invitation link manually.',
-          employee: {
-            id: employee._id,
-            name: employee.name,
-            email: employee.email,
-            employeeId: employee.employeeId,
-            department: employee.department,
-            position: employee.position,
-            status: employee.status
-          },
-          invitationToken: invitationToken, // Include token for manual sharing
-          manualInviteUrl: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify-invitation/${invitationToken}`,
-          emailError: emailResult.error
-        });
-      }
 
       console.log('✅ Invitation email sent successfully');
       res.status(201).json({
@@ -334,7 +311,7 @@ router.post('/invite-admin', authenticateToken, async (req, res) => {
     console.log('🚀 Sending admin invitation email to:', email);
     
     try {
-      const emailResult = await sendInvitationEmail(
+      await sendInvitationEmail(
         {
           ...admin.toObject(),
           company: req.user.company.name
@@ -343,29 +320,6 @@ router.post('/invite-admin', authenticateToken, async (req, res) => {
         req.user.name,
         'admin'
       );
-
-      // Check if email sending failed
-      if (emailResult && emailResult.error) {
-        console.error('❌ Admin email sending failed:', emailResult.error);
-        
-        // Still return success but with email warning
-        return res.status(201).json({
-          message: 'Admin invitation created successfully, but email delivery failed',
-          warning: 'Email could not be sent. Please share the invitation link manually.',
-          admin: {
-            id: admin._id,
-            name: admin.name,
-            email: admin.email,
-            employeeId: admin.employeeId,
-            department: admin.department,
-            position: admin.position,
-            status: admin.status
-          },
-          invitationToken: invitationToken,
-          manualInviteUrl: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify-invitation/${invitationToken}`,
-          emailError: emailResult.error
-        });
-      }
 
       console.log('✅ Admin invitation email sent successfully');
       res.status(201).json({
