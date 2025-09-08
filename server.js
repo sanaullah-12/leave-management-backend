@@ -12,6 +12,14 @@ console.log("NODE_ENV:", process.env.NODE_ENV);
 console.log("MONGODB_URI:", process.env.MONGODB_URI ? "✅ Set" : "❌ Missing");
 console.log("JWT_SECRET:", process.env.JWT_SECRET ? "✅ Set" : "❌ Missing");
 console.log("ALLOWED_ORIGINS:", process.env.ALLOWED_ORIGINS ? "✅ Set" : "❌ Missing");
+console.log("FRONTEND_URL:", process.env.FRONTEND_URL ? "✅ Set" : "❌ Missing");
+console.log("📧 EMAIL CONFIGURATION:");
+console.log("SMTP_HOST:", process.env.SMTP_HOST ? "✅ Set" : "❌ Missing");
+console.log("SMTP_PORT:", process.env.SMTP_PORT ? "✅ Set" : "❌ Missing");
+console.log("SMTP_EMAIL:", process.env.SMTP_EMAIL ? "✅ Set" : "❌ Missing");
+console.log("SMTP_PASSWORD:", process.env.SMTP_PASSWORD ? "✅ Set" : "❌ Missing");
+console.log("FROM_EMAIL:", process.env.FROM_EMAIL ? "✅ Set" : "❌ Missing");
+console.log("FROM_NAME:", process.env.FROM_NAME ? "✅ Set" : "❌ Missing");
 console.log("===============================");
 
 const authRoutes = require("./routes/auth");
@@ -202,6 +210,43 @@ app.get("/api/debug", (req, res) => {
       timestamp: new Date().toISOString()
     }
   });
+});
+
+// Test database write endpoint
+app.post("/api/debug/test-write", async (req, res) => {
+  try {
+    const db = mongoose.connection.db;
+    const testCollection = db.collection('debug_test');
+    
+    const testDoc = {
+      message: "Test write from Railway",
+      timestamp: new Date().toISOString(),
+      environment: process.env.NODE_ENV
+    };
+    
+    const result = await testCollection.insertOne(testDoc);
+    
+    // Also check if we can read it back
+    const readBack = await testCollection.findOne({ _id: result.insertedId });
+    
+    res.status(200).json({
+      message: "✅ Database write test successful",
+      database: mongoose.connection.db.databaseName,
+      host: mongoose.connection.host,
+      inserted_id: result.insertedId,
+      read_back: !!readBack,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    res.status(500).json({
+      message: "❌ Database write test failed",
+      error: error.message,
+      database: mongoose.connection.db.databaseName,
+      host: mongoose.connection.host,
+      timestamp: new Date().toISOString()
+    });
+  }
 });
 
 // Simple test endpoint
