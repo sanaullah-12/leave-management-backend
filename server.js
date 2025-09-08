@@ -261,6 +261,75 @@ app.post("/api/debug/test-write", async (req, res) => {
   }
 });
 
+// Test email sending endpoint
+app.post("/api/debug/test-email", async (req, res) => {
+  try {
+    const { email: testEmail } = req.body;
+    const targetEmail = testEmail || process.env.SMTP_EMAIL || 'test@example.com';
+    
+    console.log('\n🧪 EMAIL TEST ENDPOINT CALLED');
+    console.log('🎯 Target email:', targetEmail);
+    
+    const { sendEmail } = require('./utils/email');
+    
+    const testEmailOptions = {
+      email: targetEmail,
+      subject: 'Test Email from Leave Management System',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h2 style="color: #2563eb;">🧪 Email Test Successful!</h2>
+          <p>This is a test email from your Leave Management System.</p>
+          <div style="background: #f0f9ff; padding: 15px; border-radius: 8px; margin: 20px 0;">
+            <h3>Test Details:</h3>
+            <ul>
+              <li><strong>Environment:</strong> ${process.env.NODE_ENV}</li>
+              <li><strong>Timestamp:</strong> ${new Date().toISOString()}</li>
+              <li><strong>SMTP Host:</strong> ${process.env.SMTP_HOST}</li>
+              <li><strong>From Email:</strong> ${process.env.FROM_EMAIL}</li>
+            </ul>
+          </div>
+          <p>If you received this email, your email configuration is working correctly! 🎉</p>
+          <p style="color: #666; font-size: 12px; margin-top: 30px;">
+            This is an automated test email from Leave Management System.
+          </p>
+        </div>
+      `
+    };
+    
+    const result = await sendEmail(testEmailOptions);
+    
+    res.status(200).json({
+      message: "✅ Test email sent successfully",
+      target_email: targetEmail,
+      result: result,
+      smtp_config: {
+        host: process.env.SMTP_HOST,
+        port: process.env.SMTP_PORT,
+        from_email: process.env.FROM_EMAIL,
+        from_name: process.env.FROM_NAME
+      },
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('❌ Test email failed:', error.message);
+    
+    res.status(500).json({
+      message: "❌ Test email failed",
+      error: error.message,
+      smtp_config: {
+        host: process.env.SMTP_HOST || 'Not set',
+        port: process.env.SMTP_PORT || 'Not set',
+        smtp_email_exists: !!process.env.SMTP_EMAIL,
+        smtp_password_exists: !!process.env.SMTP_PASSWORD,
+        from_email_exists: !!process.env.FROM_EMAIL,
+        from_name_exists: !!process.env.FROM_NAME
+      },
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // Simple test endpoint
 app.get("/api/test", (req, res) => {
   res.status(200).json({

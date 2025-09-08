@@ -1,41 +1,66 @@
 const nodemailer = require('nodemailer');
 
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: process.env.SMTP_PORT,
-  secure: false, // true for 465, false for other ports
-  auth: {
-    user: process.env.SMTP_EMAIL,
-    pass: process.env.SMTP_PASSWORD
-  }
-});
+// Create transporter with better Gmail configuration
+const createTransporter = () => {
+  return nodemailer.createTransport({
+    service: 'gmail', // Use Gmail service
+    host: 'smtp.gmail.com',
+    port: 587,
+    secure: false,
+    auth: {
+      user: process.env.SMTP_EMAIL,
+      pass: process.env.SMTP_PASSWORD
+    },
+    tls: {
+      rejectUnauthorized: false
+    }
+  });
+};
 
 const sendEmail = async (options) => {
+  console.log('\n📧 STARTING EMAIL SEND PROCESS');
+  console.log('📧 Sending to:', options.email);
+  console.log('📝 Subject:', options.subject);
+  
   try {
-    // Check if email is configured with real credentials
-    if (!process.env.SMTP_EMAIL || 
-        process.env.SMTP_EMAIL === 'your-gmail-email@gmail.com' || 
-        process.env.SMTP_EMAIL === 'your_email@gmail.com' ||
-        !process.env.SMTP_PASSWORD ||
+    // Validate required email environment variables
+    const requiredVars = {
+      SMTP_EMAIL: process.env.SMTP_EMAIL,
+      SMTP_PASSWORD: process.env.SMTP_PASSWORD,
+      FROM_EMAIL: process.env.FROM_EMAIL,
+      FROM_NAME: process.env.FROM_NAME
+    };
+    
+    const missingVars = Object.entries(requiredVars)
+      .filter(([key, value]) => !value)
+      .map(([key]) => key);
+    
+    if (missingVars.length > 0) {
+      const error = `Missing email environment variables: ${missingVars.join(', ')}`;
+      console.error('❌', error);
+      throw new Error(error);
+    }
+    
+    // Check for placeholder values
+    if (process.env.SMTP_EMAIL.includes('your-gmail') || 
         process.env.SMTP_PASSWORD === 'your-gmail-app-password') {
-      
-      console.log('\n🚨 EMAIL NOT CONFIGURED FOR REAL DELIVERY');
-      console.log('📧 Would send email to:', options.email);
-      console.log('📝 Subject:', options.subject);
-      console.log('\n⚠️  CRITICAL: Employee invitations require real email delivery!');
-      console.log('📋 Please follow EMAIL_SETUP_GUIDE.md to configure Gmail SMTP');
-      console.log('🔧 Current config uses placeholder values - emails won\'t be delivered\n');
-      
-      throw new Error('EMAIL_NOT_CONFIGURED: Real email delivery not configured - check SMTP environment variables');
+      const error = 'Email configuration contains placeholder values. Please set real Gmail credentials.';
+      console.error('❌', error);
+      throw new Error(error);
     }
 
-    // Check for test email service
-    if (process.env.SMTP_HOST === 'smtp.ethereal.email') {
-      console.log('\n📧 Using Ethereal test service - emails won\'t reach real inboxes');
-      console.log('🌐 View test emails at: https://ethereal.email/messages');
-      console.log('📧 To send real emails, configure Gmail SMTP in .env\n');
-    }
-
+    console.log('✅ Email environment variables validated');
+    console.log('📧 SMTP Email:', process.env.SMTP_EMAIL);
+    console.log('📧 FROM Email:', process.env.FROM_EMAIL);
+    
+    // Create fresh transporter for this send
+    const transporter = createTransporter();
+    
+    // Verify SMTP connection
+    console.log('🔄 Testing SMTP connection...');
+    await transporter.verify();
+    console.log('✅ SMTP connection verified successfully');
+    
     const mailOptions = {
       from: `${process.env.FROM_NAME} <${process.env.FROM_EMAIL}>`,
       to: options.email,
@@ -43,34 +68,42 @@ const sendEmail = async (options) => {
       html: options.html
     };
 
-    console.log(`📤 Sending email to: ${options.email}`);
-    console.log(`📬 Using SMTP: ${process.env.SMTP_HOST}:${process.env.SMTP_PORT}`);
-    
+    console.log('📤 Sending email via Gmail SMTP...');
     const info = await transporter.sendMail(mailOptions);
     
-    if (process.env.SMTP_HOST === 'smtp.gmail.com') {
-      console.log('✅ Real email sent via Gmail:', info.messageId);
-      console.log('📥 Employee should receive invitation email shortly');
-    } else {
-      console.log('📧 Email sent successfully:', info.messageId);
-    }
+    console.log('✅ Email sent successfully!');
+    console.log('📨 Message ID:', info.messageId);
+    console.log('📥 Employee should receive email shortly');
     
-    return info;
+    return { 
+      success: true, 
+      messageId: info.messageId,
+      response: info.response 
+    };
+    
   } catch (error) {
     console.error('\n❌ EMAIL SENDING FAILED:');
-    console.error('Error:', error.message);
+    console.error('Error Type:', error.code || 'Unknown');
+    console.error('Error Message:', error.message);
+    console.error('Full Error:', error);
     
-    if (error.message.includes('Invalid login')) {
-      console.error('🔐 Authentication failed - check Gmail App Password');
-      console.error('📋 Follow EMAIL_SETUP_GUIDE.md for correct setup');
-    } else if (error.message.includes('ECONNREFUSED')) {
-      console.error('🌐 Connection refused - check SMTP host/port');
+    // Specific error handling
+    let userFriendlyError = 'Email sending failed: ';
+    
+    if (error.message.includes('Invalid login') || error.code === 'EAUTH') {
+      userFriendlyError += 'Gmail authentication failed. Check your App Password.';
+      console.error('🔐 Authentication failed - App Password may be incorrect or expired');
+    } else if (error.message.includes('ECONNREFUSED') || error.code === 'ECONNREFUSED') {
+      userFriendlyError += 'Cannot connect to Gmail SMTP server.';
+      console.error('🌐 Connection refused - Network or firewall issue');
+    } else if (error.message.includes('ETIMEDOUT') || error.code === 'ETIMEDOUT') {
+      userFriendlyError += 'Connection timeout to Gmail servers.';
+      console.error('⏰ Timeout - Gmail servers may be unreachable');
+    } else {
+      userFriendlyError += error.message;
     }
     
-    console.log('\n⚠️  Invitation created but email delivery failed');
-    console.log('🔧 Employee will need manual notification of their invitation\n');
-    
-    return { error: error.message };
+    throw new Error(userFriendlyError);
   }
 };
 
