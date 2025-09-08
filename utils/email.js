@@ -1,109 +1,66 @@
 const nodemailer = require('nodemailer');
 
-// Create transporter with better Gmail configuration
-const createTransporter = () => {
-  return nodemailer.createTransport({
-    service: 'gmail', // Use Gmail service
-    host: 'smtp.gmail.com',
-    port: 587,
-    secure: false,
-    auth: {
-      user: process.env.SMTP_EMAIL,
-      pass: process.env.SMTP_PASSWORD
-    },
-    tls: {
-      rejectUnauthorized: false
-    }
-  });
-};
+// Simple, direct Gmail transporter
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.SMTP_EMAIL,
+    pass: process.env.SMTP_PASSWORD
+  }
+});
 
 const sendEmail = async (options) => {
-  console.log('\n📧 STARTING EMAIL SEND PROCESS');
-  console.log('📧 Sending to:', options.email);
-  console.log('📝 Subject:', options.subject);
+  console.log('\n📧 =================================');
+  console.log('📧 EMAIL SEND ATTEMPT STARTED');
+  console.log('📧 Target:', options.email);
+  console.log('📧 Subject:', options.subject);
+  console.log('📧 SMTP Email:', process.env.SMTP_EMAIL || 'NOT SET');
+  console.log('📧 SMTP Password exists:', !!process.env.SMTP_PASSWORD);
+  console.log('📧 =================================');
   
+  // CRITICAL: Check if environment variables exist
+  if (!process.env.SMTP_EMAIL || !process.env.SMTP_PASSWORD) {
+    const error = 'CRITICAL ERROR: SMTP_EMAIL or SMTP_PASSWORD not set in Railway environment variables';
+    console.error('❌', error);
+    throw new Error(error);
+  }
+
+  const mailOptions = {
+    from: `${process.env.FROM_NAME || 'Leave Management'} <${process.env.FROM_EMAIL || process.env.SMTP_EMAIL}>`,
+    to: options.email,
+    subject: options.subject,
+    html: options.html
+  };
+
   try {
-    // Validate required email environment variables
-    const requiredVars = {
-      SMTP_EMAIL: process.env.SMTP_EMAIL,
-      SMTP_PASSWORD: process.env.SMTP_PASSWORD,
-      FROM_EMAIL: process.env.FROM_EMAIL,
-      FROM_NAME: process.env.FROM_NAME
-    };
+    console.log('🔄 Attempting to send email...');
+    console.log('📧 Mail Options:', JSON.stringify(mailOptions, null, 2));
     
-    const missingVars = Object.entries(requiredVars)
-      .filter(([key, value]) => !value)
-      .map(([key]) => key);
+    const result = await transporter.sendMail(mailOptions);
     
-    if (missingVars.length > 0) {
-      const error = `Missing email environment variables: ${missingVars.join(', ')}`;
-      console.error('❌', error);
-      throw new Error(error);
-    }
+    console.log('✅ NODEMAILER SAYS EMAIL SENT SUCCESSFULLY!');
+    console.log('📨 Message ID:', result.messageId);
+    console.log('📧 Response:', result.response);
+    console.log('📧 =================================');
     
-    // Check for placeholder values
-    if (process.env.SMTP_EMAIL.includes('your-gmail') || 
-        process.env.SMTP_PASSWORD === 'your-gmail-app-password') {
-      const error = 'Email configuration contains placeholder values. Please set real Gmail credentials.';
-      console.error('❌', error);
-      throw new Error(error);
-    }
-
-    console.log('✅ Email environment variables validated');
-    console.log('📧 SMTP Email:', process.env.SMTP_EMAIL);
-    console.log('📧 FROM Email:', process.env.FROM_EMAIL);
-    
-    // Create fresh transporter for this send
-    const transporter = createTransporter();
-    
-    // Verify SMTP connection
-    console.log('🔄 Testing SMTP connection...');
-    await transporter.verify();
-    console.log('✅ SMTP connection verified successfully');
-    
-    const mailOptions = {
-      from: `${process.env.FROM_NAME} <${process.env.FROM_EMAIL}>`,
-      to: options.email,
-      subject: options.subject,
-      html: options.html
-    };
-
-    console.log('📤 Sending email via Gmail SMTP...');
-    const info = await transporter.sendMail(mailOptions);
-    
-    console.log('✅ Email sent successfully!');
-    console.log('📨 Message ID:', info.messageId);
-    console.log('📥 Employee should receive email shortly');
-    
-    return { 
-      success: true, 
-      messageId: info.messageId,
-      response: info.response 
+    // IMPORTANT: Even if nodemailer says success, Gmail might reject it
+    // Let's be explicit about what we return
+    return {
+      success: true,
+      messageId: result.messageId,
+      response: result.response,
+      warning: 'Email sent via nodemailer - check inbox to confirm delivery'
     };
     
   } catch (error) {
-    console.error('\n❌ EMAIL SENDING FAILED:');
-    console.error('Error Type:', error.code || 'Unknown');
-    console.error('Error Message:', error.message);
-    console.error('Full Error:', error);
+    console.error('\n❌ EMAIL SEND FAILED:');
+    console.error('❌ Error Code:', error.code);
+    console.error('❌ Error Message:', error.message);
+    console.error('❌ Full Error:', JSON.stringify(error, null, 2));
+    console.error('📧 =================================');
     
-    // Specific error handling
-    let userFriendlyError = 'Email sending failed: ';
-    
-    if (error.message.includes('Invalid login') || error.code === 'EAUTH') {
-      userFriendlyError += 'Gmail authentication failed. Check your App Password.';
-      console.error('🔐 Authentication failed - App Password may be incorrect or expired');
-    } else if (error.message.includes('ECONNREFUSED') || error.code === 'ECONNREFUSED') {
-      userFriendlyError += 'Cannot connect to Gmail SMTP server.';
-      console.error('🌐 Connection refused - Network or firewall issue');
-    } else if (error.message.includes('ETIMEDOUT') || error.code === 'ETIMEDOUT') {
-      userFriendlyError += 'Connection timeout to Gmail servers.';
-      console.error('⏰ Timeout - Gmail servers may be unreachable');
-    } else {
-      userFriendlyError += error.message;
-    }
-    
-    throw new Error(userFriendlyError);
+    // Throw the error so the calling function knows it failed
+    throw new Error(`Email sending failed: ${error.message} (Code: ${error.code || 'Unknown'})`);
   }
 };
 
