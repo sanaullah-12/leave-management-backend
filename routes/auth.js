@@ -44,10 +44,22 @@ router.post('/register-company', async (req, res) => {
       position: 'Administrator',
       joinDate: new Date(),
       company: company._id,
-      phone,
-      status: 'active' // Admin is automatically active when creating company
+      phone: phone || '',
+      status: 'active', // Admin is automatically active when creating company
+      isActive: true // Ensure admin is active
     });
+    
+    console.log('Creating admin user with data:', {
+      name: adminName,
+      email: adminEmail,
+      role: 'admin',
+      department: 'Administration',
+      position: 'Administrator',
+      status: 'active'
+    });
+    
     await admin.save();
+    console.log('Admin user created successfully:', admin._id);
 
     // Generate token
     const token = generateToken({ 
@@ -70,9 +82,31 @@ router.post('/register-company', async (req, res) => {
 
   } catch (error) {
     console.error('Registration error:', error);
+    console.error('Error stack:', error.stack);
+    console.error('Request body:', req.body);
+    
+    // Handle specific validation errors
+    if (error.name === 'ValidationError') {
+      const validationErrors = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({ 
+        message: 'Validation failed', 
+        errors: validationErrors 
+      });
+    }
+    
+    // Handle MongoDB duplicate key errors
+    if (error.code === 11000) {
+      const field = Object.keys(error.keyValue)[0];
+      return res.status(400).json({ 
+        message: `${field} already exists`,
+        error: `Duplicate ${field}: ${error.keyValue[field]}`
+      });
+    }
+    
     res.status(500).json({ 
       message: 'Registration failed', 
-      error: error.message 
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 });
