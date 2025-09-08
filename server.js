@@ -64,19 +64,37 @@ app.use(express.urlencoded({ extended: true }));
 // Serve static files for profile pictures
 app.use("/uploads", express.static("uploads"));
 
-// Database connection
-mongoose
-  .connect(
-    process.env.MONGODB_URI || "mongodb://localhost:27017/leave-management"
-  )
-  .then(() => {
-    console.log("MongoDB connected successfully");
-    console.log("Database:", process.env.MONGODB_URI ? "Remote MongoDB" : "Local MongoDB");
-  })
-  .catch((err) => {
-    console.error("MongoDB connection error:", err);
-    console.error("Connection string:", process.env.MONGODB_URI || "mongodb://localhost:27017/leave-management");
-  });
+// Database connection with retry logic
+const connectDB = async () => {
+  try {
+    const connectionString = process.env.MONGODB_URI || "mongodb://localhost:27017/leave-management";
+    console.log("Attempting to connect to MongoDB...");
+    console.log("Connection string:", connectionString.replace(/\/\/[^:]*:[^@]*@/, '//***:***@')); // Hide credentials
+    
+    await mongoose.connect(connectionString, {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+      serverSelectionTimeoutMS: 10000, // 10 seconds
+      socketTimeoutMS: 45000, // 45 seconds
+      bufferCommands: false,
+      maxPoolSize: 10
+    });
+    
+    console.log("✅ MongoDB connected successfully");
+    console.log("Database:", process.env.MONGODB_URI ? "Remote MongoDB Atlas" : "Local MongoDB");
+    
+  } catch (error) {
+    console.error("❌ MongoDB connection failed:", error.message);
+    console.error("Full error:", error);
+    
+    // Retry connection after 5 seconds
+    console.log("🔄 Retrying connection in 5 seconds...");
+    setTimeout(connectDB, 5000);
+  }
+};
+
+// Connect to database
+connectDB();
 
 // Routes
 app.use("/api/auth", authRoutes);
