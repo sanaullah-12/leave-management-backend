@@ -69,8 +69,14 @@ mongoose
   .connect(
     process.env.MONGODB_URI || "mongodb://localhost:27017/leave-management"
   )
-  .then(() => console.log("MongoDB connected"))
-  .catch((err) => console.log("MongoDB connection error:", err));
+  .then(() => {
+    console.log("MongoDB connected successfully");
+    console.log("Database:", process.env.MONGODB_URI ? "Remote MongoDB" : "Local MongoDB");
+  })
+  .catch((err) => {
+    console.error("MongoDB connection error:", err);
+    console.error("Connection string:", process.env.MONGODB_URI || "mongodb://localhost:27017/leave-management");
+  });
 
 // Routes
 app.use("/api/auth", authRoutes);
