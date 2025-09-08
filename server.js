@@ -13,36 +13,36 @@ const notificationRoutes = require("./routes/notifications");
 
 const app = express();
 
-// Security middlewares
-app.use(
-  helmet({
-    crossOriginResourcePolicy: { policy: "cross-origin" },
-  })
-);
-// CORS allowed origins
+// CORS configuration (before other middlewares)
 const allowedOrigins = [
   'http://localhost:3000',
   'https://leave-management-frontend-nine.vercel.app'
 ];
 
-// Add any additional origins from environment
-if (process.env.FRONTEND_URL && !allowedOrigins.includes(process.env.FRONTEND_URL)) {
-  allowedOrigins.push(process.env.FRONTEND_URL);
-}
-
 app.use(
   cors({
     origin: function (origin, callback) {
-      // Allow requests with no origin (like mobile apps or curl requests)
+      // Allow requests with no origin (like mobile apps, Postman, etc.)
       if (!origin) return callback(null, true);
-
+      
+      // Only allow explicitly listed origins
       if (allowedOrigins.includes(origin)) {
         return callback(null, true);
       } else {
-        return callback(new Error("Not allowed by CORS"));
+        console.log(`CORS blocked origin: ${origin}`);
+        return callback(new Error(`Not allowed by CORS. Origin: ${origin}`));
       }
     },
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+  })
+);
+
+// Security middlewares (after CORS)
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" },
   })
 );
 app.use(morgan("combined"));
