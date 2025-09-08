@@ -1,171 +1,42 @@
 const nodemailer = require('nodemailer');
 
-// Create transporter with multiple fallback configurations
-const createTransporter = () => {
-  // Try different Gmail configurations for Railway compatibility
-  const configs = [
-    // Config 1: Direct Gmail SMTP with TLS
-    {
-      host: 'smtp.gmail.com',
-      port: 587,
-      secure: false,
-      auth: {
-        user: process.env.SMTP_EMAIL,
-        pass: process.env.SMTP_PASSWORD
-      },
-      tls: {
-        rejectUnauthorized: false,
-        ciphers: 'SSLv3'
-      },
-      connectionTimeout: 60000,
-      greetingTimeout: 30000,
-      socketTimeout: 60000
-    },
-    // Config 2: Gmail with SSL
-    {
-      host: 'smtp.gmail.com',
-      port: 465,
-      secure: true,
-      auth: {
-        user: process.env.SMTP_EMAIL,
-        pass: process.env.SMTP_PASSWORD
-      },
-      tls: {
-        rejectUnauthorized: false
-      },
-      connectionTimeout: 60000,
-      greetingTimeout: 30000,
-      socketTimeout: 60000
-    },
-    // Config 3: Simple service config
-    {
-      service: 'gmail',
-      auth: {
-        user: process.env.SMTP_EMAIL,
-        pass: process.env.SMTP_PASSWORD
-      },
-      tls: {
-        rejectUnauthorized: false
-      }
-    }
-  ];
-
-  // Use the first config for now, we'll add fallback logic if needed
-  return nodemailer.createTransport(configs[0]);
-};
-
 const sendEmail = async (options) => {
-  console.log('\n📧 =================================');
-  console.log('📧 EMAIL SEND ATTEMPT STARTED');
-  console.log('📧 Target:', options.email);
-  console.log('📧 Subject:', options.subject);
-  console.log('📧 SMTP Email:', process.env.SMTP_EMAIL || 'NOT SET');
-  console.log('📧 SMTP Password exists:', !!process.env.SMTP_PASSWORD);
-  console.log('📧 =================================');
+  console.log('📧 Email send started:', options.email);
   
-  // Check if environment variables exist
+  // Check environment variables
   if (!process.env.SMTP_EMAIL || !process.env.SMTP_PASSWORD) {
-    const error = 'SMTP_EMAIL or SMTP_PASSWORD not set in environment variables';
-    console.error('❌', error);
-    throw new Error(error);
+    throw new Error('SMTP credentials not configured');
   }
 
-  const mailOptions = {
-    from: `${process.env.FROM_NAME || 'Leave Management'} <${process.env.FROM_EMAIL || process.env.SMTP_EMAIL}>`,
-    to: options.email,
-    subject: options.subject,
-    html: options.html
-  };
-
-  // Try multiple configurations if one fails
-  const configs = [
-    // Config 1: Direct Gmail SMTP with enhanced TLS
-    {
-      name: 'Gmail SMTP (587)',
-      config: {
-        host: 'smtp.gmail.com',
-        port: 587,
-        secure: false,
-        auth: {
-          user: process.env.SMTP_EMAIL,
-          pass: process.env.SMTP_PASSWORD
-        },
-        tls: {
-          rejectUnauthorized: false,
-          ciphers: 'SSLv3'
-        },
-        connectionTimeout: 60000,
-        greetingTimeout: 30000,
-        socketTimeout: 60000,
-        pool: true,
-        maxConnections: 1,
-        maxMessages: 3
-      }
-    },
-    // Config 2: Gmail SSL
-    {
-      name: 'Gmail SSL (465)',
-      config: {
-        host: 'smtp.gmail.com',
-        port: 465,
-        secure: true,
-        auth: {
-          user: process.env.SMTP_EMAIL,
-          pass: process.env.SMTP_PASSWORD
-        },
-        tls: {
-          rejectUnauthorized: false
-        },
-        connectionTimeout: 60000
-      }
+  // Simple Gmail transporter
+  const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: process.env.SMTP_EMAIL,
+      pass: process.env.SMTP_PASSWORD
     }
-  ];
+  });
 
-  for (const { name, config } of configs) {
-    try {
-      console.log(`🔄 Trying ${name}...`);
-      const transporter = nodemailer.createTransport(config);
-      
-      // Test connection first
-      console.log('🔍 Testing SMTP connection...');
-      await transporter.verify();
-      console.log(`✅ ${name} connection verified`);
-      
-      console.log('📤 Sending email...');
-      const result = await transporter.sendMail(mailOptions);
-      
-      console.log('✅ EMAIL SENT SUCCESSFULLY!');
-      console.log(`📧 Used: ${name}`);
-      console.log('📨 Message ID:', result.messageId);
-      console.log('📧 =================================');
-      
-      return {
-        success: true,
-        messageId: result.messageId,
-        response: result.response,
-        method: name
-      };
-      
-    } catch (error) {
-      console.error(`❌ ${name} failed:`, error.code || error.message);
-      
-      // If this is the last config, throw the error
-      if (name === configs[configs.length - 1].name) {
-        console.error('\n❌ ALL EMAIL CONFIGURATIONS FAILED');
-        console.error('❌ Final Error:', error.message);
-        console.error('📧 =================================');
-        
-        // Provide specific error message for timeout
-        if (error.code === 'ETIMEDOUT') {
-          throw new Error('Email sending failed: Railway servers cannot connect to Gmail SMTP. Consider using a different email service like SendGrid or Mailgun for production.');
-        }
-        
-        throw new Error(`Email sending failed: ${error.message}`);
-      }
-      
-      // Continue to next config
-      console.log(`🔄 Trying next configuration...`);
+  try {
+    const result = await transporter.sendMail({
+      from: `${process.env.FROM_NAME || 'Leave Management'} <${process.env.SMTP_EMAIL}>`,
+      to: options.email,
+      subject: options.subject,
+      html: options.html
+    });
+    
+    console.log('✅ Email sent successfully:', result.messageId);
+    return { success: true, messageId: result.messageId };
+    
+  } catch (error) {
+    console.error('❌ Email failed:', error.message);
+    
+    // For Railway/Gmail timeout issues, provide helpful error
+    if (error.code === 'ETIMEDOUT') {
+      throw new Error('Gmail SMTP timeout on Railway. Consider using SendGrid for production email delivery.');
     }
+    
+    throw new Error(`Email sending failed: ${error.message}`);
   }
 };
 
