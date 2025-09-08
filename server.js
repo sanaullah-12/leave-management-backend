@@ -188,6 +188,18 @@ app.get("/api/debug", (req, res) => {
         'Not set',
       JWT_SECRET_exists: !!process.env.JWT_SECRET,
       ALLOWED_ORIGINS_exists: !!process.env.ALLOWED_ORIGINS,
+      FRONTEND_URL_exists: !!process.env.FRONTEND_URL,
+      FRONTEND_URL_value: process.env.FRONTEND_URL || 'Not set'
+    },
+    email: {
+      SMTP_HOST: process.env.SMTP_HOST || 'Not set',
+      SMTP_PORT: process.env.SMTP_PORT || 'Not set',
+      SMTP_EMAIL_exists: !!process.env.SMTP_EMAIL,
+      SMTP_EMAIL_preview: process.env.SMTP_EMAIL ? process.env.SMTP_EMAIL.replace(/(.{2}).*(@.*)/, '$1***$2') : 'Not set',
+      SMTP_PASSWORD_exists: !!process.env.SMTP_PASSWORD,
+      FROM_EMAIL_exists: !!process.env.FROM_EMAIL,
+      FROM_NAME_exists: !!process.env.FROM_NAME,
+      config_valid: !!(process.env.SMTP_HOST && process.env.SMTP_PORT && process.env.SMTP_EMAIL && process.env.SMTP_PASSWORD && process.env.FROM_EMAIL)
     },
     database: {
       connection_state: mongoose.connection.readyState,
