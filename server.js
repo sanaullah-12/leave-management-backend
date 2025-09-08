@@ -83,6 +83,50 @@ app.get("/api/health", (req, res) => {
   res.status(200).json({ message: "Server is running" });
 });
 
+// Test endpoint for deployment verification
+app.get("/api/test", (req, res) => {
+  res.status(200).json({
+    message: "🎉 Backend is deployed and working!",
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || "development",
+    mongodb_connected: mongoose.connection.readyState === 1,
+    uptime: process.uptime(),
+    version: "1.0.0"
+  });
+});
+
+// Root route for localhost:5000
+app.get("/", (req, res) => {
+  res.send(`
+    <html>
+      <head><title>Leave Management API</title></head>
+      <body style="font-family: Arial; text-align: center; padding: 50px;">
+        <h1>🎉 Leave Management API is Live!</h1>
+        <p>Backend deployed successfully at ${new Date().toLocaleString()}</p>
+        <p>Environment: ${process.env.NODE_ENV || "development"}</p>
+        <p>MongoDB Status: ${mongoose.connection.readyState === 1 ? "✅ Connected" : "❌ Disconnected"}</p>
+        <div style="margin: 30px 0;">
+          <a href="/api/test" style="background: #3b82f6; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; margin: 5px;">JSON Test</a>
+          <a href="/api/health" style="background: #10b981; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; margin: 5px;">Health Check</a>
+        </div>
+        <h3>Available API Endpoints:</h3>
+        <ul style="text-align: left; max-width: 400px; margin: 0 auto;">
+          <li><code>GET /api/health</code> - Health check</li>
+          <li><code>GET /api/test</code> - Test endpoint</li>
+          <li><code>POST /api/auth/register-company</code> - Register company</li>
+          <li><code>POST /api/auth/login</code> - User login</li>
+          <li><code>GET /api/leaves</code> - Get leaves (auth required)</li>
+        </ul>
+      </body>
+    </html>
+  `);
+});
+
+// Simple test endpoint that doesn't require authentication  
+app.get("/test", (req, res) => {
+  res.redirect('/');
+});
+
 // Global error handler
 app.use((err, req, res, next) => {
   console.error(err.stack);
@@ -92,9 +136,13 @@ app.use((err, req, res, next) => {
   });
 });
 
-// 404 handler
+// 404 handler for unknown routes
 app.use("*", (req, res) => {
-  res.status(404).json({ message: "Route not found" });
+  res.status(404).json({ 
+    message: "Route not found",
+    path: req.originalUrl,
+    hint: "Try /api/test for testing or / for the main page"
+  });
 });
 
 const PORT = process.env.PORT || 5000;
