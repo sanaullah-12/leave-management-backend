@@ -8,8 +8,22 @@ const router = express.Router();
 
 // Register company admin
 router.post('/register-company', async (req, res) => {
+  console.log('=== REGISTRATION REQUEST ===');
+  console.log('Request body:', req.body);
+  console.log('Headers:', req.headers);
+  console.log('MongoDB status:', require('mongoose').connection.readyState);
+  
   try {
     const { companyName, companyEmail, adminName, adminEmail, password, phone } = req.body;
+    
+    // Validate required fields
+    if (!companyName || !companyEmail || !adminName || !adminEmail || !password) {
+      console.log('Missing required fields');
+      return res.status(400).json({
+        message: 'Missing required fields',
+        required: ['companyName', 'companyEmail', 'adminName', 'adminEmail', 'password']
+      });
+    }
 
     // Check if company already exists
     const existingCompany = await Company.findOne({ 

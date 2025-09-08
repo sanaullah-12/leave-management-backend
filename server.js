@@ -84,12 +84,33 @@ app.use("/api/leaves", leaveRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/notifications", notificationRoutes);
 
-// Health check route
-app.get("/api/health", (req, res) => {
-  res.status(200).json({ message: "Server is running" });
+// Health check route with database status
+app.get("/api/health", async (req, res) => {
+  try {
+    // Check database connection
+    const dbStatus = mongoose.connection.readyState;
+    const dbStates = {
+      0: 'disconnected',
+      1: 'connected',
+      2: 'connecting',
+      3: 'disconnecting'
+    };
+    
+    res.status(200).json({ 
+      message: "Server is running",
+      database: dbStates[dbStatus],
+      environment: process.env.NODE_ENV,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      message: "Health check failed", 
+      error: error.message 
+    });
+  }
 });
 
-// Test endpoint for deployment verification
+// Simple test endpoint
 app.get("/api/test", (req, res) => {
   res.status(200).json({
     message: "🎉 Backend is deployed and working!",
