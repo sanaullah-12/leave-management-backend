@@ -6,6 +6,14 @@ const morgan = require("morgan");
 const rateLimit = require("express-rate-limit");
 require("dotenv").config();
 
+// Debug environment variables
+console.log("=== ENVIRONMENT VARIABLES ===");
+console.log("NODE_ENV:", process.env.NODE_ENV);
+console.log("MONGODB_URI:", process.env.MONGODB_URI ? "✅ Set" : "❌ Missing");
+console.log("JWT_SECRET:", process.env.JWT_SECRET ? "✅ Set" : "❌ Missing");
+console.log("ALLOWED_ORIGINS:", process.env.ALLOWED_ORIGINS ? "✅ Set" : "❌ Missing");
+console.log("===============================");
+
 const authRoutes = require("./routes/auth");
 const leaveRoutes = require("./routes/leaves");
 const userRoutes = require("./routes/users");
@@ -77,7 +85,10 @@ const connectDB = async () => {
       serverSelectionTimeoutMS: 10000, // 10 seconds
       socketTimeoutMS: 45000, // 45 seconds
       bufferCommands: false,
-      maxPoolSize: 10
+      maxPoolSize: 10,
+      authSource: 'admin',
+      retryWrites: true,
+      w: 'majority'
     });
     
     console.log("✅ MongoDB connected successfully");
