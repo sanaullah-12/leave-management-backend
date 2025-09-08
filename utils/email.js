@@ -1,14 +1,57 @@
 const nodemailer = require('nodemailer');
 
-// Create transporter function (don't create at module load)
+// Create transporter with multiple fallback configurations
 const createTransporter = () => {
-  return nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: process.env.SMTP_EMAIL,
-      pass: process.env.SMTP_PASSWORD
+  // Try different Gmail configurations for Railway compatibility
+  const configs = [
+    // Config 1: Direct Gmail SMTP with TLS
+    {
+      host: 'smtp.gmail.com',
+      port: 587,
+      secure: false,
+      auth: {
+        user: process.env.SMTP_EMAIL,
+        pass: process.env.SMTP_PASSWORD
+      },
+      tls: {
+        rejectUnauthorized: false,
+        ciphers: 'SSLv3'
+      },
+      connectionTimeout: 60000,
+      greetingTimeout: 30000,
+      socketTimeout: 60000
+    },
+    // Config 2: Gmail with SSL
+    {
+      host: 'smtp.gmail.com',
+      port: 465,
+      secure: true,
+      auth: {
+        user: process.env.SMTP_EMAIL,
+        pass: process.env.SMTP_PASSWORD
+      },
+      tls: {
+        rejectUnauthorized: false
+      },
+      connectionTimeout: 60000,
+      greetingTimeout: 30000,
+      socketTimeout: 60000
+    },
+    // Config 3: Simple service config
+    {
+      service: 'gmail',
+      auth: {
+        user: process.env.SMTP_EMAIL,
+        pass: process.env.SMTP_PASSWORD
+      },
+      tls: {
+        rejectUnauthorized: false
+      }
     }
-  });
+  ];
+
+  // Use the first config for now, we'll add fallback logic if needed
+  return nodemailer.createTransport(configs[0]);
 };
 
 const sendEmail = async (options) => {
@@ -34,29 +77,95 @@ const sendEmail = async (options) => {
     html: options.html
   };
 
-  try {
-    console.log('🔄 Creating transporter and sending email...');
-    const transporter = createTransporter();
-    
-    const result = await transporter.sendMail(mailOptions);
-    
-    console.log('✅ EMAIL SENT SUCCESSFULLY!');
-    console.log('📨 Message ID:', result.messageId);
-    console.log('📧 =================================');
-    
-    return {
-      success: true,
-      messageId: result.messageId,
-      response: result.response
-    };
-    
-  } catch (error) {
-    console.error('\n❌ EMAIL SEND FAILED:');
-    console.error('❌ Error Code:', error.code || 'Unknown');
-    console.error('❌ Error Message:', error.message);
-    console.error('📧 =================================');
-    
-    throw new Error(`Email sending failed: ${error.message}`);
+  // Try multiple configurations if one fails
+  const configs = [
+    // Config 1: Direct Gmail SMTP with enhanced TLS
+    {
+      name: 'Gmail SMTP (587)',
+      config: {
+        host: 'smtp.gmail.com',
+        port: 587,
+        secure: false,
+        auth: {
+          user: process.env.SMTP_EMAIL,
+          pass: process.env.SMTP_PASSWORD
+        },
+        tls: {
+          rejectUnauthorized: false,
+          ciphers: 'SSLv3'
+        },
+        connectionTimeout: 60000,
+        greetingTimeout: 30000,
+        socketTimeout: 60000,
+        pool: true,
+        maxConnections: 1,
+        maxMessages: 3
+      }
+    },
+    // Config 2: Gmail SSL
+    {
+      name: 'Gmail SSL (465)',
+      config: {
+        host: 'smtp.gmail.com',
+        port: 465,
+        secure: true,
+        auth: {
+          user: process.env.SMTP_EMAIL,
+          pass: process.env.SMTP_PASSWORD
+        },
+        tls: {
+          rejectUnauthorized: false
+        },
+        connectionTimeout: 60000
+      }
+    }
+  ];
+
+  for (const { name, config } of configs) {
+    try {
+      console.log(`🔄 Trying ${name}...`);
+      const transporter = nodemailer.createTransport(config);
+      
+      // Test connection first
+      console.log('🔍 Testing SMTP connection...');
+      await transporter.verify();
+      console.log(`✅ ${name} connection verified`);
+      
+      console.log('📤 Sending email...');
+      const result = await transporter.sendMail(mailOptions);
+      
+      console.log('✅ EMAIL SENT SUCCESSFULLY!');
+      console.log(`📧 Used: ${name}`);
+      console.log('📨 Message ID:', result.messageId);
+      console.log('📧 =================================');
+      
+      return {
+        success: true,
+        messageId: result.messageId,
+        response: result.response,
+        method: name
+      };
+      
+    } catch (error) {
+      console.error(`❌ ${name} failed:`, error.code || error.message);
+      
+      // If this is the last config, throw the error
+      if (name === configs[configs.length - 1].name) {
+        console.error('\n❌ ALL EMAIL CONFIGURATIONS FAILED');
+        console.error('❌ Final Error:', error.message);
+        console.error('📧 =================================');
+        
+        // Provide specific error message for timeout
+        if (error.code === 'ETIMEDOUT') {
+          throw new Error('Email sending failed: Railway servers cannot connect to Gmail SMTP. Consider using a different email service like SendGrid or Mailgun for production.');
+        }
+        
+        throw new Error(`Email sending failed: ${error.message}`);
+      }
+      
+      // Continue to next config
+      console.log(`🔄 Trying next configuration...`);
+    }
   }
 };
 
