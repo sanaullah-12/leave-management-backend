@@ -29,6 +29,9 @@ const notificationRoutes = require("./routes/notifications");
 
 const app = express();
 
+// Trust Railway proxy for rate limiting
+app.set('trust proxy', true);
+
 // CORS configuration (before other middlewares)
 const allowedOrigins = ['http://localhost:3000']; // Always allow localhost for development
 
@@ -66,10 +69,13 @@ app.use(
 );
 app.use(morgan("combined"));
 
-// Rate limiting
+// Rate limiting with Railway proxy support
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 500, // limit each IP to 500 requests per windowMs (increased for real-time features)
+  trustProxy: true, // Trust Railway proxy headers
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 app.use(limiter);
 
