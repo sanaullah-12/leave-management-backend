@@ -3,13 +3,14 @@ const sgMail = require('@sendgrid/mail');
 const sendEmail = async (options) => {
   console.log('📧 SendGrid email send started:', options.email);
   
-  // Check SendGrid API key
-  if (!process.env.SENDGRID_API_KEY) {
-    throw new Error('SENDGRID_API_KEY not configured in environment variables');
+  // Check SendGrid API key (support both variable names)
+  const apiKey = process.env.SENDGRID_API_KEY || process.env.SendGrid_Key;
+  if (!apiKey) {
+    throw new Error('SENDGRID_API_KEY or SendGrid_Key not configured in environment variables');
   }
 
   // Set SendGrid API key
-  sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+  sgMail.setApiKey(apiKey);
 
   const msg = {
     to: options.email,
