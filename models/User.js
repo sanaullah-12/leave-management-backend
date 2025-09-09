@@ -119,8 +119,22 @@ userSchema.pre('save', async function(next) {
   
   // Generate employee ID if not provided
   if (!this.employeeId && this.company) {
-    const count = await this.constructor.countDocuments({ company: this.company });
-    this.employeeId = `EMP${String(count + 1).padStart(4, '0')}`;
+    // Find the highest existing employee ID for this company
+    const latestEmployee = await this.constructor
+      .findOne({ 
+        company: this.company,
+        employeeId: { $regex: /^EMP\d{4}$/ }
+      })
+      .sort({ employeeId: -1 })
+      .select('employeeId');
+    
+    let nextNumber = 1;
+    if (latestEmployee && latestEmployee.employeeId) {
+      const currentNumber = parseInt(latestEmployee.employeeId.substring(3));
+      nextNumber = currentNumber + 1;
+    }
+    
+    this.employeeId = `EMP${String(nextNumber).padStart(4, '0')}`;
   }
   
   next();
