@@ -1,39 +1,44 @@
-const nodemailer = require('nodemailer');
+const sgMail = require('@sendgrid/mail');
 
 const sendEmail = async (options) => {
-  console.log('📧 Email send started:', options.email);
+  console.log('📧 SendGrid email send started:', options.email);
   
-  // Check environment variables
-  if (!process.env.SMTP_EMAIL || !process.env.SMTP_PASSWORD) {
-    throw new Error('SMTP credentials not configured');
+  // Check SendGrid API key
+  if (!process.env.SENDGRID_API_KEY) {
+    throw new Error('SENDGRID_API_KEY not configured in environment variables');
   }
 
-  // Simple Gmail transporter
-  const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: process.env.SMTP_EMAIL,
-      pass: process.env.SMTP_PASSWORD
-    }
-  });
+  // Set SendGrid API key
+  sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+
+  const msg = {
+    to: options.email,
+    from: process.env.FROM_EMAIL || 'qazisanaullah612@gmail.com', // Must be verified in SendGrid
+    subject: options.subject,
+    html: options.html
+  };
 
   try {
-    const result = await transporter.sendMail({
-      from: `${process.env.FROM_NAME || 'Leave Management'} <${process.env.SMTP_EMAIL}>`,
-      to: options.email,
-      subject: options.subject,
-      html: options.html
-    });
+    console.log('📤 Sending via SendGrid...');
+    const result = await sgMail.send(msg);
     
-    console.log('✅ Email sent successfully:', result.messageId);
-    return { success: true, messageId: result.messageId };
+    console.log('✅ SendGrid email sent successfully!');
+    console.log('📨 Response status:', result[0].statusCode);
+    console.log('📧 Message ID:', result[0].headers['x-message-id']);
+    
+    return { 
+      success: true, 
+      messageId: result[0].headers['x-message-id'],
+      statusCode: result[0].statusCode 
+    };
     
   } catch (error) {
-    console.error('❌ Email failed:', error.message);
+    console.error('❌ SendGrid email failed:', error.message);
     
-    // For Railway/Gmail timeout issues, provide helpful error
-    if (error.code === 'ETIMEDOUT') {
-      throw new Error('Gmail SMTP timeout on Railway. Consider using SendGrid for production email delivery.');
+    // SendGrid specific error handling
+    if (error.response) {
+      console.error('❌ SendGrid error details:', error.response.body);
+      throw new Error(`SendGrid error: ${error.response.body.errors[0].message}`);
     }
     
     throw new Error(`Email sending failed: ${error.message}`);
