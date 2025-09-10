@@ -83,15 +83,44 @@ app.use("/uploads", express.static("uploads"));
 // Database connection with retry logic
 const connectDB = async () => {
   try {
-    const connectionString = process.env.MONGODB_URI || "mongodb://localhost:27017/leave-management";
+    // Environment-based database configuration
+    let connectionString;
+    const environment = process.env.NODE_ENV || 'development';
+    const useProductionDB = process.env.USE_PRODUCTION_DB === 'true';
+    
+    if (environment === 'production') {
+      // Production: Use MongoDB Atlas
+      connectionString = process.env.MONGODB_URI;
+      if (!connectionString) {
+        throw new Error('MONGODB_URI is required in production environment');
+      }
+      console.log("🚀 PRODUCTION MODE: Using MongoDB Atlas");
+    } else if (useProductionDB && process.env.MONGODB_URI) {
+      // Development with production database access
+      connectionString = process.env.MONGODB_URI;
+      console.log("⚠️  DEVELOPMENT MODE: Using PRODUCTION database (USE_PRODUCTION_DB=true)");
+      console.log("⚠️  WARNING: You are connecting to PRODUCTION data in development!");
+    } else {
+      // Development/Local: Force local database
+      connectionString = "mongodb://127.0.0.1:27017/leave-management-dev";
+      console.log("🔒 DEVELOPMENT MODE: Using local database only");
+      console.log("💡 To use production data, set USE_PRODUCTION_DB=true in your .env file");
+    }
+    
     console.log("🔍 MONGODB CONNECTION DEBUG:");
-    console.log("Environment:", process.env.NODE_ENV);
-    console.log("MONGODB_URI exists:", !!process.env.MONGODB_URI);
+    console.log("Environment:", environment);
+    console.log("Database mode:", 
+      environment === 'production' ? 'Production (Atlas)' : 
+      useProductionDB ? 'Development using Production DB' : 'Development (Local)');
     console.log("Connection string:", connectionString.replace(/\/\/[^:]*:[^@]*@/, '//***:***@')); // Hide credentials
     console.log("Platform:", process.platform);
     console.log("Current time:", new Date().toISOString());
     
-    console.log("📡 Attempting to connect to MongoDB Atlas...");
+    console.log(
+      environment === 'production' ? "📡 Attempting to connect to MongoDB Atlas..." :
+      useProductionDB ? "📡 Attempting to connect to MongoDB Atlas (production data in dev)..." :
+      "📡 Attempting to connect to local MongoDB..."
+    );
     const startTime = Date.now();
     
     await mongoose.connect(connectionString, {

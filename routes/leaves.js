@@ -25,7 +25,7 @@ router.post('/', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'End date must be after start date' });
     }
 
-    // Check for overlapping leaves
+    // Check for overlapping leaves for the same employee
     const overlappingLeave = await Leave.findOne({
       employee: req.user._id,
       status: { $in: ['pending', 'approved'] },
@@ -41,6 +41,61 @@ router.post('/', authenticateToken, async (req, res) => {
       return res.status(400).json({ 
         message: 'You have overlapping leave requests for these dates' 
       });
+    }
+
+    // Get company leave policy to check for company-wide overlap restrictions
+    const User = require('../models/User');
+    const Company = require('../models/Company');
+    const company = await Company.findById(req.user.company._id);
+    
+    if (!company) {
+      return res.status(400).json({ message: 'Company not found' });
+    }
+
+    // Check for company-wide overlapping leaves if policy requires it
+    if (company.leavePolicy?.preventOverlappingLeaves) {
+      const companyOverlappingLeaves = await Leave.find({
+        company: req.user.company._id,
+        employee: { $ne: req.user._id }, // Exclude current user
+        status: { $in: ['pending', 'approved'] },
+        $or: [
+          {
+            startDate: { $lte: end },
+            endDate: { $gte: start }
+          }
+        ]
+      }).populate('employee', 'name employeeId');
+
+      if (companyOverlappingLeaves.length > 0) {
+        const conflictingEmployees = companyOverlappingLeaves.map(leave => 
+          `${leave.employee.name} (${leave.employee.employeeId})`
+        ).join(', ');
+        
+        return res.status(400).json({ 
+          message: `Cannot approve leave request. The following employees already have leave during these dates: ${conflictingEmployees}. Company policy prevents overlapping leaves.`
+        });
+      }
+    }
+
+    // Check for maximum concurrent leaves limit
+    if (company.leavePolicy?.maxConcurrentLeaves && company.leavePolicy.maxConcurrentLeaves > 0) {
+      const concurrentLeaves = await Leave.countDocuments({
+        company: req.user.company._id,
+        employee: { $ne: req.user._id },
+        status: { $in: ['pending', 'approved'] },
+        $or: [
+          {
+            startDate: { $lte: end },
+            endDate: { $gte: start }
+          }
+        ]
+      });
+
+      if (concurrentLeaves >= company.leavePolicy.maxConcurrentLeaves) {
+        return res.status(400).json({ 
+          message: `Cannot submit leave request. Maximum ${company.leavePolicy.maxConcurrentLeaves} employees can be on leave simultaneously during these dates. Currently ${concurrentLeaves} employees have leave approved/pending.`
+        });
+      }
     }
 
     // Calculate requested days
@@ -542,10 +597,19 @@ router.put('/policy', authenticateToken, authorizeRoles('admin'), async (req, re
     const Company = require('../models/Company');
     const user = await User.findById(req.user._id);
     
+    // Validate policy settings
+    if (policy.maxConcurrentLeaves !== null && policy.maxConcurrentLeaves !== undefined) {
+      if (policy.maxConcurrentLeaves < 0) {
+        return res.status(400).json({ 
+          message: 'Maximum concurrent leaves cannot be negative' 
+        });
+      }
+    }
+    
     const company = await Company.findByIdAndUpdate(
       user.company._id,
       { leavePolicy: policy },
-      { new: true }
+      { new: true, runValidators: true }
     );
 
     res.status(200).json({
@@ -606,6 +670,68 @@ router.put('/allocation/:employeeId', authenticateToken, authorizeRoles('admin')
     console.error('Leave allocation update error:', error);
     res.status(500).json({ 
       message: 'Failed to update leave allocation', 
+      error: error.message 
+    });
+  }
+});
+
+// Quick setup endpoint to enable overlap prevention (Admin only)
+router.post('/policy/prevent-overlaps', authenticateToken, authorizeRoles('admin'), async (req, res) => {
+  try {
+    const Company = require('../models/Company');
+    
+    const company = await Company.findByIdAndUpdate(
+      req.user.company._id,
+      { 
+        'leavePolicy.preventOverlappingLeaves': true
+      },
+      { new: true, runValidators: true }
+    );
+
+    res.status(200).json({
+      message: 'Overlapping leave prevention enabled successfully',
+      policy: company.leavePolicy
+    });
+
+  } catch (error) {
+    console.error('Enable overlap prevention error:', error);
+    res.status(500).json({ 
+      message: 'Failed to enable overlap prevention', 
+      error: error.message 
+    });
+  }
+});
+
+// Quick setup endpoint to set maximum concurrent leaves (Admin only)
+router.post('/policy/max-concurrent/:maxCount', authenticateToken, authorizeRoles('admin'), async (req, res) => {
+  try {
+    const maxCount = parseInt(req.params.maxCount);
+    
+    if (maxCount < 0) {
+      return res.status(400).json({ 
+        message: 'Maximum concurrent leaves cannot be negative' 
+      });
+    }
+
+    const Company = require('../models/Company');
+    
+    const company = await Company.findByIdAndUpdate(
+      req.user.company._id,
+      { 
+        'leavePolicy.maxConcurrentLeaves': maxCount
+      },
+      { new: true, runValidators: true }
+    );
+
+    res.status(200).json({
+      message: `Maximum concurrent leaves set to ${maxCount}`,
+      policy: company.leavePolicy
+    });
+
+  } catch (error) {
+    console.error('Set max concurrent leaves error:', error);
+    res.status(500).json({ 
+      message: 'Failed to set maximum concurrent leaves', 
       error: error.message 
     });
   }

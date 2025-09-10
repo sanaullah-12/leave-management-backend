@@ -53,6 +53,14 @@ const companySchema = new mongoose.Schema({
     paternityLeave: {
       type: Number,
       default: 15
+    },
+    preventOverlappingLeaves: {
+      type: Boolean,
+      default: false // Allow multiple employees to take leave on same dates by default
+    },
+    maxConcurrentLeaves: {
+      type: Number,
+      default: null // No limit by default, set number to limit concurrent leaves
     }
   },
   isActive: {
