@@ -1,46 +1,99 @@
 const sgMail = require('@sendgrid/mail');
+const { enhanceEmailForDeliverability, getDeliverabilityTips } = require('./emailDeliverability');
 
 const sendEmail = async (options) => {
-  console.log('📧 SendGrid email send started:', options.email);
+  console.log('📧 Email delivery process started for:', options.email);
   
   // Check SendGrid API key (support both variable names)
   const apiKey = process.env.SENDGRID_API_KEY || process.env.SendGrid_Key;
   if (!apiKey) {
+    console.error('❌ SendGrid API key not found!');
+    console.log('💡 Deliverability Tips:');
+    getDeliverabilityTips().forEach(tip => console.log(tip));
     throw new Error('SENDGRID_API_KEY or SendGrid_Key not configured in environment variables');
   }
 
   // Set SendGrid API key
   sgMail.setApiKey(apiKey);
 
+  // Enhance email for better deliverability
+  const { enhanced, validation, timing } = enhanceEmailForDeliverability(options);
+  
+  console.log('📊 Content validation score:', validation.score + '/100');
+  if (!validation.isClean) {
+    console.warn('⚠️ Spam triggers detected:', validation.triggers);
+  }
+  
+  console.log('⏰ Send timing:', timing.reason);
+  
   const msg = {
-    to: options.email,
-    from: process.env.FROM_EMAIL || 'qazisanaullah612@gmail.com', // Must be verified in SendGrid
-    subject: options.subject,
-    html: options.html
+    to: enhanced.email,
+    from: {
+      email: process.env.FROM_EMAIL || 'qazisanaullah612@gmail.com', // Must be verified in SendGrid
+      name: process.env.FROM_NAME || 'Leave Management System'
+    },
+    replyTo: {
+      email: process.env.REPLY_TO_EMAIL || process.env.FROM_EMAIL || 'qazisanaullah612@gmail.com',
+      name: 'Leave Management Support'
+    },
+    subject: enhanced.subject,
+    html: enhanced.html,
+    text: enhanced.text,
+    headers: enhanced.headers,
+    trackingSettings: enhanced.trackingSettings,
+    mailSettings: enhanced.mailSettings,
+    categories: enhanced.categories
   };
 
   try {
-    console.log('📤 Sending via SendGrid...');
+    console.log('📤 Sending via SendGrid with enhanced deliverability...');
+    console.log('📧 To:', msg.to);
+    console.log('📝 Subject:', msg.subject);
+    console.log('🏷️ Categories:', msg.categories);
+    
     const result = await sgMail.send(msg);
     
-    console.log('✅ SendGrid email sent successfully!');
-    console.log('📨 Response status:', result[0].statusCode);
-    console.log('📧 Message ID:', result[0].headers['x-message-id']);
+    console.log('✅ Email sent successfully!');
+    console.log('📊 Status:', result[0].statusCode);
+    console.log('🆔 Message ID:', result[0].headers['x-message-id']);
+    console.log('💯 Deliverability score:', validation.score + '/100');
     
     return { 
       success: true, 
       messageId: result[0].headers['x-message-id'],
-      statusCode: result[0].statusCode 
+      statusCode: result[0].statusCode,
+      deliverabilityScore: validation.score,
+      timing: timing.reason
     };
     
   } catch (error) {
-    console.error('❌ SendGrid email failed:', error.message);
+    console.error('❌ Email delivery failed:', error.message);
     
-    // SendGrid specific error handling
+    // Enhanced error handling with deliverability tips
     if (error.response) {
-      console.error('❌ SendGrid error details:', error.response.body);
-      throw new Error(`SendGrid error: ${error.response.body.errors[0].message}`);
+      const errorBody = error.response.body;
+      console.error('❌ SendGrid error details:', errorBody);
+      
+      // Check for common deliverability issues
+      if (errorBody.errors) {
+        errorBody.errors.forEach(err => {
+          if (err.message.includes('not verified')) {
+            console.log('💡 TIP: Verify your sender email in SendGrid dashboard');
+          }
+          if (err.message.includes('reputation')) {
+            console.log('💡 TIP: Check your sender reputation and warm up your IP');
+          }
+          if (err.message.includes('bounced')) {
+            console.log('💡 TIP: Clean your email list and remove bounced addresses');
+          }
+        });
+      }
+      
+      throw new Error(`SendGrid error: ${errorBody.errors?.[0]?.message || 'Unknown SendGrid error'}`);
     }
+    
+    console.log('💡 General deliverability tips:');
+    getDeliverabilityTips().slice(0, 5).forEach(tip => console.log(tip));
     
     throw new Error(`Email sending failed: ${error.message}`);
   }
@@ -49,56 +102,118 @@ const sendEmail = async (options) => {
 const sendInvitationEmail = async (user, invitationToken, invitedByName, role = 'employee') => {
   const verifyUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify-invitation/${invitationToken}`;
   
+  // Plain text version for better deliverability
+  const textContent = `
+You're Invited to Join ${user.company}!
+
+Hello ${user.name},
+
+${invitedByName} has invited you to join the Leave Management System for ${user.company} as ${role === 'admin' ? 'an Administrator' : 'an Employee'}.
+
+Your Account Details:
+- Email: ${user.email}
+- Role: ${role.charAt(0).toUpperCase() + role.slice(1)}
+- Department: ${user.department}
+- Position: ${user.position}
+
+To accept this invitation and set your password, please visit:
+${verifyUrl}
+
+Note: This invitation link will expire in 7 days. If you don't recognize this invitation, you can safely ignore this email.
+
+---
+This is an automated email from Leave Management System. Please do not reply to this message.
+  `;
+  
   const html = `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
-      <div style="text-align: center; margin-bottom: 30px;">
-        <h1 style="color: #2563eb; margin: 0;">Leave Management System</h1>
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Invitation to Join ${user.company}</title>
+      <!--[if mso]>
+      <noscript>
+        <xml>
+          <o:OfficeDocumentSettings>
+            <o:PixelsPerInch>96</o:PixelsPerInch>
+          </o:OfficeDocumentSettings>
+        </xml>
+      </noscript>
+      <![endif]-->
+      <style>
+        @media only screen and (max-width: 600px) {
+          .container { width: 100% !important; padding: 10px !important; }
+          .button { padding: 12px 20px !important; font-size: 14px !important; }
+        }
+      </style>
+    </head>
+    <body style="margin: 0; padding: 0; background-color: #f4f4f4; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+      <div style="padding: 20px 0;">
+        <div class="container" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; max-width: 600px; margin: 0 auto; background: white; padding: 40px 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+          <div style="text-align: center; margin-bottom: 30px; border-bottom: 2px solid #f0f0f0; padding-bottom: 20px;">
+            <h1 style="color: #2563eb; margin: 0; font-size: 28px; font-weight: 600;">Leave Management System</h1>
+            <p style="color: #666; margin: 5px 0 0 0; font-size: 14px;">${user.company}</p>
+          </div>
+          
+          <div style="margin-bottom: 30px;">
+            <h2 style="color: #1a1a1a; margin-bottom: 10px; font-size: 24px; font-weight: 600;">You're Invited to Join Our Team! 🎉</h2>
+            
+            <p style="font-size: 16px; line-height: 1.6; color: #4a4a4a; margin-bottom: 20px;">Hello <strong>${user.name}</strong>,</p>
+            
+            <p style="font-size: 16px; line-height: 1.6; color: #4a4a4a; margin-bottom: 25px;">
+              <strong>${invitedByName}</strong> has invited you to join the Leave Management System for <strong>${user.company}</strong> as <strong>${role === 'admin' ? 'an Administrator' : 'an Employee'}</strong>.
+            </p>
+          </div>
+          
+          <div style="background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%); padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #2563eb;">
+            <h3 style="color: #1e293b; margin-top: 0; margin-bottom: 15px; font-size: 18px; font-weight: 600;">📋 Your Account Details</h3>
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr><td style="padding: 8px 0; color: #64748b; font-weight: 500;">Email Address:</td><td style="padding: 8px 0; color: #1e293b; font-weight: 600;">${user.email}</td></tr>
+              <tr><td style="padding: 8px 0; color: #64748b; font-weight: 500;">Role:</td><td style="padding: 8px 0; color: #1e293b; font-weight: 600;">${role.charAt(0).toUpperCase() + role.slice(1)}</td></tr>
+              <tr><td style="padding: 8px 0; color: #64748b; font-weight: 500;">Department:</td><td style="padding: 8px 0; color: #1e293b; font-weight: 600;">${user.department}</td></tr>
+              <tr><td style="padding: 8px 0; color: #64748b; font-weight: 500;">Position:</td><td style="padding: 8px 0; color: #1e293b; font-weight: 600;">${user.position}</td></tr>
+            </table>
+          </div>
+          
+          <div style="text-align: center; margin: 40px 0;">
+            <a href="${verifyUrl}" class="button" style="display: inline-block; background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); color: white; padding: 16px 32px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px; box-shadow: 0 4px 14px rgba(37, 99, 235, 0.3); transition: all 0.3s ease;">
+              🚀 Accept Invitation & Set Password
+            </a>
+          </div>
+          
+          <div style="background: #fef3cd; border: 1px solid #f6cc2f; padding: 15px; border-radius: 6px; margin: 25px 0;">
+            <p style="font-size: 14px; color: #8b5a00; margin: 0; font-weight: 500;">
+              ⏰ <strong>Important:</strong> This invitation link expires in 7 days for security reasons. If you don't recognize this invitation, please ignore this email.
+            </p>
+          </div>
+          
+          <div style="background: #f8f9fa; padding: 15px; border-radius: 6px; margin: 25px 0;">
+            <p style="font-size: 13px; color: #666; margin: 0; line-height: 1.5;">
+              <strong>Having trouble with the button?</strong> Copy and paste this link into your browser:
+              <br><span style="font-family: monospace; color: #2563eb; word-break: break-all; font-size: 12px;">${verifyUrl}</span>
+            </p>
+          </div>
+          
+          <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+          <div style="text-align: center;">
+            <p style="color: #9ca3af; font-size: 12px; margin: 0; line-height: 1.4;">
+              This email was sent by Leave Management System<br>
+              This is an automated message, please do not reply to this email.
+            </p>
+          </div>
+        </div>
       </div>
-      
-      <h2 style="color: #333; margin-bottom: 20px;">You're Invited!</h2>
-      
-      <p style="font-size: 16px; line-height: 1.6; color: #444;">Hello ${user.name},</p>
-      
-      <p style="font-size: 16px; line-height: 1.6; color: #444;">
-        ${invitedByName} has invited you to join the Leave Management System for <strong>${user.company}</strong> as ${role === 'admin' ? 'an Administrator' : 'an Employee'}.
-      </p>
-      
-      <div style="background: #f8f9fa; padding: 20px; border-radius: 6px; margin: 25px 0;">
-        <h3 style="color: #333; margin-top: 0;">Your Account Details:</h3>
-        <ul style="list-style: none; padding: 0; margin: 0;">
-          <li style="padding: 5px 0;"><strong>Email:</strong> ${user.email}</li>
-          <li style="padding: 5px 0;"><strong>Role:</strong> ${role.charAt(0).toUpperCase() + role.slice(1)}</li>
-          <li style="padding: 5px 0;"><strong>Department:</strong> ${user.department}</li>
-          <li style="padding: 5px 0;"><strong>Position:</strong> ${user.position}</li>
-        </ul>
-      </div>
-      
-      <div style="text-align: center; margin: 30px 0;">
-        <a href="${verifyUrl}" style="display: inline-block; background: #2563eb; color: white; padding: 14px 30px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px;">
-          Accept Invitation & Set Password
-        </a>
-      </div>
-      
-      <p style="font-size: 14px; color: #666; line-height: 1.5;">
-        <strong>Note:</strong> This invitation link will expire in 7 days. If you don't recognize this invitation, you can safely ignore this email.
-      </p>
-      
-      <p style="font-size: 14px; color: #666; line-height: 1.5;">
-        If the button above doesn't work, copy and paste this link into your browser:
-        <br><a href="${verifyUrl}" style="color: #2563eb; word-break: break-all;">${verifyUrl}</a>
-      </p>
-      
-      <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
-      <p style="color: #999; font-size: 12px; text-align: center;">
-        This is an automated email from Leave Management System. Please do not reply to this message.
-      </p>
-    </div>
+    </body>
+    </html>
   `;
 
   await sendEmail({
     email: user.email,
-    subject: `Invitation to join ${user.company} - Leave Management System`,
-    html
+    subject: `🎉 Welcome to ${user.company} - Your invitation awaits!`,
+    html,
+    text: textContent,
+    category: 'invitation'
   });
 };
 
@@ -132,62 +247,114 @@ const sendWelcomeEmail = async (user, tempPassword) => {
 const sendPasswordResetEmail = async (user, resetToken) => {
   const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password/${resetToken}`;
   
+  // Plain text version for better deliverability
+  const textContent = `
+Password Reset Request - ${user.company}
+
+Hello ${user.name},
+
+We received a request to reset your password for your Leave Management System account at ${user.company}.
+
+Account Details:
+- Email: ${user.email}
+- Employee ID: ${user.employeeId}
+
+To reset your password, please visit:
+${resetUrl}
+
+IMPORTANT SECURITY NOTICE:
+- This reset link will expire in 15 minutes for security reasons.
+- If you didn't request this password reset, please ignore this email.
+- Never share this link with anyone else.
+
+---
+This is an automated email from Leave Management System. Please do not reply to this message.
+If you continue to have problems, please contact your system administrator.
+  `;
+  
   const html = `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
-      <div style="text-align: center; margin-bottom: 30px;">
-        <h1 style="color: #2563eb; margin: 0;">Leave Management System</h1>
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Password Reset Request</title>
+      <style>
+        @media only screen and (max-width: 600px) {
+          .container { width: 100% !important; padding: 10px !important; }
+          .button { padding: 12px 20px !important; font-size: 14px !important; }
+        }
+      </style>
+    </head>
+    <body style="margin: 0; padding: 0; background-color: #f4f4f4; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+      <div style="padding: 20px 0;">
+        <div class="container" style="max-width: 600px; margin: 0 auto; background: white; padding: 40px 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+          <div style="text-align: center; margin-bottom: 30px; border-bottom: 2px solid #f0f0f0; padding-bottom: 20px;">
+            <h1 style="color: #dc2626; margin: 0; font-size: 28px; font-weight: 600;">🔐 Password Reset</h1>
+            <p style="color: #666; margin: 5px 0 0 0; font-size: 14px;">Leave Management System - ${user.company}</p>
+          </div>
+          
+          <div style="margin-bottom: 30px;">
+            <p style="font-size: 16px; line-height: 1.6; color: #4a4a4a; margin-bottom: 20px;">Hello <strong>${user.name}</strong>,</p>
+            
+            <p style="font-size: 16px; line-height: 1.6; color: #4a4a4a; margin-bottom: 25px;">
+              We received a request to reset your password for your Leave Management System account at <strong>${user.company}</strong>.
+            </p>
+          </div>
+          
+          <div style="background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%); padding: 25px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #dc2626;">
+            <h3 style="color: #1e293b; margin-top: 0; margin-bottom: 15px; font-size: 18px; font-weight: 600;">👤 Account Information</h3>
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr><td style="padding: 8px 0; color: #64748b; font-weight: 500;">Email Address:</td><td style="padding: 8px 0; color: #1e293b; font-weight: 600;">${user.email}</td></tr>
+              <tr><td style="padding: 8px 0; color: #64748b; font-weight: 500;">Employee ID:</td><td style="padding: 8px 0; color: #1e293b; font-weight: 600;">${user.employeeId}</td></tr>
+            </table>
+          </div>
+          
+          <div style="text-align: center; margin: 40px 0;">
+            <a href="${resetUrl}" class="button" style="display: inline-block; background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%); color: white; padding: 16px 32px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px; box-shadow: 0 4px 14px rgba(220, 38, 38, 0.3);">
+              🔑 Reset My Password
+            </a>
+          </div>
+          
+          <div style="background: #fef2f2; border: 2px solid #fecaca; padding: 20px; border-radius: 8px; margin: 25px 0;">
+            <h4 style="color: #dc2626; margin: 0 0 10px 0; font-size: 16px; font-weight: 600;">
+              ⚠️ Security Notice - Please Read
+            </h4>
+            <ul style="font-size: 14px; color: #7f1d1d; margin: 0; padding-left: 20px; line-height: 1.5;">
+              <li style="margin-bottom: 5px;">This reset link expires in <strong>15 minutes</strong> for your security</li>
+              <li style="margin-bottom: 5px;">If you didn't request this, you can safely ignore this email</li>
+              <li style="margin-bottom: 5px;">Never share this link with anyone</li>
+              <li>Your password won't change until you use this link</li>
+            </ul>
+          </div>
+          
+          <div style="background: #f8f9fa; padding: 15px; border-radius: 6px; margin: 25px 0;">
+            <p style="font-size: 13px; color: #666; margin: 0; line-height: 1.5;">
+              <strong>Button not working?</strong> Copy and paste this link into your browser:
+              <br><span style="font-family: monospace; color: #dc2626; word-break: break-all; font-size: 12px;">${resetUrl}</span>
+            </p>
+          </div>
+          
+          <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+          <div style="text-align: center;">
+            <p style="color: #9ca3af; font-size: 12px; margin: 0; line-height: 1.4;">
+              This email was sent by Leave Management System<br>
+              This is an automated security message. Please do not reply.<br>
+              Need help? Contact your system administrator.
+            </p>
+          </div>
+        </div>
       </div>
-      
-      <h2 style="color: #333; margin-bottom: 20px;">Reset Your Password</h2>
-      
-      <p style="font-size: 16px; line-height: 1.6; color: #444;">Hello ${user.name},</p>
-      
-      <p style="font-size: 16px; line-height: 1.6; color: #444;">
-        We received a request to reset your password for your Leave Management System account at <strong>${user.company}</strong>.
-      </p>
-      
-      <div style="background: #f8f9fa; padding: 20px; border-radius: 6px; margin: 25px 0;">
-        <h3 style="color: #333; margin-top: 0;">Account Details:</h3>
-        <ul style="list-style: none; padding: 0; margin: 0;">
-          <li style="padding: 5px 0;"><strong>Email:</strong> ${user.email}</li>
-          <li style="padding: 5px 0;"><strong>Employee ID:</strong> ${user.employeeId}</li>
-        </ul>
-      </div>
-      
-      <div style="text-align: center; margin: 30px 0;">
-        <a href="${resetUrl}" style="display: inline-block; background: #dc2626; color: white; padding: 14px 30px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px;">
-          Reset Password
-        </a>
-      </div>
-      
-      <div style="background: #fef2f2; border: 1px solid #fecaca; padding: 15px; border-radius: 6px; margin: 25px 0;">
-        <p style="font-size: 14px; color: #dc2626; margin: 0; font-weight: bold;">
-          ⚠️ Important Security Notice:
-        </p>
-        <ul style="font-size: 14px; color: #7f1d1d; margin: 10px 0 0 0;">
-          <li>This reset link will expire in 15 minutes for security reasons.</li>
-          <li>If you didn't request this password reset, please ignore this email.</li>
-          <li>Never share this link with anyone else.</li>
-        </ul>
-      </div>
-      
-      <p style="font-size: 14px; color: #666; line-height: 1.5;">
-        If the button above doesn't work, copy and paste this link into your browser:
-        <br><a href="${resetUrl}" style="color: #2563eb; word-break: break-all;">${resetUrl}</a>
-      </p>
-      
-      <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
-      <p style="color: #999; font-size: 12px; text-align: center;">
-        This is an automated email from Leave Management System. Please do not reply to this message.
-        <br>If you continue to have problems, please contact your system administrator.
-      </p>
-    </div>
+    </body>
+    </html>
   `;
 
   await sendEmail({
     email: user.email,
-    subject: 'Password Reset Request - Leave Management System',
-    html
+    subject: `🔐 Password reset requested for ${user.company}`,
+    html,
+    text: textContent,
+    category: 'password-reset'
   });
 };
 
