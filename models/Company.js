@@ -36,15 +36,15 @@ const companySchema = new mongoose.Schema({
   leavePolicy: {
     annualLeave: {
       type: Number,
-      default: 21
+      default: 10
     },
     sickLeave: {
       type: Number,
-      default: 10
+      default: 8
     },
     casualLeave: {
       type: Number,
-      default: 7
+      default: 10
     },
     maternityLeave: {
       type: Number,
