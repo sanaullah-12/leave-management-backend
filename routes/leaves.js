@@ -64,7 +64,7 @@ router.post('/', authenticateToken, async (req, res) => {
             endDate: { $gte: start }
           }
         ]
-      }).populate('employee', 'name employeeId');
+      }).populate('employee', 'name employeeId profilePicture');
 
       if (companyOverlappingLeaves.length > 0) {
         const conflictingEmployees = companyOverlappingLeaves.map(leave => 
@@ -123,7 +123,7 @@ router.post('/', authenticateToken, async (req, res) => {
     });
 
     await leave.save();
-    await leave.populate('employee', 'name employeeId department');
+    await leave.populate('employee', 'name employeeId department profilePicture');
 
     // Send notification to admins
     const { sendLeaveRequestNotification } = require('../utils/email');
@@ -182,7 +182,7 @@ router.get('/', authenticateToken, async (req, res) => {
     }
 
     const leaves = await Leave.find(query)
-      .populate('employee', 'name employeeId department position')
+      .populate('employee', 'name employeeId department position profilePicture')
       .populate('reviewedBy', 'name')
       .skip(skip)
       .limit(limit)
@@ -218,7 +218,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
     }
 
     const leave = await Leave.findOne(query)
-      .populate('employee', 'name employeeId department position')
+      .populate('employee', 'name employeeId department position profilePicture')
       .populate('reviewedBy', 'name');
 
     if (!leave) {
@@ -257,7 +257,7 @@ router.put('/:id/review', authenticateToken, authorizeRoles('admin'), async (req
         reviewComments
       },
       { new: true }
-    ).populate('employee', 'name employeeId department email')
+    ).populate('employee', 'name employeeId department email profilePicture')
      .populate('reviewedBy', 'name')
      .populate('company', 'name');
 
@@ -301,7 +301,7 @@ router.delete('/:id', authenticateToken, authorizeRoles('admin'), async (req, re
     const leave = await Leave.findOneAndDelete({
       _id: req.params.id,
       company: req.user.company._id
-    }).populate('employee', 'name email');
+    }).populate('employee', 'name email profilePicture');
 
     if (!leave) {
       return res.status(404).json({ message: 'Leave request not found' });
