@@ -259,7 +259,15 @@ router.post('/profile-picture', authenticateToken, uploadSingle, processProfileP
         id: user._id,
         name: user.name,
         email: user.email,
-        profilePicture: user.profilePicture
+        role: user.role,
+        employeeId: user.employeeId,
+        department: user.department,
+        position: user.position,
+        company: user.company,
+        joinDate: user.joinDate,
+        phone: user.phone,
+        profilePicture: user.profilePicture,
+        isActive: user.isActive
       }
     });
 

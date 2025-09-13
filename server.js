@@ -66,10 +66,16 @@ app.use(
 );
 app.use(morgan("combined"));
 
-// Rate limiting (simplified for Railway)
+// Rate limiting (relaxed for development stability)
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 500,
+  max: 1000, // Increased limit
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => {
+    // Skip rate limiting for health check and debug endpoints
+    return req.url.includes('/health') || req.url.includes('/debug') || req.url.includes('/test');
+  }
 });
 app.use(limiter);
 
@@ -124,8 +130,6 @@ const connectDB = async () => {
     const startTime = Date.now();
     
     await mongoose.connect(connectionString, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
       serverSelectionTimeoutMS: 30000, // 30 seconds for Atlas
       socketTimeoutMS: 45000, // 45 seconds
       bufferCommands: false,
@@ -157,20 +161,65 @@ const connectDB = async () => {
       console.error("🌐 DNS lookup failed - check network connectivity");
     } else if (error.message.includes('authentication failed')) {
       console.error("🔐 Authentication failed - check username/password");
-    } else if (error.message.includes('timeout')) {
-      console.error("⏰ Connection timeout - network or firewall issue");
+    } else if (error.message.includes('timeout') || error.message.includes('ECONNREFUSED')) {
+      console.error("⏰ Connection timeout or refused - MongoDB may not be running");
+      console.error("💡 To fix this:");
+      console.error("   1. Install MongoDB locally: https://www.mongodb.com/try/download/community");
+      console.error("   2. Start MongoDB service: net start MongoDB (as Administrator)");
+      console.error("   3. Or use production database: set USE_PRODUCTION_DB=true in .env");
+    } else if (error.message.includes('serverselectionretrydelayms')) {
+      console.error("⚙️  MongoDB connection option issue - using compatible settings");
     }
     
     console.error("Full error object:", JSON.stringify(error, null, 2));
     
-    // Retry connection after 10 seconds (increased for Railway)
-    console.log("🔄 Retrying connection in 10 seconds...");
-    setTimeout(connectDB, 10000);
+    // For now, don't auto-retry to avoid connection loops
+    console.log("💡 Please check your MongoDB connection and restart the server");
   }
 };
 
 // Connect to database
 connectDB();
+
+// Add database connection event listeners for stability
+mongoose.connection.on('connected', () => {
+  console.log('✅ Mongoose connected to MongoDB');
+});
+
+mongoose.connection.on('error', (err) => {
+  console.error('❌ Mongoose connection error:', err);
+});
+
+mongoose.connection.on('disconnected', () => {
+  console.log('⚠️  Mongoose disconnected from MongoDB');
+  console.log('💡 If this happens frequently, check your MongoDB connection or restart the server');
+});
+
+// Handle process termination gracefully
+process.on('SIGINT', async () => {
+  console.log('📴 SIGINT received. Gracefully shutting down...');
+  await mongoose.connection.close();
+  process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+  console.log('📴 SIGTERM received. Gracefully shutting down...');
+  await mongoose.connection.close();
+  process.exit(0);
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  console.error('💥 Uncaught Exception:', error);
+  console.error('Stack trace:', error.stack);
+  // Don't exit immediately - log and continue
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('💥 Unhandled Rejection at:', promise, 'reason:', reason);
+  // Don't exit immediately - log and continue
+});
+
 
 // Routes
 app.use("/api/auth", authRoutes);
@@ -377,12 +426,30 @@ app.get("/test", (req, res) => {
   res.redirect('/');
 });
 
-// Global error handler
+// Request logging middleware for debugging
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    if (duration > 1000) { // Log slow requests
+      console.log(`⏰ Slow request: ${req.method} ${req.path} - ${duration}ms`);
+    }
+  });
+  next();
+});
+
+// Global error handler with better logging
 app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({
+  console.error(`💥 Error in ${req.method} ${req.path}:`);
+  console.error('Error message:', err.message);
+  console.error('Error stack:', err.stack);
+  
+  res.status(err.status || 500).json({
     message: "Something went wrong!",
     error: process.env.NODE_ENV === "production" ? {} : err.message,
+    path: req.path,
+    method: req.method,
+    timestamp: new Date().toISOString()
   });
 });
 
