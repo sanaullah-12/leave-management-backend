@@ -134,13 +134,9 @@ router.post('/', authenticateToken, async (req, res) => {
     }).populate('company');
 
     for (const admin of admins) {
-      try {
-        await sendLeaveRequestNotification(admin, user, leave);
-        // Create in-app notification
-        await notifyLeaveRequest(leave, admin);
-      } catch (emailError) {
-        console.error('Failed to send email notification:', emailError);
-      }
+      await sendLeaveRequestNotification(admin, user, leave);
+      // Create in-app notification
+      await notifyLeaveRequest(leave, admin);
     }
 
     res.status(201).json({
@@ -269,17 +265,13 @@ router.put('/:id/review', authenticateToken, authorizeRoles('admin'), async (req
 
     // Send email notification to employee
     const { sendLeaveStatusNotification } = require('../utils/email');
-    try {
-      await sendLeaveStatusNotification(leave.employee, leave, req.user);
+    await sendLeaveStatusNotification(leave.employee, leave, req.user);
       
-      // Create in-app notification
-      if (status === 'approved') {
-        await notifyLeaveApproval(leave, leave.employee);
-      } else if (status === 'rejected') {
-        await notifyLeaveRejection(leave, leave.employee, reviewComments);
-      }
-    } catch (emailError) {
-      console.error('Failed to send leave status notification:', emailError);
+    // Create in-app notification
+    if (status === 'approved') {
+      await notifyLeaveApproval(leave, leave.employee);
+    } else if (status === 'rejected') {
+      await notifyLeaveRejection(leave, leave.employee, reviewComments);
     }
 
     res.status(200).json({

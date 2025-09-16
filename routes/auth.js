@@ -202,7 +202,7 @@ router.post('/invite-employee', authenticateToken, async (req, res) => {
       department,
       position,
       joinDate: new Date(joinDate),
-      company: req.user.company._id,
+      company: req.user.company,
       invitedBy: req.user._id,
       status: 'pending'
     });
@@ -245,21 +245,12 @@ router.post('/invite-employee', authenticateToken, async (req, res) => {
       console.error('❌ Email sending error:', emailError.message);
       
       // Return success but with email warning
-      return res.status(201).json({
-        message: 'Employee invitation created successfully, but email delivery failed',
-        warning: 'Email could not be sent. Please share the invitation link manually.',
-        employee: {
-          id: employee._id,
-          name: employee.name,
-          email: employee.email,
-          employeeId: employee.employeeId,
-          department: employee.department,
-          position: employee.position,
-          status: employee.status
-        },
+      return res.status(500).json({
+        message: 'Employee invitation created, but email delivery failed.',
+        error: emailError.message,
+        stack: emailError.stack,
         invitationToken: invitationToken, // Include token for manual sharing
         manualInviteUrl: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify-invitation/${invitationToken}`,
-        emailError: emailError.message
       });
     }
 
@@ -296,7 +287,7 @@ router.post('/invite-admin', authenticateToken, async (req, res) => {
       department,
       position,
       joinDate: new Date(),
-      company: req.user.company._id,
+      company: req.user.company,
       invitedBy: req.user._id,
       status: 'pending'
     });
@@ -339,21 +330,12 @@ router.post('/invite-admin', authenticateToken, async (req, res) => {
       console.error('❌ Admin email sending error:', emailError.message);
       
       // Return success but with email warning
-      return res.status(201).json({
-        message: 'Admin invitation created successfully, but email delivery failed',
-        warning: 'Email could not be sent. Please share the invitation link manually.',
-        admin: {
-          id: admin._id,
-          name: admin.name,
-          email: admin.email,
-          employeeId: admin.employeeId,
-          department: admin.department,
-          position: admin.position,
-          status: admin.status
-        },
+      return res.status(500).json({
+        message: 'Admin invitation created, but email delivery failed.',
+        error: emailError.message,
+        stack: emailError.stack,
         invitationToken: invitationToken,
         manualInviteUrl: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify-invitation/${invitationToken}`,
-        emailError: emailError.message
       });
     }
 
