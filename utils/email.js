@@ -1,101 +1,126 @@
-const sgMail = require('@sendgrid/mail');
-const { enhanceEmailForDeliverability, getDeliverabilityTips } = require('./emailDeliverability');
+const nodemailer = require('nodemailer');
+const { getDeliverabilityTips } = require('./emailDeliverability');
 
 const sendEmail = async (options) => {
   console.log('📧 Email delivery process started for:', options.email);
-  
-  // Check SendGrid API key (support both variable names)
-  const apiKey = process.env.SENDGRID_API_KEY || process.env.SendGrid_Key;
-  if (!apiKey) {
-    console.error('❌ SendGrid API key not found!');
-    console.log('💡 Deliverability Tips:');
-    getDeliverabilityTips().forEach(tip => console.log(tip));
-    throw new Error('SENDGRID_API_KEY or SendGrid_Key not configured in environment variables');
-  }
 
-  // Set SendGrid API key
-  sgMail.setApiKey(apiKey);
+  // Production email configuration
+  const isProduction = process.env.NODE_ENV === 'production';
 
-  // Enhance email for better deliverability
-  const { enhanced, validation, timing } = enhanceEmailForDeliverability(options);
-  
-  console.log('📊 Content validation score:', validation.score + '/100');
-  if (!validation.isClean) {
-    console.warn('⚠️ Spam triggers detected:', validation.triggers);
-  }
-  
-  console.log('⏰ Send timing:', timing.reason);
-  
-  const msg = {
-    to: enhanced.email,
-    from: {
-      email: process.env.FROM_EMAIL || 'qazisanaullah612@gmail.com', // Must be verified in SendGrid
-      name: process.env.FROM_NAME || 'Leave Management System'
-    },
-    replyTo: {
-      email: process.env.REPLY_TO_EMAIL || process.env.FROM_EMAIL || 'qazisanaullah612@gmail.com',
-      name: 'Leave Management Support'
-    },
-    subject: enhanced.subject,
-    html: enhanced.html,
-    text: enhanced.text,
-    headers: enhanced.headers,
-    trackingSettings: enhanced.trackingSettings,
-    mailSettings: enhanced.mailSettings,
-    categories: enhanced.categories
-  };
+  let transporter;
 
-  try {
-    console.log('📤 Sending via SendGrid with enhanced deliverability...');
-    console.log('📧 To:', msg.to);
-    console.log('📝 Subject:', msg.subject);
-    console.log('🏷️ Categories:', msg.categories);
-    
-    const result = await sgMail.send(msg);
-    
-    console.log('✅ Email sent successfully!');
-    console.log('📊 Status:', result[0].statusCode);
-    console.log('🆔 Message ID:', result[0].headers['x-message-id']);
-    console.log('💯 Deliverability score:', validation.score + '/100');
-    
-    return { 
-      success: true, 
-      messageId: result[0].headers['x-message-id'],
-      statusCode: result[0].statusCode,
-      deliverabilityScore: validation.score,
-      timing: timing.reason
-    };
-    
-  } catch (error) {
-    console.error('❌ Email delivery failed:', error.message);
-    
-    // Enhanced error handling with deliverability tips
-    if (error.response) {
-      const errorBody = error.response.body;
-      console.error('❌ SendGrid error details:', errorBody);
-      
-      // Check for common deliverability issues
-      if (errorBody.errors) {
-        errorBody.errors.forEach(err => {
-          if (err.message.includes('not verified')) {
-            console.log('💡 TIP: Verify your sender email in SendGrid dashboard');
-          }
-          if (err.message.includes('reputation')) {
-            console.log('💡 TIP: Check your sender reputation and warm up your IP');
-          }
-          if (err.message.includes('bounced')) {
-            console.log('💡 TIP: Clean your email list and remove bounced addresses');
-          }
-        });
+  if (isProduction && process.env.SENDGRID_API_KEY) {
+    // Use SendGrid for production (recommended for deliverability)
+    const sgMail = require('@sendgrid/mail');
+    sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+
+    // SendGrid configuration for better deliverability
+    const mailOptions = {
+      from: {
+        email: process.env.FROM_EMAIL,
+        name: process.env.FROM_NAME || 'Leave Management System'
+      },
+      to: options.email,
+      subject: options.subject,
+      html: options.html,
+      text: options.text,
+      categories: ['leave-management', options.category || 'general'],
+      mailSettings: {
+        spamCheck: {
+          enable: true,
+          threshold: 1
+        }
+      },
+      trackingSettings: {
+        clickTracking: { enable: false },
+        openTracking: { enable: false },
+        subscriptionTracking: { enable: false }
+      },
+      headers: {
+        'X-Priority': '3',
+        'X-MSMail-Priority': 'Normal',
+        'Importance': 'Normal',
+        'List-Unsubscribe': `<mailto:${process.env.FROM_EMAIL}?subject=unsubscribe>`,
+        'X-Entity-Ref-ID': `lms-${Date.now()}`
       }
-      
-      throw new Error(`SendGrid error: ${errorBody.errors?.[0]?.message || 'Unknown SendGrid error'}`);
+    };
+
+    try {
+      console.log('📤 Sending via SendGrid...');
+      const response = await sgMail.send(mailOptions);
+      console.log('✅ Email sent successfully via SendGrid!');
+      return { success: true, messageId: response[0].headers['x-message-id'] };
+    } catch (error) {
+      console.error('❌ SendGrid delivery failed:', error.message);
+      throw new Error(`SendGrid sending failed: ${error.message}`);
     }
-    
-    console.log('💡 General deliverability tips:');
-    getDeliverabilityTips().slice(0, 5).forEach(tip => console.log(tip));
-    
-    throw new Error(`Email sending failed: ${error.message}`);
+  } else {
+    // Use SMTP for development or fallback
+    transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: process.env.SMTP_PORT,
+      secure: process.env.SMTP_PORT === '465', // true for 465, false for other ports
+      auth: {
+        user: process.env.SMTP_EMAIL,
+        pass: process.env.SMTP_PASSWORD,
+      },
+      pool: true, // Use connection pooling
+      rateLimit: true, // Enable rate limiting
+      maxConnections: 3, // Max 3 connections
+      maxMessages: 100, // Max 100 messages per connection
+      // Additional production-grade SMTP settings
+      connectionTimeout: 60000, // 60 seconds
+      greetingTimeout: 30000, // 30 seconds
+      socketTimeout: 60000, // 60 seconds
+      dnsTimeout: 30000, // 30 seconds
+      tls: {
+        rejectUnauthorized: isProduction, // Strict TLS in production
+        ciphers: 'SSLv3'
+      }
+    });
+  }
+
+  // For SMTP fallback, define the email options with deliverability enhancements
+  if (!isProduction || !process.env.SENDGRID_API_KEY) {
+    const mailOptions = {
+      from: {
+        name: process.env.FROM_NAME || 'Leave Management System',
+        address: process.env.FROM_EMAIL,
+      },
+      to: options.email,
+      subject: options.subject,
+      html: options.html,
+      text: options.text,
+      headers: {
+        'X-Priority': '3',
+        'X-MSMail-Priority': 'Normal',
+        'Importance': 'Normal',
+        'List-Unsubscribe': `<mailto:${process.env.FROM_EMAIL}?subject=unsubscribe>`,
+        'X-Entity-Ref-ID': `lms-${Date.now()}`,
+        'Return-Path': process.env.FROM_EMAIL,
+        'Reply-To': process.env.FROM_EMAIL
+      },
+      dsn: {
+        id: `lms-${Date.now()}`,
+        return: 'headers',
+        notify: ['success', 'failure', 'delay'],
+        recipient: process.env.FROM_EMAIL,
+      },
+    };
+
+    try {
+      console.log('📤 Sending via SMTP with enhanced deliverability...');
+      const info = await transporter.sendMail(mailOptions);
+      console.log('✅ Email sent successfully via SMTP!');
+      console.log('✉️ Message ID:', info.messageId);
+      console.log('📧 Recipients:', info.accepted);
+      return { success: true, messageId: info.messageId };
+    } catch (error) {
+      console.error('❌ SMTP delivery failed:', error.message);
+      console.log('💡 General deliverability tips:');
+      getDeliverabilityTips().slice(0, 5).forEach(tip => console.log(tip));
+      throw new Error(`SMTP sending failed: ${error.message}`);
+    }
   }
 };
 

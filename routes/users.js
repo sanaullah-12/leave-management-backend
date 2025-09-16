@@ -44,6 +44,45 @@ router.get('/', authenticateToken, authorizeRoles('admin'), async (req, res) => 
   }
 });
 
+// Get all admins (Admin only)
+router.get('/admins/list', authenticateToken, authorizeRoles('admin'), async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 50;
+    const skip = (page - 1) * limit;
+
+    const users = await User.find({
+      company: req.user.company._id,
+      role: 'admin'
+    })
+    .select('-password')
+    .populate('company', 'name')
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(limit);
+
+    const total = await User.countDocuments({
+      company: req.user.company._id,
+      role: 'admin'
+    });
+
+    res.status(200).json({
+      admins: users,
+      pagination: {
+        current: page,
+        pages: Math.ceil(total / limit),
+        total
+      }
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      message: 'Failed to get admins',
+      error: error.message
+    });
+  }
+});
+
 // Get single employee (Admin can get any, Employee can get only themselves)
 router.get('/:id', authenticateToken, checkCompanyAccess, async (req, res) => {
   try {
@@ -200,20 +239,9 @@ router.delete('/:id', authenticateToken, authorizeRoles('admin'), async (req, re
       return res.status(404).json({ message: 'Employee not found' });
     }
 
-    // Check if employee has any pending or approved leaves
+    // Delete all leaves for this employee (including pending/approved ones)
+    // Admin has full control to delete employees regardless of leave status
     const Leave = require('../models/Leave');
-    const activeLeaves = await Leave.countDocuments({
-      employee: employeeId,
-      status: { $in: ['pending', 'approved'] }
-    });
-
-    if (activeLeaves > 0) {
-      return res.status(400).json({ 
-        message: `Cannot delete employee. They have ${activeLeaves} active leave request(s). Please resolve all leave requests first.` 
-      });
-    }
-
-    // Delete all rejected/historical leaves for this employee
     await Leave.deleteMany({ employee: employeeId });
 
     // Delete the employee
