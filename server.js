@@ -139,18 +139,19 @@ const connectDB = async (retryCount = 0) => {
     );
     const startTime = Date.now();
 
-    // Railway-optimized connection options
+    // Railway + Mumbai cluster optimized connection options
     await mongoose.connect(connectionString, {
-      serverSelectionTimeoutMS: 20000, // 20 seconds (Railway timeout)
-      socketTimeoutMS: 45000,          // 45 seconds
-      connectTimeoutMS: 20000,         // 20 seconds
+      serverSelectionTimeoutMS: 45000, // 45 seconds (Mumbai cluster needs more time)
+      socketTimeoutMS: 60000,          // 60 seconds
+      connectTimeoutMS: 45000,         // 45 seconds for Mumbai→Railway
       bufferCommands: false,
-      maxPoolSize: 5,                  // Reduced for Railway
+      maxPoolSize: 3,                  // Further reduced for cross-region
       minPoolSize: 1,
       retryWrites: true,
       w: 'majority',
-      maxIdleTimeMS: 30000,           // Close idle connections
-      heartbeatFrequencyMS: 10000     // 10 second heartbeat
+      maxIdleTimeMS: 300000,          // 5 minutes for cross-region stability
+      heartbeatFrequencyMS: 30000,    // 30 second heartbeat for Mumbai distance
+      family: 4                       // Force IPv4 for better Railway compatibility
     });
     
     const connectionTime = Date.now() - startTime;
@@ -186,10 +187,11 @@ const connectDB = async (retryCount = 0) => {
       console.error("💡 Check: MongoDB Atlas cluster status and Railway network access");
     }
 
-    // Retry logic for Railway
+    // Retry logic for Railway + Mumbai cluster
     if (retryCount < maxRetries) {
-      const retryDelay = (retryCount + 1) * 3000; // 3s, 6s, 9s delays
+      const retryDelay = (retryCount + 1) * 5000; // 5s, 10s, 15s delays for cross-region
       console.log(`🔄 Retrying connection in ${retryDelay/1000} seconds... (${retryCount + 1}/${maxRetries})`);
+      console.log(`🌏 Note: Mumbai cluster → Railway requires extra time for cross-region connection`);
 
       await new Promise(resolve => setTimeout(resolve, retryDelay));
       return connectDB(retryCount + 1);
