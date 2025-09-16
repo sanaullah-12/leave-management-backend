@@ -87,18 +87,26 @@ app.use(express.urlencoded({ extended: true }));
 app.use("/uploads", express.static("uploads"));
 
 // Database connection with retry logic
-const connectDB = async () => {
+const connectDB = async (retryCount = 0) => {
+  const maxRetries = 3;
+
   try {
     // Environment-based database configuration
     let connectionString;
     const environment = process.env.NODE_ENV || 'development';
     const useProductionDB = process.env.USE_PRODUCTION_DB === 'true';
-    
+
+    // Railway-specific: Ensure environment variables are loaded
+    if (environment === 'production' && !process.env.MONGODB_URI) {
+      console.log("⚠️  MONGODB_URI not found, waiting for Railway environment...");
+      await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
+    }
+
     if (environment === 'production') {
       // Production: Use MongoDB Atlas
       connectionString = process.env.MONGODB_URI;
       if (!connectionString) {
-        throw new Error('MONGODB_URI is required in production environment');
+        throw new Error('MONGODB_URI is required in production environment - check Railway variables');
       }
       console.log("🚀 PRODUCTION MODE: Using MongoDB Atlas");
     } else if (useProductionDB && process.env.MONGODB_URI) {
@@ -112,30 +120,37 @@ const connectDB = async () => {
       console.log("🔒 DEVELOPMENT MODE: Using local database only");
       console.log("💡 To use production data, set USE_PRODUCTION_DB=true in your .env file");
     }
-    
+
     console.log("🔍 MONGODB CONNECTION DEBUG:");
+    console.log("Retry attempt:", retryCount + 1, "/", maxRetries + 1);
     console.log("Environment:", environment);
-    console.log("Database mode:", 
-      environment === 'production' ? 'Production (Atlas)' : 
+    console.log("Database mode:",
+      environment === 'production' ? 'Production (Atlas)' :
       useProductionDB ? 'Development using Production DB' : 'Development (Local)');
     console.log("Connection string:", connectionString.replace(/\/\/[^:]*:[^@]*@/, '//***:***@')); // Hide credentials
     console.log("Platform:", process.platform);
     console.log("Current time:", new Date().toISOString());
-    
+    console.log("Railway PORT:", process.env.PORT || 'Not set');
+
     console.log(
       environment === 'production' ? "📡 Attempting to connect to MongoDB Atlas..." :
       useProductionDB ? "📡 Attempting to connect to MongoDB Atlas (production data in dev)..." :
       "📡 Attempting to connect to local MongoDB..."
     );
     const startTime = Date.now();
-    
+
+    // Railway-optimized connection options
     await mongoose.connect(connectionString, {
-      serverSelectionTimeoutMS: 30000, // 30 seconds for Atlas
-      socketTimeoutMS: 45000, // 45 seconds
+      serverSelectionTimeoutMS: 20000, // 20 seconds (Railway timeout)
+      socketTimeoutMS: 45000,          // 45 seconds
+      connectTimeoutMS: 20000,         // 20 seconds
       bufferCommands: false,
-      maxPoolSize: 10,
+      maxPoolSize: 5,                  // Reduced for Railway
+      minPoolSize: 1,
       retryWrites: true,
-      w: 'majority'
+      w: 'majority',
+      maxIdleTimeMS: 30000,           // Close idle connections
+      heartbeatFrequencyMS: 10000     // 10 second heartbeat
     });
     
     const connectionTime = Date.now() - startTime;
@@ -151,30 +166,42 @@ const connectDB = async () => {
     console.error("Error message:", error.message);
     console.error("Error code:", error.code);
     console.error("Error codeName:", error.codeName);
-    
+
     if (error.reason) {
       console.error("Error reason:", error.reason);
     }
-    
-    // More specific error handling
-    if (error.message.includes('ENOTFOUND')) {
-      console.error("🌐 DNS lookup failed - check network connectivity");
-    } else if (error.message.includes('authentication failed')) {
-      console.error("🔐 Authentication failed - check username/password");
-    } else if (error.message.includes('timeout') || error.message.includes('ECONNREFUSED')) {
-      console.error("⏰ Connection timeout or refused - MongoDB may not be running");
-      console.error("💡 To fix this:");
-      console.error("   1. Install MongoDB locally: https://www.mongodb.com/try/download/community");
-      console.error("   2. Start MongoDB service: net start MongoDB (as Administrator)");
-      console.error("   3. Or use production database: set USE_PRODUCTION_DB=true in .env");
-    } else if (error.message.includes('serverselectionretrydelayms')) {
-      console.error("⚙️  MongoDB connection option issue - using compatible settings");
+
+    // Railway-specific error handling
+    if (error.message.includes('ENOTFOUND') || error.message.includes('getaddrinfo')) {
+      console.error("🌐 DNS lookup failed - Railway network issue or MongoDB Atlas unreachable");
+      console.error("💡 Check: MongoDB Atlas cluster is active and network access allows Railway IPs");
+    } else if (error.message.includes('authentication failed') || error.message.includes('AuthenticationFailed')) {
+      console.error("🔐 Authentication failed - check MongoDB Atlas credentials");
+      console.error("💡 Verify: Database user credentials in MONGODB_URI are correct");
+    } else if (error.message.includes('timeout') || error.message.includes('serverSelectionTimeout')) {
+      console.error("⏰ Connection timeout - Railway to MongoDB Atlas timeout");
+      console.error("💡 Check: MongoDB Atlas network access whitelist includes Railway IPs");
+    } else if (error.message.includes('MongoServerSelectionError')) {
+      console.error("🔍 Server selection failed - MongoDB Atlas connectivity issue");
+      console.error("💡 Check: MongoDB Atlas cluster status and Railway network access");
     }
-    
+
+    // Retry logic for Railway
+    if (retryCount < maxRetries) {
+      const retryDelay = (retryCount + 1) * 3000; // 3s, 6s, 9s delays
+      console.log(`🔄 Retrying connection in ${retryDelay/1000} seconds... (${retryCount + 1}/${maxRetries})`);
+
+      await new Promise(resolve => setTimeout(resolve, retryDelay));
+      return connectDB(retryCount + 1);
+    }
+
     console.error("Full error object:", JSON.stringify(error, null, 2));
-    
-    // For now, don't auto-retry to avoid connection loops
-    console.log("💡 Please check your MongoDB connection and restart the server");
+    console.log("💥 All retry attempts failed. MongoDB connection could not be established.");
+    console.log("🔧 Railway Troubleshooting:");
+    console.log("   1. Check Railway environment variables are set");
+    console.log("   2. Verify MongoDB Atlas network access allows Railway");
+    console.log("   3. Confirm MongoDB Atlas cluster is active");
+    console.log("   4. Check Railway deployment logs for specific errors");
   }
 };
 
@@ -253,18 +280,79 @@ app.get("/api/health", async (req, res) => {
   }
 });
 
+// Railway MongoDB connection test endpoint
+app.get("/api/test-db", async (req, res) => {
+  try {
+    const dbStatus = mongoose.connection.readyState;
+    const dbStates = { 0: 'disconnected', 1: 'connected', 2: 'connecting', 3: 'disconnecting' };
+
+    let testResults = {
+      connectionState: dbStates[dbStatus],
+      message: dbStatus === 1 ? "Database connected successfully" : "Database not connected"
+    };
+
+    if (dbStatus === 1) {
+      // Test database operations
+      const collections = await mongoose.connection.db.listCollections().toArray();
+      testResults.collections = collections.map(c => c.name);
+      testResults.databaseName = mongoose.connection.db.databaseName;
+      testResults.host = mongoose.connection.host;
+
+      // Test a simple query if User model exists
+      try {
+        const User = require('./models/User');
+        const userCount = await User.countDocuments();
+        testResults.userCount = userCount;
+        testResults.dataAccess = "✅ Success";
+      } catch (error) {
+        testResults.dataAccess = `❌ Failed: ${error.message}`;
+      }
+    }
+
+    res.status(200).json({
+      message: "🧪 Railway MongoDB Connection Test",
+      timestamp: new Date().toISOString(),
+      database: testResults
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      message: "🧪 Railway MongoDB Connection Test",
+      timestamp: new Date().toISOString(),
+      database: {
+        connectionState: "error",
+        error: error.message
+      }
+    });
+  }
+});
+
 // Debug endpoint for Railway troubleshooting
 app.get("/api/debug", (req, res) => {
   res.status(200).json({
     message: "🔍 Railway Debug Information",
+    timestamp: new Date().toISOString(),
+    database: {
+      connectionState: mongoose.connection.readyState,
+      connectionStates: {
+        0: 'disconnected',
+        1: 'connected',
+        2: 'connecting',
+        3: 'disconnecting'
+      },
+      host: mongoose.connection.host || 'Not connected',
+      databaseName: mongoose.connection.db?.databaseName || 'Not connected'
+    },
     environment: {
       NODE_ENV: process.env.NODE_ENV,
       PORT: process.env.PORT,
       MONGODB_URI_exists: !!process.env.MONGODB_URI,
-      MONGODB_URI_preview: process.env.MONGODB_URI ? 
-        process.env.MONGODB_URI.replace(/\/\/[^:]*:[^@]*@/, '//***:***@') : 
+      MONGODB_URI_length: process.env.MONGODB_URI?.length || 0,
+      MONGODB_URI_preview: process.env.MONGODB_URI ?
+        process.env.MONGODB_URI.replace(/\/\/[^:]*:[^@]*@/, '//***:***@') :
         'Not set',
       JWT_SECRET_exists: !!process.env.JWT_SECRET,
+      JWT_SECRET_length: process.env.JWT_SECRET?.length || 0,
       ALLOWED_ORIGINS_exists: !!process.env.ALLOWED_ORIGINS,
       FRONTEND_URL_exists: !!process.env.FRONTEND_URL,
       FRONTEND_URL_value: process.env.FRONTEND_URL || 'Not set'
