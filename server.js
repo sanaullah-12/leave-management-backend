@@ -4,7 +4,13 @@ const cors = require("cors");
 const helmet = require("helmet");
 const morgan = require("morgan");
 const rateLimit = require("express-rate-limit");
-require("dotenv").config();
+// Load environment variables
+const path = require('path');
+if (process.env.NODE_ENV === 'production') {
+  require('dotenv').config({ path: path.join(__dirname, '.env.production') });
+} else {
+  require('dotenv').config();
+}
 
 // Debug environment variables
 console.log("=== ENVIRONMENT VARIABLES ===");
