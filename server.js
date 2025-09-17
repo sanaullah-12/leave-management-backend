@@ -103,10 +103,13 @@ const connectDB = async (retryCount = 0) => {
     }
 
     if (environment === 'production') {
-      // Production: Use MongoDB Atlas
       connectionString = process.env.MONGODB_URI;
       if (!connectionString) {
-        throw new Error('MONGODB_URI is required in production environment - check Railway variables');
+        console.error("❌ CRITICAL: MONGODB_URI is not set in the production environment.");
+        console.error("Please set the MONGODB_URI environment variable in your Railway project settings.");
+        // In a production environment, we should not fall back to a local database.
+        // We will stop the process here to make the configuration error obvious.
+        process.exit(1);
       }
       console.log("🚀 PRODUCTION MODE: Using MongoDB Atlas");
     } else if (useProductionDB && process.env.MONGODB_URI) {
