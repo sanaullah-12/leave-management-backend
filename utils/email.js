@@ -9,7 +9,12 @@ const sendEmail = async (options) => {
 
   let transporter;
 
-  if (isProduction && process.env.SENDGRID_API_KEY) {
+  // Check if SendGrid is properly configured
+  const isSendGridConfigured = process.env.SENDGRID_API_KEY &&
+                               process.env.SENDGRID_API_KEY !== 'your_sendgrid_api_key_here' &&
+                               process.env.SENDGRID_API_KEY.length > 10;
+
+  if (isProduction && isSendGridConfigured) {
     // Use SendGrid for production (recommended for deliverability)
     const sgMail = require('@sendgrid/mail');
     sgMail.setApiKey(process.env.SENDGRID_API_KEY);
@@ -56,6 +61,18 @@ const sendEmail = async (options) => {
     }
   } else {
     // Use SMTP for development or fallback
+    console.log('📤 Using SMTP fallback...');
+
+    if (isProduction && !isSendGridConfigured) {
+      console.warn('⚠️ Production environment detected but SendGrid not configured properly');
+      console.warn('⚠️ Falling back to SMTP - consider setting up SendGrid for better deliverability');
+    }
+
+    // Validate SMTP configuration
+    if (!process.env.SMTP_HOST || !process.env.SMTP_EMAIL || !process.env.SMTP_PASSWORD) {
+      throw new Error('SMTP configuration incomplete. Required: SMTP_HOST, SMTP_EMAIL, SMTP_PASSWORD');
+    }
+
     transporter = nodemailer.createTransport({
       host: process.env.SMTP_HOST,
       port: process.env.SMTP_PORT,
@@ -117,9 +134,31 @@ const sendEmail = async (options) => {
       return { success: true, messageId: info.messageId };
     } catch (error) {
       console.error('❌ SMTP delivery failed:', error.message);
-      console.log('💡 General deliverability tips:');
-      getDeliverabilityTips().slice(0, 5).forEach(tip => console.log(tip));
-      throw new Error(`SMTP sending failed: ${error.message}`);
+      console.error('🔍 Error code:', error.code);
+      console.error('🔍 Error details:', error);
+
+      // Provide specific error diagnostics
+      let errorHint = '';
+      if (error.code === 'EAUTH') {
+        errorHint = '💡 Authentication failed - check Gmail app password. Ensure 2FA is enabled and use app-specific password.';
+      } else if (error.code === 'ECONNECTION') {
+        errorHint = '💡 Connection failed - check SMTP host/port settings';
+      } else if (error.code === 'ETIMEDOUT') {
+        errorHint = '💡 Connection timeout - check network connectivity and firewall settings';
+      } else if (error.code === 'ESOCKET') {
+        errorHint = '💡 Socket error - check SMTP server availability';
+      } else if (error.message.includes('Username and Password not accepted')) {
+        errorHint = '💡 Gmail rejected credentials - regenerate app password and ensure 2FA is enabled';
+      }
+
+      console.error(errorHint);
+      console.log('💡 Email troubleshooting tips:');
+      console.log('1. Verify Gmail app password (16 characters, no spaces)');
+      console.log('2. Enable 2-Factor Authentication on Gmail account');
+      console.log('3. Check Gmail security settings');
+      console.log('4. Consider using SendGrid for production');
+
+      throw new Error(`SMTP sending failed: ${error.message}. ${errorHint}`);
     }
   }
 };

@@ -9,10 +9,11 @@ const router = express.Router();
 router.get('/', authenticateToken, authorizeRoles('admin'), async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
+    const limit = parseInt(req.query.limit) || 50; // Increased default limit for employees
     const skip = (page - 1) * limit;
 
-    const users = await User.find({ 
+    // Include ALL employees (active + inactive) for comprehensive view
+    const users = await User.find({
       company: req.user.company._id,
       role: 'employee'
     })
@@ -22,10 +23,25 @@ router.get('/', authenticateToken, authorizeRoles('admin'), async (req, res) => 
     .limit(limit)
     .sort({ createdAt: -1 });
 
-    const total = await User.countDocuments({ 
+    const total = await User.countDocuments({
       company: req.user.company._id,
       role: 'employee'
     });
+
+    // Get active employee count for comparison with Dashboard
+    const activeEmployees = await User.countDocuments({
+      company: req.user.company._id,
+      role: 'employee',
+      isActive: true
+    });
+
+    console.log(`Employee listing debug - Found ${total} total employees, ${activeEmployees} active employees, returning ${users.length} employees`);
+    console.log('Employee details:', users.map(u => ({
+      name: u.name,
+      employeeId: u.employeeId,
+      isActive: u.isActive,
+      status: u.status
+    })));
 
     res.status(200).json({
       employees: users,
