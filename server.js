@@ -6,6 +6,7 @@ const morgan = require("morgan");
 const rateLimit = require("express-rate-limit");
 // Load environment variables
 const path = require('path');
+const fs = require('fs');
 if (process.env.NODE_ENV === 'production') {
   require('dotenv').config({ path: path.join(__dirname, '.env.production') });
 } else {
@@ -89,8 +90,34 @@ app.use(limiter);
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-// Serve static files for profile pictures
-app.use("/uploads", express.static("uploads"));
+// Serve static files for profile pictures with better error handling
+const uploadsPath = path.join(__dirname, 'uploads');
+console.log('📁 Static files directory:', uploadsPath);
+
+// Ensure uploads directory exists
+if (!fs.existsSync(uploadsPath)) {
+  fs.mkdirSync(uploadsPath, { recursive: true });
+  console.log('📁 Created uploads directory');
+}
+
+app.use("/uploads", express.static(uploadsPath, {
+  fallthrough: false,
+  index: false,
+  setHeaders: (res, path) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  }
+}));
+
+// Handle static file 404s
+app.use('/uploads/*', (req, res) => {
+  console.log('❌ Static file not found:', req.path);
+  res.status(404).json({
+    message: 'File not found',
+    path: req.path,
+    hint: 'File may have been lost due to Railway ephemeral storage'
+  });
+});
 
 // Database connection with retry logic
 const connectDB = async (retryCount = 0) => {
@@ -515,9 +542,51 @@ app.get("/", (req, res) => {
   `);
 });
 
-// Simple test endpoint that doesn't require authentication  
+// Simple test endpoint that doesn't require authentication
 app.get("/test", (req, res) => {
   res.redirect('/');
+});
+
+// Debug endpoint to check uploads directory and files
+app.get("/api/debug/uploads", (req, res) => {
+  try {
+    const uploadsPath = path.join(__dirname, 'uploads');
+    const profilesPath = path.join(uploadsPath, 'profiles');
+
+    const result = {
+      uploadsExists: fs.existsSync(uploadsPath),
+      profilesExists: fs.existsSync(profilesPath),
+      uploadsPath: uploadsPath,
+      profilesPath: profilesPath,
+      files: []
+    };
+
+    if (result.profilesExists) {
+      try {
+        const files = fs.readdirSync(profilesPath);
+        result.files = files.map(file => ({
+          name: file,
+          path: `/uploads/profiles/${file}`,
+          fullPath: path.join(profilesPath, file),
+          stats: fs.statSync(path.join(profilesPath, file))
+        }));
+      } catch (error) {
+        result.error = error.message;
+      }
+    }
+
+    res.status(200).json({
+      message: "📁 Uploads Directory Debug",
+      timestamp: new Date().toISOString(),
+      data: result
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: "❌ Debug uploads failed",
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
 });
 
 // Request logging middleware for debugging
