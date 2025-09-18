@@ -460,43 +460,62 @@ app.post("/api/debug/test-write", async (req, res) => {
   }
 });
 
-// Test email sending endpoint - SIMPLE VERSION
+// Test email sending endpoint - ENHANCED VERSION
 app.post("/api/debug/test-email", async (req, res) => {
   console.log('\n🧪 EMAIL TEST ENDPOINT CALLED');
-  
+
   try {
     const targetEmail = req.body.email || process.env.SMTP_EMAIL || 'qazisanaullah612@gmail.com';
     console.log('🎯 Target email:', targetEmail);
-    
+
     // Import fresh every time to avoid caching issues
     delete require.cache[require.resolve('./utils/email')];
     const { sendEmail } = require('./utils/email');
-    
+
     const result = await sendEmail({
       email: targetEmail,
       subject: '🧪 URGENT TEST - Leave Management Email System',
-      html: '<h1>🎉 SUCCESS!</h1><p>If you received this, your email system is working!</p>'
+      html: '<h1>🎉 SUCCESS!</h1><p>If you received this, your email system is working!</p><p>Time: ' + new Date().toISOString() + '</p>',
+      text: 'SUCCESS! If you received this, your email system is working! Time: ' + new Date().toISOString(),
+      category: 'test'
     });
-    
+
     console.log('✅ Test email completed successfully');
-    
+
     res.status(200).json({
       message: "✅ Test email completed - check your inbox!",
       target_email: targetEmail,
       result: result,
+      environment_check: {
+        node_env: process.env.NODE_ENV,
+        sendgrid_key_railway: process.env.SendGrid_Key ? `${process.env.SendGrid_Key.substring(0, 10)}...` : 'NOT SET',
+        sendgrid_key_standard: process.env.SENDGRID_API_KEY ? `${process.env.SENDGRID_API_KEY.substring(0, 10)}...` : 'NOT SET',
+        sendgrid_configured: !!(process.env.SendGrid_Key || process.env.SENDGRID_API_KEY),
+        sendgrid_key_length: (process.env.SendGrid_Key || process.env.SENDGRID_API_KEY || '').length,
+        smtp_configured: !!(process.env.SMTP_EMAIL && process.env.SMTP_PASSWORD),
+        from_email: process.env.FROM_EMAIL || 'NOT SET'
+      },
       timestamp: new Date().toISOString()
     });
-    
+
   } catch (error) {
     console.error('❌ Test email failed:', error.message);
-    
+    console.error('❌ Full error:', error);
+
     res.status(500).json({
       message: "❌ Test email failed",
       error: error.message,
+      error_stack: error.stack,
       environment_check: {
+        node_env: process.env.NODE_ENV,
+        sendgrid_key_railway: process.env.SendGrid_Key ? `${process.env.SendGrid_Key.substring(0, 10)}...` : 'NOT SET',
+        sendgrid_key_standard: process.env.SENDGRID_API_KEY ? `${process.env.SENDGRID_API_KEY.substring(0, 10)}...` : 'NOT SET',
+        sendgrid_configured: !!(process.env.SendGrid_Key || process.env.SENDGRID_API_KEY),
+        sendgrid_key_length: (process.env.SendGrid_Key || process.env.SENDGRID_API_KEY || '').length,
+        smtp_configured: !!(process.env.SMTP_EMAIL && process.env.SMTP_PASSWORD),
+        from_email: process.env.FROM_EMAIL || 'NOT SET',
         smtp_email: process.env.SMTP_EMAIL || 'NOT SET',
-        smtp_password_exists: !!process.env.SMTP_PASSWORD,
-        node_env: process.env.NODE_ENV
+        smtp_password_exists: !!process.env.SMTP_PASSWORD
       },
       timestamp: new Date().toISOString()
     });
@@ -545,6 +564,34 @@ app.get("/", (req, res) => {
 // Simple test endpoint that doesn't require authentication
 app.get("/test", (req, res) => {
   res.redirect('/');
+});
+
+// Debug endpoint for email configuration
+app.get("/api/debug/email-config", (req, res) => {
+  try {
+    const emailConfig = {
+      node_env: process.env.NODE_ENV,
+      sendgrid_key_railway_exists: !!process.env.SendGrid_Key,
+      sendgrid_key_railway_length: (process.env.SendGrid_Key || '').length,
+      sendgrid_key_railway_preview: process.env.SendGrid_Key ? `${process.env.SendGrid_Key.substring(0, 15)}...` : 'NOT SET',
+      sendgrid_key_standard_exists: !!process.env.SENDGRID_API_KEY,
+      sendgrid_key_standard_length: (process.env.SENDGRID_API_KEY || '').length,
+      from_email: process.env.FROM_EMAIL,
+      smtp_email: process.env.SMTP_EMAIL,
+      smtp_password_exists: !!process.env.SMTP_PASSWORD,
+      timestamp: new Date().toISOString()
+    };
+
+    res.status(200).json({
+      message: "📧 Email Configuration Debug",
+      config: emailConfig
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: "❌ Email config debug failed",
+      error: error.message
+    });
+  }
 });
 
 // Debug endpoint to check uploads directory and files

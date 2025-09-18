@@ -3,21 +3,39 @@ const { getDeliverabilityTips } = require('./emailDeliverability');
 
 const sendEmail = async (options) => {
   console.log('📧 Email delivery process started for:', options.email);
+  console.log('📧 Email subject:', options.subject);
 
   // Production email configuration
   const isProduction = process.env.NODE_ENV === 'production';
+  console.log('🌍 Environment:', process.env.NODE_ENV);
 
   let transporter;
 
-  // Check if SendGrid is properly configured
-  const isSendGridConfigured = process.env.SENDGRID_API_KEY &&
-                               process.env.SENDGRID_API_KEY !== 'your_sendgrid_api_key_here' &&
-                               process.env.SENDGRID_API_KEY.length > 10;
+  // Check if SendGrid is properly configured (prioritize Railway variable name)
+  const sendGridKey = process.env.SendGrid_Key || process.env.SENDGRID_API_KEY;
+  const isSendGridConfigured = sendGridKey &&
+                               sendGridKey !== 'your_sendgrid_api_key_here' &&
+                               sendGridKey.length > 10;
+
+  console.log('🔍 Email provider check:');
+  console.log('  - Is Production:', isProduction);
+  console.log('  - NODE_ENV:', process.env.NODE_ENV);
+  console.log('  - SendGrid_Key exists:', !!process.env.SendGrid_Key);
+  console.log('  - SendGrid_Key value:', process.env.SendGrid_Key ? `${process.env.SendGrid_Key.substring(0, 10)}...` : 'NOT SET');
+  console.log('  - SENDGRID_API_KEY exists:', !!process.env.SENDGRID_API_KEY);
+  console.log('  - Final SendGrid Key exists:', !!sendGridKey);
+  console.log('  - SendGrid Key length:', sendGridKey?.length || 0);
+  console.log('  - SendGrid configured:', isSendGridConfigured);
+  console.log('  - Will use:', (isProduction && isSendGridConfigured) ? 'SendGrid' : 'SMTP');
+  console.log('  - Production check:', isProduction, '&& SendGrid check:', isSendGridConfigured, '=', (isProduction && isSendGridConfigured));
 
   if (isProduction && isSendGridConfigured) {
     // Use SendGrid for production (recommended for deliverability)
+    console.log('🔑 Using SendGrid for email delivery...');
+    console.log('🔑 SendGrid API Key configured:', sendGridKey ? `${sendGridKey.substring(0, 10)}...` : 'None');
+
     const sgMail = require('@sendgrid/mail');
-    sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+    sgMail.setApiKey(sendGridKey);
 
     // SendGrid configuration for better deliverability
     const mailOptions = {
@@ -40,24 +58,46 @@ const sendEmail = async (options) => {
         clickTracking: { enable: false },
         openTracking: { enable: false },
         subscriptionTracking: { enable: false }
-      },
-      headers: {
-        'X-Priority': '3',
-        'X-MSMail-Priority': 'Normal',
-        'Importance': 'Normal',
-        'List-Unsubscribe': `<mailto:${process.env.FROM_EMAIL}?subject=unsubscribe>`,
-        'X-Entity-Ref-ID': `lms-${Date.now()}`
       }
     };
 
     try {
-      console.log('📤 Sending via SendGrid...');
+      console.log('📤 Sending via SendGrid to:', options.email);
+      console.log('📤 Subject:', options.subject);
+      console.log('📤 From:', mailOptions.from);
+
       const response = await sgMail.send(mailOptions);
+
       console.log('✅ Email sent successfully via SendGrid!');
-      return { success: true, messageId: response[0].headers['x-message-id'] };
+      console.log('📧 Response status:', response[0]?.statusCode);
+      console.log('📧 Message ID:', response[0]?.headers?.['x-message-id']);
+
+      return {
+        success: true,
+        messageId: response[0]?.headers?.['x-message-id'],
+        provider: 'SendGrid',
+        statusCode: response[0]?.statusCode
+      };
     } catch (error) {
-      console.error('❌ SendGrid delivery failed:', error.message);
-      throw new Error(`SendGrid sending failed: ${error.message}`);
+      console.error('❌ SendGrid delivery failed:');
+      console.error('Error code:', error.code);
+      console.error('Error message:', error.message);
+      console.error('Error response:', error.response?.body);
+
+      // Provide specific SendGrid error diagnostics
+      let errorHint = '';
+      if (error.code === 401) {
+        errorHint = '💡 Invalid API Key - check your SendGrid API key configuration';
+      } else if (error.code === 403) {
+        errorHint = '💡 Forbidden - check SendGrid account permissions and verify sender email';
+      } else if (error.code === 413) {
+        errorHint = '💡 Email too large - reduce email size or attachments';
+      } else if (error.message?.includes('verify')) {
+        errorHint = '💡 Sender email not verified - verify your sender email in SendGrid dashboard';
+      }
+
+      console.error(errorHint);
+      throw new Error(`SendGrid sending failed: ${error.message}. ${errorHint}`);
     }
   } else {
     // Use SMTP for development or fallback
@@ -98,7 +138,7 @@ const sendEmail = async (options) => {
   }
 
   // For SMTP fallback, define the email options with deliverability enhancements
-  if (!isProduction || !process.env.SENDGRID_API_KEY) {
+  if (!isProduction || !isSendGridConfigured) {
     const mailOptions = {
       from: {
         name: process.env.FROM_NAME || 'Leave Management System',
