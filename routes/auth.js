@@ -243,14 +243,29 @@ router.post('/invite-employee', authenticateToken, async (req, res) => {
 
     } catch (emailError) {
       console.error('❌ Email sending error:', emailError.message);
-      
-      // Return success but with email warning
-      return res.status(500).json({
-        message: 'Employee invitation created, but email delivery failed.',
-        error: emailError.message,
-        stack: emailError.stack,
+      console.error('❌ Full email error:', emailError);
+
+      // Return success but with email warning - don't fail the invitation
+      return res.status(201).json({
+        message: 'Employee invitation created successfully, but email delivery failed. Please share the invitation link manually.',
+        warning: 'Email delivery failed',
+        emailError: emailError.message,
+        employee: {
+          id: employee._id,
+          name: employee.name,
+          email: employee.email,
+          employeeId: employee.employeeId,
+          department: employee.department,
+          position: employee.position,
+          status: employee.status
+        },
         invitationToken: invitationToken, // Include token for manual sharing
         manualInviteUrl: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify-invitation/${invitationToken}`,
+        troubleshooting: {
+          message: 'Check Railway logs for detailed email configuration issues',
+          debugEndpoint: '/api/debug/email-config',
+          testEndpoint: '/api/debug/test-email'
+        }
       });
     }
 
@@ -328,14 +343,29 @@ router.post('/invite-admin', authenticateToken, async (req, res) => {
 
     } catch (emailError) {
       console.error('❌ Admin email sending error:', emailError.message);
-      
-      // Return success but with email warning
-      return res.status(500).json({
-        message: 'Admin invitation created, but email delivery failed.',
-        error: emailError.message,
-        stack: emailError.stack,
+      console.error('❌ Full admin email error:', emailError);
+
+      // Return success but with email warning - don't fail the invitation
+      return res.status(201).json({
+        message: 'Admin invitation created successfully, but email delivery failed. Please share the invitation link manually.',
+        warning: 'Email delivery failed',
+        emailError: emailError.message,
+        admin: {
+          id: admin._id,
+          name: admin.name,
+          email: admin.email,
+          employeeId: admin.employeeId,
+          department: admin.department,
+          position: admin.position,
+          status: admin.status
+        },
         invitationToken: invitationToken,
         manualInviteUrl: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify-invitation/${invitationToken}`,
+        troubleshooting: {
+          message: 'Check Railway logs for detailed email configuration issues',
+          debugEndpoint: '/api/debug/email-config',
+          testEndpoint: '/api/debug/test-email'
+        }
       });
     }
 

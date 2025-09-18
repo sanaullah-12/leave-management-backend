@@ -83,6 +83,7 @@ const sendEmail = async (options) => {
       console.error('Error code:', error.code);
       console.error('Error message:', error.message);
       console.error('Error response:', error.response?.body);
+      console.error('Full error object:', JSON.stringify(error, null, 2));
 
       // Provide specific SendGrid error diagnostics
       let errorHint = '';
@@ -94,9 +95,15 @@ const sendEmail = async (options) => {
         errorHint = '💡 Email too large - reduce email size or attachments';
       } else if (error.message?.includes('verify')) {
         errorHint = '💡 Sender email not verified - verify your sender email in SendGrid dashboard';
+      } else if (error.message?.includes('The from address does not match a verified Sender Identity')) {
+        errorHint = '💡 Sender email not verified in SendGrid - add and verify your sender email in SendGrid dashboard';
       }
 
       console.error(errorHint);
+      console.error('📧 Email config debug info:');
+      console.error('  - From email:', process.env.FROM_EMAIL);
+      console.error('  - SendGrid Key (first 10 chars):', sendGridKey ? sendGridKey.substring(0, 10) : 'NOT SET');
+
       throw new Error(`SendGrid sending failed: ${error.message}. ${errorHint}`);
     }
   } else {
