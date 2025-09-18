@@ -292,13 +292,17 @@ router.post('/profile-picture', authenticateToken, uploadSingle, processProfileP
     // Update user's profile picture
     const user = await User.findByIdAndUpdate(
       req.user._id,
-      { profilePicture: req.profilePicturePath },
+      {
+        profilePicture: req.profilePicturePath,
+        profilePictureUploadedAt: new Date() // Track when file was uploaded
+      },
       { new: true }
     ).select('-password');
 
     res.status(200).json({
       message: 'Profile picture updated successfully',
       profilePicture: req.profilePicturePath,
+      warning: 'Note: On Railway, uploaded files may be lost on app restart. Consider using a cloud storage service for persistent file storage.',
       user: {
         id: user._id,
         name: user.name,
@@ -317,9 +321,9 @@ router.post('/profile-picture', authenticateToken, uploadSingle, processProfileP
 
   } catch (error) {
     console.error('Profile picture upload error:', error);
-    res.status(500).json({ 
-      message: 'Failed to upload profile picture', 
-      error: error.message 
+    res.status(500).json({
+      message: 'Failed to upload profile picture',
+      error: error.message
     });
   }
 });
