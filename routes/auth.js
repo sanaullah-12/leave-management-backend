@@ -245,8 +245,8 @@ router.post('/invite-employee', authenticateToken, async (req, res) => {
       console.error('❌ Email sending error:', emailError.message);
       console.error('❌ Full email error:', emailError);
 
-      // Return success but with email warning - don't fail the invitation
-      return res.status(201).json({
+      // Return partial success with warning status - don't fail the invitation but indicate email issue
+      return res.status(202).json({
         message: 'Employee invitation created successfully, but email delivery failed. Please share the invitation link manually.',
         warning: 'Email delivery failed',
         emailError: emailError.message,
