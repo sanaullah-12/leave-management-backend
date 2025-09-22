@@ -15,7 +15,8 @@ const sendEmail = async (options) => {
   const sendGridKey = process.env.SendGrid_Key || process.env.SENDGRID_API_KEY;
   const isSendGridConfigured = sendGridKey &&
                                sendGridKey !== 'your_sendgrid_api_key_here' &&
-                               sendGridKey.length > 10;
+                               sendGridKey.startsWith('SG.') &&
+                               sendGridKey.length > 50; // SendGrid keys are typically 69 characters
 
   console.log('🔍 Email provider check:');
   console.log('  - Is Production:', isProduction);
