@@ -48,12 +48,6 @@ const sendEmail = async (options) => {
       html: options.html,
       text: options.text,
       categories: ['leave-management', options.category || 'general'],
-      mailSettings: {
-        spamCheck: {
-          enable: true,
-          threshold: 1
-        }
-      },
       trackingSettings: {
         clickTracking: { enable: false },
         openTracking: { enable: false },
