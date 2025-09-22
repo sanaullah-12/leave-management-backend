@@ -104,7 +104,73 @@ const sendEmail = async (options) => {
       console.error('  - From email:', process.env.FROM_EMAIL);
       console.error('  - SendGrid Key (first 10 chars):', sendGridKey ? sendGridKey.substring(0, 10) : 'NOT SET');
 
-      throw new Error(`SendGrid sending failed: ${error.message}. ${errorHint}`);
+      // PRODUCTION FIX: Fall back to SMTP if SendGrid fails
+      console.warn('🔄 SendGrid failed, attempting SMTP fallback...');
+
+      // Validate SMTP configuration
+      if (!process.env.SMTP_HOST || !process.env.SMTP_EMAIL || !process.env.SMTP_PASSWORD) {
+        throw new Error(`SendGrid failed and SMTP not configured. SendGrid error: ${error.message}. ${errorHint}`);
+      }
+
+      // Create SMTP transporter for fallback
+      const transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST,
+        port: process.env.SMTP_PORT,
+        secure: process.env.SMTP_PORT === '465',
+        auth: {
+          user: process.env.SMTP_EMAIL,
+          pass: process.env.SMTP_PASSWORD,
+        },
+        pool: true,
+        rateLimit: true,
+        maxConnections: 3,
+        maxMessages: 100,
+        connectionTimeout: 60000,
+        greetingTimeout: 30000,
+        socketTimeout: 60000,
+        dnsTimeout: 30000,
+        tls: {
+          rejectUnauthorized: isProduction,
+          ciphers: 'SSLv3'
+        }
+      });
+
+      const mailOptions = {
+        from: {
+          name: process.env.FROM_NAME || 'Leave Management System',
+          address: process.env.FROM_EMAIL,
+        },
+        to: options.email,
+        subject: options.subject,
+        html: options.html,
+        text: options.text,
+        headers: {
+          'X-Priority': '3',
+          'X-MSMail-Priority': 'Normal',
+          'Importance': 'Normal',
+          'List-Unsubscribe': `<mailto:${process.env.FROM_EMAIL}?subject=unsubscribe>`,
+          'X-Entity-Ref-ID': `lms-${Date.now()}`,
+          'Return-Path': process.env.FROM_EMAIL,
+          'Reply-To': process.env.FROM_EMAIL
+        },
+        dsn: {
+          id: `lms-${Date.now()}`,
+          return: 'headers',
+          notify: ['success', 'failure', 'delay'],
+          recipient: process.env.FROM_EMAIL,
+        },
+      };
+
+      try {
+        console.log('📤 Sending via SMTP fallback after SendGrid failure...');
+        const info = await transporter.sendMail(mailOptions);
+        console.log('✅ Email sent successfully via SMTP fallback!');
+        console.log('✉️ Message ID:', info.messageId);
+        return { success: true, messageId: info.messageId, provider: 'SMTP-Fallback' };
+      } catch (smtpError) {
+        console.error('❌ SMTP fallback also failed:', smtpError.message);
+        throw new Error(`Both SendGrid and SMTP failed. SendGrid: ${error.message}. SMTP: ${smtpError.message}`);
+      }
     }
   } else {
     // Use SMTP for development or fallback
