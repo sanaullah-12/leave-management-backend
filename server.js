@@ -32,6 +32,7 @@ console.log("===============================");
 const authRoutes = require("./routes/auth");
 const leaveRoutes = require("./routes/leaves");
 const userRoutes = require("./routes/users");
+const debugRoutes = require("./routes/debug");
 // const notificationRoutes = require("./routes/notifications"); // Removed for Socket.IO implementation
 
 const app = express();
@@ -285,6 +286,7 @@ process.on('unhandledRejection', (reason, promise) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/leaves", leaveRoutes);
 app.use("/api/users", userRoutes);
+app.use("/api/debug", debugRoutes);
 // app.use("/api/notifications", notificationRoutes); // Removed for Socket.IO implementation
 
 // Health check route with database status
