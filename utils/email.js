@@ -49,10 +49,25 @@ const sendEmail = async (options) => {
       html: options.html,
       text: options.text,
       categories: ['leave-management', options.category || 'general'],
+      headers: {
+        'X-Priority': '3',
+        'X-MSMail-Priority': 'Normal',
+        'Importance': 'Normal',
+        'X-Mailer': 'Leave Management System v1.0',
+        'List-Unsubscribe': `<mailto:${process.env.FROM_EMAIL}?subject=unsubscribe>`,
+        'Return-Path': process.env.FROM_EMAIL,
+        'Reply-To': process.env.FROM_EMAIL,
+        'X-Entity-Ref-ID': `lms-${Date.now()}`,
+        'Message-ID': `<${Date.now()}.${Math.random().toString(36).substr(2, 9)}@leavemanagement.system>`
+      },
       trackingSettings: {
         clickTracking: { enable: false },
         openTracking: { enable: false },
         subscriptionTracking: { enable: false }
+      },
+      asm: {
+        group_id: 1, // Use default unsubscribe group
+        groups_to_display: [1]
       }
     };
 
@@ -276,25 +291,29 @@ const sendInvitationEmail = async (user, invitationToken, invitedByName, role = 
   
   // Plain text version for better deliverability
   const textContent = `
-You're Invited to Join ${user.company}!
+Account Setup Required - ${user.company}
 
 Hello ${user.name},
 
 ${invitedByName} has invited you to join the Leave Management System for ${user.company} as ${role === 'admin' ? 'an Administrator' : 'an Employee'}.
 
 Your Account Details:
-- Email: ${user.email}
+- Email Address: ${user.email}
 - Role: ${role.charAt(0).toUpperCase() + role.slice(1)}
 - Department: ${user.department}
 - Position: ${user.position}
 
-To accept this invitation and set your password, please visit:
+To complete your account setup and create your password, please visit:
 ${verifyUrl}
 
-Note: This invitation link will expire in 7 days. If you don't recognize this invitation, you can safely ignore this email.
+Important Information:
+- This setup link will expire in 7 days for security reasons
+- If you did not expect this invitation, please ignore this email
+- For assistance, contact your system administrator
 
 ---
-This is an automated email from Leave Management System. Please do not reply to this message.
+This is an automated message from ${user.company} Leave Management System.
+Do not reply to this email address.
   `;
   
   const html = `
@@ -329,7 +348,7 @@ This is an automated email from Leave Management System. Please do not reply to 
           </div>
           
           <div style="margin-bottom: 30px;">
-            <h2 style="color: #1a1a1a; margin-bottom: 10px; font-size: 24px; font-weight: 600;">You're Invited to Join Our Team! 🎉</h2>
+            <h2 style="color: #1a1a1a; margin-bottom: 10px; font-size: 24px; font-weight: 600;">Account Setup Required</h2>
             
             <p style="font-size: 16px; line-height: 1.6; color: #4a4a4a; margin-bottom: 20px;">Hello <strong>${user.name}</strong>,</p>
             
@@ -349,8 +368,8 @@ This is an automated email from Leave Management System. Please do not reply to 
           </div>
           
           <div style="text-align: center; margin: 40px 0;">
-            <a href="${verifyUrl}" class="button" style="display: inline-block; background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); color: white; padding: 16px 32px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px; box-shadow: 0 4px 14px rgba(37, 99, 235, 0.3); transition: all 0.3s ease;">
-              🚀 Accept Invitation & Set Password
+            <a href="${verifyUrl}" class="button" style="display: inline-block; background: #2563eb; color: white; padding: 16px 32px; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 16px;">
+              Complete Account Setup
             </a>
           </div>
           
@@ -382,7 +401,7 @@ This is an automated email from Leave Management System. Please do not reply to 
 
   await sendEmail({
     email: user.email,
-    subject: `🎉 Welcome to ${user.company} - Your invitation awaits!`,
+    subject: `Welcome to ${user.company} - Account Setup Required`,
     html,
     text: textContent,
     category: 'invitation'
