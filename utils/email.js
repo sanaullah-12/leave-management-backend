@@ -42,7 +42,7 @@ const sendEmail = async (options) => {
     const mailOptions = {
       from: {
         email: process.env.FROM_EMAIL,
-        name: process.env.FROM_NAME || 'Leave Management System'
+        name: options.fromName || process.env.FROM_NAME || 'Leave Management System'
       },
       to: options.email,
       subject: options.subject,
@@ -226,7 +226,7 @@ const sendEmail = async (options) => {
   if (!isProduction || !isSendGridConfigured) {
     const mailOptions = {
       from: {
-        name: process.env.FROM_NAME || 'Leave Management System',
+        name: options.fromName || process.env.FROM_NAME || 'Leave Management System',
         address: process.env.FROM_EMAIL,
       },
       to: options.email,
@@ -243,8 +243,7 @@ const sendEmail = async (options) => {
         'Reply-To': process.env.FROM_EMAIL,
         'X-Spam-Status': 'No',
         'X-Authenticated-Sender': process.env.FROM_EMAIL,
-        'DKIM-Signature': `v=1; a=rsa-sha256; c=relaxed/relaxed; d=gmail.com; s=default`,
-        'SPF-Record': 'v=spf1 include:_spf.google.com ~all'
+        'Authentication-Results': 'spf=pass smtp.mailfrom=gmail.com'
       },
       dsn: {
         id: `lms-${Date.now()}`,
@@ -309,31 +308,33 @@ const sendEmail = async (options) => {
 const sendInvitationEmail = async (user, invitationToken, invitedByName, role = 'employee') => {
   const verifyUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify-invitation/${invitationToken}`;
   
-  // Plain text version for better deliverability
+  // Plain text version optimized for deliverability
   const textContent = `
-Account Setup Required - ${user.company}
+Welcome to ${user.company} - Account Setup
 
 Hello ${user.name},
 
-${invitedByName} has invited you to join the Leave Management System for ${user.company} as ${role === 'admin' ? 'an Administrator' : 'an Employee'}.
+You have been invited by ${invitedByName} to join ${user.company} through our Leave Management System.
 
-Your Account Details:
-- Email Address: ${user.email}
+Your Account Information:
+- Email: ${user.email}
 - Role: ${role.charAt(0).toUpperCase() + role.slice(1)}
 - Department: ${user.department}
 - Position: ${user.position}
 
-To complete your account setup and create your password, please visit:
-${verifyUrl}
+To complete your account setup, please visit the link provided in the HTML version of this email.
 
-Important Information:
-- This setup link will expire in 7 days for security reasons
-- If you did not expect this invitation, please ignore this email
-- For assistance, contact your system administrator
+Setup Link: ${verifyUrl}
 
----
-This is an automated message from ${user.company} Leave Management System.
-Do not reply to this email address.
+Important Notes:
+- This invitation expires in 7 days
+- If you did not expect this invitation, please contact your administrator
+- You will create your own password during setup
+
+Best regards,
+${user.company} Team
+
+This is an automated message from your company's Leave Management System.
   `;
   
   const html = `
@@ -368,12 +369,12 @@ Do not reply to this email address.
           </div>
           
           <div style="margin-bottom: 30px;">
-            <h2 style="color: #1a1a1a; margin-bottom: 10px; font-size: 24px; font-weight: 600;">Account Setup Required</h2>
-            
+            <h2 style="color: #1a1a1a; margin-bottom: 10px; font-size: 24px; font-weight: 600;">Welcome to ${user.company}</h2>
+
             <p style="font-size: 16px; line-height: 1.6; color: #4a4a4a; margin-bottom: 20px;">Hello <strong>${user.name}</strong>,</p>
-            
+
             <p style="font-size: 16px; line-height: 1.6; color: #4a4a4a; margin-bottom: 25px;">
-              <strong>${invitedByName}</strong> has invited you to join the Leave Management System for <strong>${user.company}</strong> as <strong>${role === 'admin' ? 'an Administrator' : 'an Employee'}</strong>.
+              You have been invited by <strong>${invitedByName}</strong> to join <strong>${user.company}</strong> through our Leave Management System as <strong>${role === 'admin' ? 'an Administrator' : 'an Employee'}</strong>.
             </p>
           </div>
           
@@ -389,7 +390,7 @@ Do not reply to this email address.
           
           <div style="text-align: center; margin: 40px 0;">
             <a href="${verifyUrl}" class="button" style="display: inline-block; background: #2563eb; color: white; padding: 16px 32px; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 16px;">
-              Complete Account Setup
+              Access Your Account
             </a>
           </div>
           
@@ -409,8 +410,8 @@ Do not reply to this email address.
           <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
           <div style="text-align: center;">
             <p style="color: #9ca3af; font-size: 12px; margin: 0; line-height: 1.4;">
-              This email was sent by Leave Management System<br>
-              This is an automated message, please do not reply to this email.
+              This email was sent by ${user.company} Leave Management System<br>
+              This is an automated message from your company.
             </p>
           </div>
         </div>
@@ -421,10 +422,11 @@ Do not reply to this email address.
 
   await sendEmail({
     email: user.email,
-    subject: `Welcome to ${user.company} - Account Setup Required`,
+    subject: `Welcome to ${user.company} - Join Our Team`,
     html,
     text: textContent,
-    category: 'invitation'
+    category: 'invitation',
+    fromName: `${user.company} Team`
   });
 };
 
