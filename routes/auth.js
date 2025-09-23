@@ -212,62 +212,40 @@ router.post('/invite-employee', authenticateToken, async (req, res) => {
     
     await employee.save();
 
-    // Send invitation email
+    // Send invitation email asynchronously (non-blocking)
     const { sendInvitationEmail } = require('../utils/email');
-    console.log('🚀 Sending invitation email to:', email);
-    
-    try {
-      await sendInvitationEmail(
-        {
-          ...employee.toObject(),
-          company: req.user.company.name
-        },
-        invitationToken,
-        req.user.name,
-        'employee'
-      );
+    console.log('🚀 Starting async invitation email to:', email);
 
-      console.log('✅ Invitation email sent successfully');
-      res.status(201).json({
-        message: 'Employee invitation sent successfully',
-        employee: {
-          id: employee._id,
-          name: employee.name,
-          email: employee.email,
-          employeeId: employee.employeeId,
-          department: employee.department,
-          position: employee.position,
-          status: employee.status
-        }
-      });
+    // Immediately respond to frontend with success
+    res.status(201).json({
+      message: 'Employee invitation sent successfully',
+      employee: {
+        id: employee._id,
+        name: employee.name,
+        email: employee.email,
+        employeeId: employee.employeeId,
+        department: employee.department,
+        position: employee.position,
+        status: employee.status
+      }
+    });
 
-    } catch (emailError) {
-      console.error('❌ Email sending error:', emailError.message);
+    // Send email asynchronously without blocking the response
+    sendInvitationEmail(
+      {
+        ...employee.toObject(),
+        company: req.user.company.name
+      },
+      invitationToken,
+      req.user.name,
+      'employee'
+    ).then(() => {
+      console.log('✅ Invitation email sent successfully to:', email);
+    }).catch((emailError) => {
+      console.error('❌ Async email sending error for', email, ':', emailError.message);
       console.error('❌ Full email error:', emailError);
-
-      // Return partial success with warning status - don't fail the invitation but indicate email issue
-      return res.status(202).json({
-        message: 'Employee invitation created successfully, but email delivery failed. Please share the invitation link manually.',
-        warning: 'Email delivery failed',
-        emailError: emailError.message,
-        employee: {
-          id: employee._id,
-          name: employee.name,
-          email: employee.email,
-          employeeId: employee.employeeId,
-          department: employee.department,
-          position: employee.position,
-          status: employee.status
-        },
-        invitationToken: invitationToken, // Include token for manual sharing
-        manualInviteUrl: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify-invitation/${invitationToken}`,
-        troubleshooting: {
-          message: 'Check Railway logs for detailed email configuration issues',
-          debugEndpoint: '/api/debug/email-config',
-          testEndpoint: '/api/debug/test-email'
-        }
-      });
-    }
+      // Email failure doesn't affect the invitation creation since we already responded
+    });
 
   } catch (error) {
     console.error('Invite error:', error);
