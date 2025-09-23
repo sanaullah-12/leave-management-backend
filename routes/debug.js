@@ -37,16 +37,34 @@ router.get('/email-config', (req, res) => {
   res.json(emailConfig);
 });
 
-// Test email endpoint
+// Test email endpoint with detailed logging
 router.post('/test-email', async (req, res) => {
   try {
     const { sendEmail } = require('../utils/email');
+    const testEmail = req.body.email || 'qazisanaullah612@gmail.com';
+
+    console.log('🧪 Debug email test initiated for:', testEmail);
 
     const result = await sendEmail({
-      email: req.body.email || 'test@example.com',
-      subject: 'Production Email Test',
-      html: '<h2>Production Test</h2><p>This is a test email from production environment.</p>',
-      text: 'Production Test - This is a test email from production environment.',
+      email: testEmail,
+      subject: 'Production Email Test - Delivery Check',
+      html: `
+        <h2>🧪 Production Email Test</h2>
+        <p>This is a test email from production environment.</p>
+        <p><strong>Timestamp:</strong> ${new Date().toISOString()}</p>
+        <p><strong>Environment:</strong> ${process.env.NODE_ENV}</p>
+        <p><strong>Server:</strong> Railway Production</p>
+        <div style="background: #f0f9ff; padding: 15px; border-radius: 8px; margin: 20px 0;">
+          <h3>📧 Delivery Test</h3>
+          <p>If you receive this email, the email system is working correctly.</p>
+          <ul>
+            <li>✅ SMTP Authentication: Working</li>
+            <li>✅ Email Sending: Successful</li>
+            <li>✅ HTML Rendering: Working</li>
+          </ul>
+        </div>
+      `,
+      text: `Production Email Test\n\nThis is a test email from production environment.\nTimestamp: ${new Date().toISOString()}\nEnvironment: ${process.env.NODE_ENV}\n\nIf you receive this email, the email system is working correctly.`,
       category: 'test'
     });
 

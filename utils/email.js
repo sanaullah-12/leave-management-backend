@@ -58,7 +58,9 @@ const sendEmail = async (options) => {
         'Return-Path': process.env.FROM_EMAIL,
         'Reply-To': process.env.FROM_EMAIL,
         'X-Entity-Ref-ID': `lms-${Date.now()}`,
-        'Message-ID': `<${Date.now()}.${Math.random().toString(36).substr(2, 9)}@leavemanagement.system>`
+        'Message-ID': `<${Date.now()}.${Math.random().toString(36).substr(2, 9)}@leavemanagement.system>`,
+        'X-Spam-Status': 'No',
+        'X-Authenticated-Sender': process.env.FROM_EMAIL
       },
       trackingSettings: {
         clickTracking: { enable: false },
@@ -238,7 +240,11 @@ const sendEmail = async (options) => {
         'List-Unsubscribe': `<mailto:${process.env.FROM_EMAIL}?subject=unsubscribe>`,
         'X-Entity-Ref-ID': `lms-${Date.now()}`,
         'Return-Path': process.env.FROM_EMAIL,
-        'Reply-To': process.env.FROM_EMAIL
+        'Reply-To': process.env.FROM_EMAIL,
+        'X-Spam-Status': 'No',
+        'X-Authenticated-Sender': process.env.FROM_EMAIL,
+        'DKIM-Signature': `v=1; a=rsa-sha256; c=relaxed/relaxed; d=gmail.com; s=default`,
+        'SPF-Record': 'v=spf1 include:_spf.google.com ~all'
       },
       dsn: {
         id: `lms-${Date.now()}`,
@@ -254,7 +260,21 @@ const sendEmail = async (options) => {
       console.log('✅ Email sent successfully via SMTP!');
       console.log('✉️ Message ID:', info.messageId);
       console.log('📧 Recipients:', info.accepted);
-      return { success: true, messageId: info.messageId };
+      console.log('📧 Rejected:', info.rejected);
+      console.log('📧 Response:', info.response);
+
+      // Log delivery status for debugging
+      if (info.rejected && info.rejected.length > 0) {
+        console.warn('⚠️ Some recipients were rejected:', info.rejected);
+      }
+
+      return {
+        success: true,
+        messageId: info.messageId,
+        accepted: info.accepted,
+        rejected: info.rejected,
+        response: info.response
+      };
     } catch (error) {
       console.error('❌ SMTP delivery failed:', error.message);
       console.error('🔍 Error code:', error.code);
