@@ -217,25 +217,12 @@ router.post('/invite-employee', authenticateToken, async (req, res) => {
     console.log('🚀 Starting invitation email (synchronous) to:', email);
 
     try {
-      console.log('🔍 DEBUG: Starting invitation email process');
-      console.log('🔍 Request body:', JSON.stringify(req.body, null, 2));
-      console.log('🔍 Recipient email:', email);
-      console.log('🔍 Inviter name:', req.user.name);
-      console.log('🔍 Company name:', req.user.company.name);
-      console.log('🔍 Employee object keys:', Object.keys(employee.toObject()));
-      console.log('🔍 Invitation token length:', invitationToken?.length);
+      console.log('📧 Sending invitation email to:', email);
 
       const emailPayload = {
         ...employee.toObject(),
         company: req.user.company.name
       };
-      console.log('🔍 Email payload keys:', Object.keys(emailPayload));
-      console.log('🔍 Environment check:');
-      console.log('  - NODE_ENV:', process.env.NODE_ENV);
-      console.log('  - SMTP_HOST:', process.env.SMTP_HOST);
-      console.log('  - SMTP_EMAIL:', process.env.SMTP_EMAIL);
-      console.log('  - FROM_EMAIL:', process.env.FROM_EMAIL);
-      console.log('  - FRONTEND_URL:', process.env.FRONTEND_URL);
 
       const emailResult = await sendInvitationEmail(
         emailPayload,
@@ -244,12 +231,8 @@ router.post('/invite-employee', authenticateToken, async (req, res) => {
         'employee'
       );
 
-      console.log('✅ VERBOSE: Invitation email sent successfully to:', email);
-      console.log('✅ SMTP Response:', JSON.stringify(emailResult, null, 2));
+      console.log('✅ Invitation email sent successfully to:', email);
       console.log('✅ Message ID:', emailResult.messageId);
-      console.log('✅ Accepted:', emailResult.accepted);
-      console.log('✅ Rejected:', emailResult.rejected);
-      console.log('✅ Provider:', emailResult.provider);
 
       // Respond with success including email confirmation
       res.status(201).json({
@@ -268,13 +251,7 @@ router.post('/invite-employee', authenticateToken, async (req, res) => {
       });
 
     } catch (emailError) {
-      console.error('❌ VERBOSE: Email sending error for', email);
-      console.error('❌ Error message:', emailError.message);
-      console.error('❌ Error code:', emailError.code);
-      console.error('❌ Error response:', emailError.response);
-      console.error('❌ Error responseCode:', emailError.responseCode);
-      console.error('❌ Full email error stack:', emailError.stack);
-      console.error('❌ Full email error object:', JSON.stringify(emailError, Object.getOwnPropertyNames(emailError), 2));
+      console.error('❌ Email sending failed for', email, '- Error:', emailError.message);
 
       // Still respond with success for employee creation, but note email failure
       res.status(201).json({
