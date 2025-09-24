@@ -180,21 +180,45 @@ router.post('/login', async (req, res) => {
 
 // Invite employee
 router.post('/invite-employee', authenticateToken, async (req, res) => {
+  const startTime = Date.now();
+  const timeoutMs = 25000; // 25 second timeout
+
+  // Set up timeout to prevent hanging
+  const timeoutHandler = setTimeout(() => {
+    if (!res.headersSent) {
+      console.error('🚨 INVITE ROUTE TIMEOUT after 25 seconds');
+      res.status(408).json({
+        message: 'Request timeout - email processing took too long',
+        error: 'TIMEOUT_ERROR',
+        timestamp: new Date().toISOString()
+      });
+    }
+  }, timeoutMs);
+
   try {
+    console.log('🚀 INVITE ROUTE START:', new Date().toISOString());
+
     // Only admins can invite employees
     if (req.user.role !== 'admin') {
+      clearTimeout(timeoutHandler);
       return res.status(403).json({ message: 'Only admins can invite employees' });
     }
 
     const { name, email, department, position, joinDate } = req.body;
+    console.log('📝 Processing invite for:', email);
 
     // Check if email already exists
+    console.log('🔍 Checking for existing user:', email);
     const existingUser = await User.findOne({ email });
     if (existingUser) {
+      clearTimeout(timeoutHandler);
+      console.log('❌ Email already exists:', email);
       return res.status(400).json({ message: 'Email already registered' });
     }
+    console.log('✅ Email available:', email);
 
     // Create employee with pending status (no password yet)
+    console.log('👤 Creating employee record...');
     const employee = new User({
       name,
       email,
@@ -208,9 +232,15 @@ router.post('/invite-employee', authenticateToken, async (req, res) => {
     });
 
     // Generate invitation token
+    console.log('🔑 Generating invitation token...');
+    const tokenStart = Date.now();
     const invitationToken = employee.generateInvitationToken();
-    
+    console.log(`✅ Token generated in ${Date.now() - tokenStart}ms`);
+
+    console.log('💾 Saving employee to database...');
+    const saveStart = Date.now();
     await employee.save();
+    console.log(`✅ Employee saved in ${Date.now() - saveStart}ms`);
 
     // Send invitation email synchronously to ensure it works
     const { sendInvitationEmail } = require('../utils/email');
@@ -231,52 +261,86 @@ router.post('/invite-employee', authenticateToken, async (req, res) => {
         'employee'
       );
 
+      const totalTime = Date.now() - startTime;
       console.log('✅ Invitation email sent successfully to:', email);
       console.log('✅ Message ID:', emailResult.messageId);
+      console.log(`✅ Total invite process time: ${totalTime}ms`);
 
-      // Respond with success including email confirmation
-      res.status(201).json({
-        message: 'Employee invitation sent successfully',
-        employee: {
-          id: employee._id,
-          name: employee.name,
-          email: employee.email,
-          employeeId: employee.employeeId,
-          department: employee.department,
-          position: employee.position,
-          status: employee.status
-        },
-        emailSent: true,
-        emailMessageId: emailResult.messageId
-      });
+      // Clear timeout and respond with success
+      clearTimeout(timeoutHandler);
+
+      if (!res.headersSent) {
+        res.status(201).json({
+          message: 'Employee invitation sent successfully',
+          employee: {
+            id: employee._id,
+            name: employee.name,
+            email: employee.email,
+            employeeId: employee.employeeId,
+            department: employee.department,
+            position: employee.position,
+            status: employee.status
+          },
+          emailSent: true,
+          emailMessageId: emailResult.messageId,
+          processingTime: totalTime
+        });
+        console.log('📤 SUCCESS response sent to frontend');
+      } else {
+        console.log('⚠️ Headers already sent, skipping response');
+      }
 
     } catch (emailError) {
+      const totalTime = Date.now() - startTime;
       console.error('❌ Email sending failed for', email, '- Error:', emailError.message);
+      console.error(`❌ Failed after ${totalTime}ms`);
 
-      // Still respond with success for employee creation, but note email failure
-      res.status(201).json({
-        message: 'Employee invitation created but email failed',
-        employee: {
-          id: employee._id,
-          name: employee.name,
-          email: employee.email,
-          employeeId: employee.employeeId,
-          department: employee.department,
-          position: employee.position,
-          status: employee.status
-        },
-        emailSent: false,
-        emailError: emailError.message,
-        warning: 'Email delivery failed - please contact the employee manually'
-      });
+      // Clear timeout and respond with email failure
+      clearTimeout(timeoutHandler);
+
+      if (!res.headersSent) {
+        res.status(201).json({
+          message: 'Employee invitation created but email failed',
+          employee: {
+            id: employee._id,
+            name: employee.name,
+            email: employee.email,
+            employeeId: employee.employeeId,
+            department: employee.department,
+            position: employee.position,
+            status: employee.status
+          },
+          emailSent: false,
+          emailError: emailError.message,
+          warning: 'Email delivery failed - please contact the employee manually',
+          processingTime: totalTime
+        });
+        console.log('📤 ERROR response sent to frontend');
+      } else {
+        console.log('⚠️ Headers already sent, skipping error response');
+      }
     }
 
   } catch (error) {
-    console.error('Invite error:', error);
-    res.status(500).json({ 
-      message: 'Failed to invite employee', 
-      error: error.message 
-    });
+    const totalTime = Date.now() - startTime;
+    console.error('💥 Invite route fatal error:', error.message);
+    console.error(`💥 Failed after ${totalTime}ms`);
+    console.error('💥 Full error:', error);
+
+    // Clear timeout and send error response
+    clearTimeout(timeoutHandler);
+
+    if (!res.headersSent) {
+      res.status(500).json({
+        message: 'Failed to invite employee',
+        error: error.message,
+        processingTime: totalTime,
+        timestamp: new Date().toISOString()
+      });
+      console.log('📤 FATAL ERROR response sent to frontend');
+    } else {
+      console.log('⚠️ Headers already sent, cannot send error response');
+    }
   }
 });
 
