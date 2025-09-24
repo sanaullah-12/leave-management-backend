@@ -351,6 +351,19 @@ process.on("unhandledRejection", (reason, promise) => {
   // Don't exit immediately - log and continue
 });
 
+// Global request logging for debugging invite issues
+app.use('/api/auth/invite-employee', (req, res, next) => {
+  console.log('🔴 === INTERCEPTED INVITE REQUEST ===');
+  console.log('🔴 Timestamp:', new Date().toISOString());
+  console.log('🔴 Method:', req.method);
+  console.log('🔴 URL:', req.url);
+  console.log('🔴 Body:', JSON.stringify(req.body));
+  console.log('🔴 Content-Type:', req.headers['content-type']);
+  console.log('🔴 Authorization:', req.headers.authorization ? 'Present' : 'Missing');
+  console.log('🔴 === FORWARDING TO ROUTE ===');
+  next();
+});
+
 // Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/leaves", leaveRoutes);
