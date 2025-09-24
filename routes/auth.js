@@ -180,6 +180,12 @@ router.post('/login', async (req, res) => {
 
 // Invite employee
 router.post('/invite-employee', authenticateToken, async (req, res) => {
+  console.log('🟢 === INVITE ROUTE HIT === REQUEST RECEIVED ===');
+  console.log('🟢 Method:', req.method, 'URL:', req.url);
+  console.log('🟢 Body:', req.body);
+  console.log('🟢 User:', req.user?.email);
+  console.log('🟢 Headers:', req.headers['content-type']);
+
   const startTime = Date.now();
   const timeoutMs = 25000; // 25 second timeout
 
