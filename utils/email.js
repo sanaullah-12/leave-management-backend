@@ -63,7 +63,11 @@ const sendEmail = async (options) => {
         pass: process.env.SMTP_PASSWORD,
       },
       debug: process.env.NODE_ENV !== 'production',
-      logger: process.env.NODE_ENV !== 'production'
+      logger: process.env.NODE_ENV !== 'production',
+      // Enhanced delivery settings
+      pool: true,
+      maxConnections: 3,
+      maxMessages: 100
     });
 
     const mailOptions = {
@@ -74,7 +78,25 @@ const sendEmail = async (options) => {
       to: options.email,
       subject: options.subject,
       html: options.html,
-      text: options.text || options.html?.replace(/<[^>]*>/g, '') || options.subject
+      text: options.text || options.html?.replace(/<[^>]*>/g, '') || options.subject,
+      // Enhanced headers for better deliverability
+      headers: {
+        'X-Priority': '3',
+        'X-MSMail-Priority': 'Normal',
+        'Importance': 'Normal',
+        'X-Mailer': 'Leave Management System v1.0',
+        'List-Unsubscribe': `<mailto:${process.env.FROM_EMAIL}?subject=unsubscribe>`,
+        'Return-Path': process.env.FROM_EMAIL,
+        'Reply-To': process.env.FROM_EMAIL,
+        'Message-ID': `<${Date.now()}.${Math.random().toString(36).substr(2, 9)}@gmail.com>`,
+        'X-Entity-Ref-ID': `lms-${Date.now()}`,
+        // Anti-spam headers
+        'X-Spam-Status': 'No',
+        'X-Auto-Response-Suppress': 'OOF, DR, RN, NRN, AutoReply',
+        'Precedence': 'list',
+        // Authentication hints
+        'X-Authenticated-Sender': process.env.FROM_EMAIL
+      }
     };
 
     try {
@@ -97,56 +119,108 @@ const sendEmail = async (options) => {
 const sendInvitationEmail = async (user, invitationToken, invitedByName, role = 'employee') => {
   const verifyUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify-invitation/${invitationToken}`;
 
+  // Plain text version for better deliverability
+  const textContent = `
+Team Invitation - ${user.company}
+
+Hello ${user.name},
+
+${invitedByName} has invited you to join ${user.company}'s team using our Leave Management System.
+
+Your Account Information:
+- Email: ${user.email}
+- Role: ${role.charAt(0).toUpperCase() + role.slice(1)}
+- Department: ${user.department}
+- Position: ${user.position}
+
+To accept this invitation and set up your account, please visit:
+${verifyUrl}
+
+This invitation will expire in 7 days.
+
+If you have any questions, please contact ${invitedByName} or your HR department.
+
+Best regards,
+${user.company} Team
+
+---
+This is an automated invitation from ${user.company}. If you did not expect this invitation, you can safely ignore this email.
+  `;
+
   const html = `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
-      <div style="text-align: center; margin-bottom: 30px;">
-        <h1 style="color: #2563eb; margin: 0;">Leave Management System</h1>
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Team Invitation - ${user.company}</title>
+    </head>
+    <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; background-color: #f5f5f5;">
+      <div style="max-width: 600px; margin: 20px auto; background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+
+        <!-- Header -->
+        <div style="background: #2563eb; color: white; padding: 30px; text-align: center; border-radius: 8px 8px 0 0;">
+          <h1 style="margin: 0; font-size: 24px; font-weight: 600;">Team Invitation</h1>
+          <p style="margin: 10px 0 0 0; opacity: 0.9;">${user.company}</p>
+        </div>
+
+        <!-- Content -->
+        <div style="padding: 40px 30px;">
+          <h2 style="color: #1f2937; margin: 0 0 20px 0; font-size: 20px;">Hello ${user.name},</h2>
+
+          <p style="margin: 0 0 20px 0; color: #4b5563; font-size: 16px;">
+            <strong>${invitedByName}</strong> has invited you to join the <strong>${user.company}</strong> team using our Leave Management System.
+          </p>
+
+          <!-- Account Details -->
+          <div style="background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 20px; margin: 25px 0;">
+            <h3 style="margin: 0 0 15px 0; color: #1f2937; font-size: 16px;">Your Account Details</h3>
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr><td style="padding: 6px 0; color: #6b7280; width: 100px;">Email:</td><td style="padding: 6px 0; color: #1f2937; font-weight: 500;">${user.email}</td></tr>
+              <tr><td style="padding: 6px 0; color: #6b7280;">Role:</td><td style="padding: 6px 0; color: #1f2937; font-weight: 500;">${role.charAt(0).toUpperCase() + role.slice(1)}</td></tr>
+              <tr><td style="padding: 6px 0; color: #6b7280;">Department:</td><td style="padding: 6px 0; color: #1f2937; font-weight: 500;">${user.department}</td></tr>
+              <tr><td style="padding: 6px 0; color: #6b7280;">Position:</td><td style="padding: 6px 0; color: #1f2937; font-weight: 500;">${user.position}</td></tr>
+            </table>
+          </div>
+
+          <!-- Action Button -->
+          <div style="text-align: center; margin: 35px 0;">
+            <a href="${verifyUrl}" style="display: inline-block; background: #2563eb; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 16px;">Accept Invitation</a>
+          </div>
+
+          <!-- Important Notice -->
+          <div style="background: #fef3c7; border: 1px solid #f59e0b; border-radius: 6px; padding: 15px; margin: 25px 0;">
+            <p style="margin: 0; color: #92400e; font-size: 14px;">
+              <strong>⏰ Important:</strong> This invitation expires in 7 days. If you don't recognize this invitation, please contact your HR department.
+            </p>
+          </div>
+
+          <!-- Backup Link -->
+          <div style="background: #f3f4f6; padding: 15px; border-radius: 6px; margin: 25px 0;">
+            <p style="margin: 0; font-size: 13px; color: #6b7280;">
+              <strong>Can't click the button?</strong> Copy and paste this link:
+              <br><span style="word-break: break-all; color: #2563eb;">${verifyUrl}</span>
+            </p>
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <div style="background: #f9fafb; padding: 20px 30px; border-top: 1px solid #e5e7eb; border-radius: 0 0 8px 8px;">
+          <p style="margin: 0; font-size: 12px; color: #6b7280; text-align: center;">
+            This is an automated invitation from <strong>${user.company}</strong><br>
+            If you have questions, contact ${invitedByName} or your HR department
+          </p>
+        </div>
       </div>
-
-      <h2 style="color: #333; margin-bottom: 20px;">You're Invited!</h2>
-
-      <p style="font-size: 16px; line-height: 1.6; color: #444;">Hello ${user.name},</p>
-
-      <p style="font-size: 16px; line-height: 1.6; color: #444;">
-        ${invitedByName} has invited you to join the Leave Management System for <strong>${user.company}</strong> as ${role === 'admin' ? 'an Administrator' : 'an Employee'}.
-      </p>
-
-      <div style="background: #f8f9fa; padding: 20px; border-radius: 6px; margin: 25px 0;">
-        <h3 style="color: #333; margin-top: 0;">Your Account Details:</h3>
-        <ul style="list-style: none; padding: 0; margin: 0;">
-          <li style="padding: 5px 0;"><strong>Email:</strong> ${user.email}</li>
-          <li style="padding: 5px 0;"><strong>Role:</strong> ${role.charAt(0).toUpperCase() + role.slice(1)}</li>
-          <li style="padding: 5px 0;"><strong>Department:</strong> ${user.department}</li>
-          <li style="padding: 5px 0;"><strong>Position:</strong> ${user.position}</li>
-        </ul>
-      </div>
-
-      <div style="text-align: center; margin: 30px 0;">
-        <a href="${verifyUrl}" style="display: inline-block; background: #2563eb; color: white; padding: 14px 30px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px;">
-          Accept Invitation & Set Password
-        </a>
-      </div>
-
-      <p style="font-size: 14px; color: #666; line-height: 1.5;">
-        <strong>Note:</strong> This invitation link will expire in 7 days. If you don't recognize this invitation, you can safely ignore this email.
-      </p>
-
-      <p style="font-size: 14px; color: #666; line-height: 1.5;">
-        If the button above doesn't work, copy and paste this link into your browser:
-        <br><a href="${verifyUrl}" style="color: #2563eb; word-break: break-all;">${verifyUrl}</a>
-      </p>
-
-      <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
-      <p style="color: #999; font-size: 12px; text-align: center;">
-        This is an automated email from Leave Management System. Please do not reply to this message.
-      </p>
-    </div>
+    </body>
+    </html>
   `;
 
   await sendEmail({
     email: user.email,
-    subject: `Invitation to join ${user.company} - Leave Management System`,
-    html
+    subject: `Team Invitation - ${user.company}`,
+    html,
+    text: textContent
   });
 };
 
