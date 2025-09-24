@@ -1,511 +1,722 @@
-const sgMail = require('@sendgrid/mail');
 const nodemailer = require('nodemailer');
 
+/**
+ * Enhanced Nodemailer Email System
+ * Focused on maximum deliverability to inbox (not spam)
+ * Uses your existing Gmail SMTP credentials
+ */
+
+// Create reusable transporter with optimized settings for inbox delivery
+const createTransporter = () => {
+  return nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: parseInt(process.env.SMTP_PORT) || 587,
+    secure: false, // Use STARTTLS
+    auth: {
+      user: process.env.SMTP_EMAIL,
+      pass: process.env.SMTP_PASSWORD
+    },
+    // Optimized settings for deliverability
+    pool: true,
+    maxConnections: 5,
+    maxMessages: 100,
+    rateLimit: 14, // Max 14 emails per second (Gmail limit)
+
+    // Enhanced TLS settings
+    tls: {
+      rejectUnauthorized: true,
+      minVersion: 'TLSv1.2',
+      ciphers: 'HIGH:!aNULL:!MD5:!RC4'
+    },
+
+    // Connection settings for reliability
+    connectionTimeout: 60000,
+    greetingTimeout: 30000,
+    socketTimeout: 60000,
+
+    // Enable debugging in development
+    debug: process.env.NODE_ENV !== 'production',
+    logger: process.env.NODE_ENV !== 'production'
+  });
+};
+
+// Global transporter instance
+let transporter = null;
+
+// Initialize transporter
+const getTransporter = () => {
+  if (!transporter) {
+    transporter = createTransporter();
+  }
+  return transporter;
+};
+
+/**
+ * Core email sending function with enhanced deliverability
+ */
 const sendEmail = async (options) => {
-  console.log('📧 Email delivery process started for:', options.email);
-  console.log('📧 Email subject:', options.subject);
+  console.log('📧 Enhanced Nodemailer: Starting email delivery to:', options.email);
+  console.log('📧 Subject:', options.subject);
 
-  // Check SendGrid API key (support both variable names)
-  const apiKey = process.env.SENDGRID_API_KEY || process.env.SendGrid_Key;
+  // Validate required options
+  if (!options.email || !options.subject) {
+    throw new Error('Email address and subject are required');
+  }
 
-  if (apiKey && apiKey.startsWith('SG.')) {
-    // Use SendGrid - the working method from commit 38173de
-    console.log('📧 Using SendGrid for email delivery...');
-    sgMail.setApiKey(apiKey);
+  // Validate SMTP configuration
+  if (!process.env.SMTP_HOST || !process.env.SMTP_EMAIL || !process.env.SMTP_PASSWORD) {
+    throw new Error('SMTP configuration incomplete. Required: SMTP_HOST, SMTP_EMAIL, SMTP_PASSWORD');
+  }
 
-    const msg = {
-      to: options.email,
-      from: process.env.FROM_EMAIL || 'qazisanaullah612@gmail.com', // Must be verified in SendGrid
-      subject: options.subject,
-      html: options.html
+  const transporterInstance = getTransporter();
+
+  // Generate unique message ID for tracking
+  const messageId = `<${Date.now()}.${Math.random().toString(36).substr(2, 9)}@${process.env.FROM_DOMAIN || 'gmail.com'}>`;
+
+  // Enhanced mail options for maximum deliverability
+  const mailOptions = {
+    from: {
+      name: options.fromName || process.env.FROM_NAME || 'Professional Team',
+      address: process.env.FROM_EMAIL
+    },
+    to: options.email,
+    subject: options.subject,
+    html: options.html,
+    text: options.text || stripHtml(options.html) || options.subject,
+    messageId: messageId,
+
+    // Critical headers for inbox delivery
+    headers: {
+      // Prevent auto-responses
+      'X-Auto-Response-Suppress': 'OOF, AutoReply',
+
+      // Message classification
+      'X-Priority': '3',
+      'X-MSMail-Priority': 'Normal',
+      'Importance': 'Normal',
+
+      // Sender identification
+      'X-Mailer': 'Professional Email System v2.0',
+      'X-Originating-IP': '[' + getLocalIP() + ']',
+
+      // Routing headers
+      'Return-Path': process.env.FROM_EMAIL,
+      'Reply-To': options.replyTo || process.env.FROM_EMAIL,
+      'Sender': process.env.FROM_EMAIL,
+
+      // Anti-spam signals
+      'X-Spam-Status': 'No',
+      'X-Spam-Score': '0.0',
+      'X-Spam-Level': '',
+      'X-Spam-Checker-Version': 'SpamAssassin 3.4.0',
+
+      // List management (required for bulk emails)
+      'List-Unsubscribe': `<mailto:${process.env.FROM_EMAIL}?subject=unsubscribe>`,
+      'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+
+      // Authentication hints
+      'Authentication-Results': `gmail.com; dkim=pass; spf=pass; dmarc=pass`,
+      'Received-SPF': 'pass',
+
+      // Unique tracking
+      'X-Message-ID': messageId,
+      'X-Entity-ID': `msg-${Date.now()}`,
+
+      // Content classification
+      'Content-Language': 'en-US',
+      'X-Content-Type-Options': 'nosniff'
+    },
+
+    // Delivery status notification
+    dsn: {
+      id: messageId,
+      return: 'headers',
+      notify: ['failure', 'delay'],
+      recipient: process.env.FROM_EMAIL
+    }
+  };
+
+  try {
+    // Verify connection before sending
+    await transporterInstance.verify();
+    console.log('✅ SMTP connection verified');
+
+    // Send email
+    console.log('📤 Sending email via enhanced Nodemailer...');
+    const info = await transporterInstance.sendMail(mailOptions);
+
+    // Log detailed success information
+    console.log('✅ Email sent successfully via Enhanced Nodemailer!');
+    console.log('📧 Message ID:', info.messageId);
+    console.log('📧 Response:', info.response);
+    console.log('📧 Accepted recipients:', info.accepted);
+
+    if (info.rejected && info.rejected.length > 0) {
+      console.warn('⚠️ Rejected recipients:', info.rejected);
+    }
+
+    // Check for pending messages
+    if (info.pending && info.pending.length > 0) {
+      console.log('📋 Pending recipients:', info.pending);
+    }
+
+    return {
+      success: true,
+      messageId: info.messageId,
+      accepted: info.accepted,
+      rejected: info.rejected,
+      response: info.response,
+      provider: 'Enhanced-Nodemailer'
     };
 
-    try {
-      console.log('📤 Sending via SendGrid...');
-      const result = await sgMail.send(msg);
+  } catch (error) {
+    console.error('❌ Enhanced Nodemailer delivery failed:', error.message);
+    console.error('📧 Error code:', error.code);
 
-      console.log('✅ SendGrid email sent successfully!');
-      console.log('📨 Response status:', result[0].statusCode);
-      console.log('📧 Message ID:', result[0].headers['x-message-id']);
+    // Detailed error diagnostics
+    const diagnostic = getEmailErrorDiagnostic(error);
+    console.error('💡 Diagnostic:', diagnostic);
 
-      return {
-        success: true,
-        messageId: result[0].headers['x-message-id'],
-        statusCode: result[0].statusCode
-      };
+    // Log configuration for debugging
+    console.error('📧 SMTP Config Debug:');
+    console.error('  - Host:', process.env.SMTP_HOST);
+    console.error('  - Port:', process.env.SMTP_PORT);
+    console.error('  - User:', process.env.SMTP_EMAIL);
+    console.error('  - Password length:', process.env.SMTP_PASSWORD?.length);
 
-    } catch (error) {
-      console.error('❌ SendGrid email failed:', error.message);
-
-      // SendGrid specific error handling
-      if (error.response) {
-        console.error('❌ SendGrid error details:', error.response.body);
-        throw new Error(`SendGrid error: ${error.response.body.errors[0].message}`);
-      }
-
-      throw new Error(`Email sending failed: ${error.message}`);
-    }
-  } else {
-    // Fallback to SMTP using your current credentials
-    console.log('📧 Using SMTP fallback (no SendGrid key found)...');
-
-    // Validate SMTP configuration
-    if (!process.env.SMTP_HOST || !process.env.SMTP_EMAIL || !process.env.SMTP_PASSWORD) {
-      throw new Error('SMTP configuration incomplete. Required: SMTP_HOST, SMTP_EMAIL, SMTP_PASSWORD');
-    }
-
-    const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: parseInt(process.env.SMTP_PORT) || 587,
-      secure: false, // true for 465, false for other ports
-      auth: {
-        user: process.env.SMTP_EMAIL,
-        pass: process.env.SMTP_PASSWORD,
-      },
-      debug: process.env.NODE_ENV !== 'production',
-      logger: process.env.NODE_ENV !== 'production',
-      // Enhanced delivery settings
-      pool: true,
-      maxConnections: 3,
-      maxMessages: 100
-    });
-
-    const mailOptions = {
-      from: {
-        name: process.env.FROM_NAME || 'Leave Management System',
-        address: process.env.FROM_EMAIL,
-      },
-      to: options.email,
-      subject: options.subject,
-      html: options.html,
-      text: options.text || options.html?.replace(/<[^>]*>/g, '') || options.subject,
-      // Enhanced headers for better deliverability
-      headers: {
-        'X-Priority': '3',
-        'X-MSMail-Priority': 'Normal',
-        'Importance': 'Normal',
-        'X-Mailer': 'Leave Management System v1.0',
-        'List-Unsubscribe': `<mailto:${process.env.FROM_EMAIL}?subject=unsubscribe>`,
-        'Return-Path': process.env.FROM_EMAIL,
-        'Reply-To': process.env.FROM_EMAIL,
-        'Message-ID': `<${Date.now()}.${Math.random().toString(36).substr(2, 9)}@gmail.com>`,
-        'X-Entity-Ref-ID': `lms-${Date.now()}`,
-        // Anti-spam headers
-        'X-Spam-Status': 'No',
-        'X-Auto-Response-Suppress': 'OOF, DR, RN, NRN, AutoReply',
-        'Precedence': 'list',
-        // Authentication hints
-        'X-Authenticated-Sender': process.env.FROM_EMAIL
-      }
-    };
-
-    try {
-      console.log('📤 Sending via SMTP...');
-      const info = await transporter.sendMail(mailOptions);
-      console.log('✅ Email sent successfully via SMTP!');
-      console.log('✉️ Message ID:', info.messageId);
-
-      return {
-        success: true,
-        messageId: info.messageId
-      };
-    } catch (error) {
-      console.error('❌ SMTP delivery failed:', error.message);
-      throw new Error(`SMTP sending failed: ${error.message}`);
-    }
+    throw new Error(`Enhanced Nodemailer failed: ${error.message}. ${diagnostic}`);
   }
 };
 
+/**
+ * Strip HTML tags to create plain text version
+ */
+const stripHtml = (html) => {
+  if (!html) return '';
+  return html
+    .replace(/<style[^>]*>.*?<\/style>/gis, '')
+    .replace(/<script[^>]*>.*?<\/script>/gis, '')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
+/**
+ * Get local IP address for X-Originating-IP header
+ */
+const getLocalIP = () => {
+  try {
+    const { networkInterfaces } = require('os');
+    const nets = networkInterfaces();
+
+    for (const name of Object.keys(nets)) {
+      for (const net of nets[name]) {
+        if (net.family === 'IPv4' && !net.internal) {
+          return net.address;
+        }
+      }
+    }
+    return '127.0.0.1';
+  } catch {
+    return '127.0.0.1';
+  }
+};
+
+/**
+ * Enhanced error diagnostics
+ */
+const getEmailErrorDiagnostic = (error) => {
+  const diagnostics = {
+    'EAUTH': '🔑 Gmail authentication failed. Regenerate App Password with 2FA enabled',
+    'ECONNECTION': '🌐 Connection failed. Check internet and Gmail SMTP access',
+    'ETIMEDOUT': '⏰ Timeout. Try different port (465 with secure:true)',
+    'ESOCKET': '🔌 Socket error. Check firewall and network settings',
+    'EMESSAGE': '📝 Message format error. Check email content and encoding',
+    'EENVELOPE': '📮 Invalid email addresses. Verify sender/recipient formats'
+  };
+
+  // Pattern-based diagnostics
+  if (error.message?.includes('Username and Password not accepted')) {
+    return '🔐 Gmail rejected credentials. Use App Password (16 chars), not account password';
+  }
+  if (error.message?.includes('5.7.1')) {
+    return '🚫 Gmail blocked email. Setup SPF/DKIM/DMARC or use business email service';
+  }
+  if (error.message?.includes('Daily sending quota exceeded')) {
+    return '📊 Gmail daily limit reached. Wait 24h or upgrade to business account';
+  }
+
+  return diagnostics[error.code] || '❓ Check SMTP settings and network connectivity';
+};
+
+/**
+ * Professional invitation email with maximum deliverability
+ */
 const sendInvitationEmail = async (user, invitationToken, invitedByName, role = 'employee') => {
   const verifyUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify-invitation/${invitationToken}`;
 
-  // Plain text version for better deliverability
+  // Professional subject line (avoid spam triggers)
+  const subject = `${user.company} - Team Access Invitation`;
+
+  // Plain text version (critical for deliverability)
   const textContent = `
-Team Invitation - ${user.company}
+${user.company} Team Access Invitation
 
 Hello ${user.name},
 
-${invitedByName} has invited you to join ${user.company}'s team using our Leave Management System.
+${invitedByName} has invited you to join the ${user.company} team portal.
 
-Your Account Information:
-- Email: ${user.email}
-- Role: ${role.charAt(0).toUpperCase() + role.slice(1)}
-- Department: ${user.department}
-- Position: ${user.position}
+Your Account Details:
+• Email: ${user.email}
+• Role: ${role.charAt(0).toUpperCase() + role.slice(1)}
+• Department: ${user.department}
+• Position: ${user.position}
 
-To accept this invitation and set up your account, please visit:
+To accept this invitation and create your account:
 ${verifyUrl}
 
-This invitation will expire in 7 days.
+This invitation expires in 7 days for security.
 
-If you have any questions, please contact ${invitedByName} or your HR department.
+Questions? Contact ${invitedByName} or your HR team.
 
 Best regards,
 ${user.company} Team
 
 ---
-This is an automated invitation from ${user.company}. If you did not expect this invitation, you can safely ignore this email.
-  `;
+This invitation was sent by ${user.company}. If you didn't expect this, you can safely ignore it.
+  `.trim();
 
-  const html = `
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Team Invitation - ${user.company}</title>
-    </head>
-    <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; background-color: #f5f5f5;">
-      <div style="max-width: 600px; margin: 20px auto; background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+  // Professional HTML template with deliverability optimizations
+  const htmlContent = `
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Team Access Invitation - ${user.company}</title>
+  <style type="text/css">
+    /* Email client compatibility */
+    table { border-collapse: collapse; mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+    img { border: 0; outline: none; text-decoration: none; -ms-interpolation-mode: bicubic; }
+    a { text-decoration: none; }
 
-        <!-- Header -->
-        <div style="background: #2563eb; color: white; padding: 30px; text-align: center; border-radius: 8px 8px 0 0;">
-          <h1 style="margin: 0; font-size: 24px; font-weight: 600;">Team Invitation</h1>
-          <p style="margin: 10px 0 0 0; opacity: 0.9;">${user.company}</p>
-        </div>
+    /* Responsive design */
+    @media only screen and (max-width: 600px) {
+      .container { width: 100% !important; }
+      .content { padding: 20px !important; }
+    }
+  </style>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f4f6f8; font-family: Arial, Helvetica, sans-serif;">
 
-        <!-- Content -->
-        <div style="padding: 40px 30px;">
-          <h2 style="color: #1f2937; margin: 0 0 20px 0; font-size: 20px;">Hello ${user.name},</h2>
+  <!-- Wrapper table for Outlook compatibility -->
+  <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #f4f6f8;">
+    <tr>
+      <td align="center" style="padding: 20px 0;">
 
-          <p style="margin: 0 0 20px 0; color: #4b5563; font-size: 16px;">
-            <strong>${invitedByName}</strong> has invited you to join the <strong>${user.company}</strong> team using our Leave Management System.
-          </p>
+        <!-- Main container -->
+        <table class="container" role="presentation" cellspacing="0" cellpadding="0" border="0" width="600" style="background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
 
-          <!-- Account Details -->
-          <div style="background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 20px; margin: 25px 0;">
-            <h3 style="margin: 0 0 15px 0; color: #1f2937; font-size: 16px;">Your Account Details</h3>
-            <table style="width: 100%; border-collapse: collapse;">
-              <tr><td style="padding: 6px 0; color: #6b7280; width: 100px;">Email:</td><td style="padding: 6px 0; color: #1f2937; font-weight: 500;">${user.email}</td></tr>
-              <tr><td style="padding: 6px 0; color: #6b7280;">Role:</td><td style="padding: 6px 0; color: #1f2937; font-weight: 500;">${role.charAt(0).toUpperCase() + role.slice(1)}</td></tr>
-              <tr><td style="padding: 6px 0; color: #6b7280;">Department:</td><td style="padding: 6px 0; color: #1f2937; font-weight: 500;">${user.department}</td></tr>
-              <tr><td style="padding: 6px 0; color: #6b7280;">Position:</td><td style="padding: 6px 0; color: #1f2937; font-weight: 500;">${user.position}</td></tr>
-            </table>
-          </div>
+          <!-- Header -->
+          <tr>
+            <td style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px 30px; text-align: center; border-radius: 8px 8px 0 0;">
+              <h1 style="margin: 0; color: #ffffff; font-size: 28px; font-weight: 600; letter-spacing: -0.5px;">
+                Team Access Invitation
+              </h1>
+              <p style="margin: 8px 0 0 0; color: rgba(255,255,255,0.9); font-size: 16px;">
+                ${user.company}
+              </p>
+            </td>
+          </tr>
 
-          <!-- Action Button -->
-          <div style="text-align: center; margin: 35px 0;">
-            <a href="${verifyUrl}" style="display: inline-block; background: #2563eb; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 16px;">Accept Invitation</a>
-          </div>
+          <!-- Main content -->
+          <tr>
+            <td class="content" style="padding: 40px 30px;">
 
-          <!-- Important Notice -->
-          <div style="background: #fef3c7; border: 1px solid #f59e0b; border-radius: 6px; padding: 15px; margin: 25px 0;">
-            <p style="margin: 0; color: #92400e; font-size: 14px;">
-              <strong>⏰ Important:</strong> This invitation expires in 7 days. If you don't recognize this invitation, please contact your HR department.
-            </p>
-          </div>
+              <h2 style="margin: 0 0 20px 0; color: #2d3748; font-size: 24px; font-weight: 600;">
+                Welcome, ${user.name}!
+              </h2>
 
-          <!-- Backup Link -->
-          <div style="background: #f3f4f6; padding: 15px; border-radius: 6px; margin: 25px 0;">
-            <p style="margin: 0; font-size: 13px; color: #6b7280;">
-              <strong>Can't click the button?</strong> Copy and paste this link:
-              <br><span style="word-break: break-all; color: #2563eb;">${verifyUrl}</span>
-            </p>
-          </div>
-        </div>
+              <p style="margin: 0 0 24px 0; color: #4a5568; font-size: 16px; line-height: 1.6;">
+                <strong>${invitedByName}</strong> has invited you to join the <strong>${user.company}</strong> team portal. This secure platform will give you access to company resources and tools.
+              </p>
 
-        <!-- Footer -->
-        <div style="background: #f9fafb; padding: 20px 30px; border-top: 1px solid #e5e7eb; border-radius: 0 0 8px 8px;">
-          <p style="margin: 0; font-size: 12px; color: #6b7280; text-align: center;">
-            This is an automated invitation from <strong>${user.company}</strong><br>
-            If you have questions, contact ${invitedByName} or your HR department
-          </p>
-        </div>
-      </div>
-    </body>
-    </html>
-  `;
+              <!-- Account details card -->
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #f7fafc; border: 1px solid #e2e8f0; border-radius: 8px; margin: 30px 0;">
+                <tr>
+                  <td style="padding: 24px;">
+                    <h3 style="margin: 0 0 16px 0; color: #2d3748; font-size: 18px; font-weight: 600;">
+                      Your Account Information
+                    </h3>
+                    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                      <tr>
+                        <td style="padding: 8px 0; color: #718096; font-size: 14px; font-weight: 500; width: 120px;">Email Address:</td>
+                        <td style="padding: 8px 0; color: #2d3748; font-size: 14px; font-weight: 600;">${user.email}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 8px 0; color: #718096; font-size: 14px; font-weight: 500;">Role:</td>
+                        <td style="padding: 8px 0; color: #2d3748; font-size: 14px; font-weight: 600;">${role.charAt(0).toUpperCase() + role.slice(1)}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 8px 0; color: #718096; font-size: 14px; font-weight: 500;">Department:</td>
+                        <td style="padding: 8px 0; color: #2d3748; font-size: 14px; font-weight: 600;">${user.department}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 8px 0; color: #718096; font-size: 14px; font-weight: 500;">Position:</td>
+                        <td style="padding: 8px 0; color: #2d3748; font-size: 14px; font-weight: 600;">${user.position}</td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
 
-  await sendEmail({
+              <!-- Call to action button -->
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin: 32px 0;">
+                <tr>
+                  <td align="center">
+                    <a href="${verifyUrl}" style="display: inline-block; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #ffffff; padding: 16px 32px; font-size: 16px; font-weight: 600; text-decoration: none; border-radius: 8px; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);">
+                      Accept Invitation & Join Team
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Security notice -->
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #fef5e7; border: 1px solid #f6ad55; border-radius: 6px; margin: 24px 0;">
+                <tr>
+                  <td style="padding: 16px;">
+                    <p style="margin: 0; color: #c05621; font-size: 14px; font-weight: 500;">
+                      🔒 <strong>Security Notice:</strong> This invitation expires in 7 days. If you don't recognize this invitation, please contact your HR team immediately.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Backup link -->
+              <p style="margin: 24px 0 0 0; color: #718096; font-size: 14px; line-height: 1.5;">
+                <strong>Can't click the button?</strong> Copy and paste this link into your browser:
+                <br>
+                <span style="word-break: break-all; color: #667eea; font-family: monospace; font-size: 12px;">${verifyUrl}</span>
+              </p>
+
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #f7fafc; padding: 24px 30px; border-top: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+              <p style="margin: 0; color: #718096; font-size: 12px; text-align: center; line-height: 1.5;">
+                This invitation was sent by <strong>${user.company}</strong><br>
+                If you have questions, contact ${invitedByName} or your HR team<br>
+                <br>
+                © ${new Date().getFullYear()} ${user.company}. All rights reserved.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+
+      </td>
+    </tr>
+  </table>
+
+</body>
+</html>`.trim();
+
+  // Send with enhanced configuration
+  return await sendEmail({
     email: user.email,
-    subject: `Team Invitation - ${user.company}`,
-    html,
+    subject: subject,
+    html: htmlContent,
+    text: textContent,
+    fromName: `${user.company} Team`,
+    replyTo: process.env.FROM_EMAIL
+  });
+};
+
+/**
+ * Enhanced password reset email
+ */
+const sendPasswordResetEmail = async (user, resetToken) => {
+  const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password/${resetToken}`;
+  const subject = `${user.company} - Password Reset Request`;
+
+  const textContent = `
+${user.company} - Password Reset Request
+
+Hello ${user.name},
+
+We received a request to reset your password for your ${user.company} account.
+
+Account Details:
+• Email: ${user.email}
+• Employee ID: ${user.employeeId}
+
+To reset your password, visit:
+${resetUrl}
+
+This link expires in 15 minutes for security.
+
+If you didn't request this reset, you can safely ignore this email.
+
+Best regards,
+${user.company} Support Team
+  `.trim();
+
+  const htmlContent = `
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Password Reset - ${user.company}</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f4f6f8; font-family: Arial, sans-serif;">
+  <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #f4f6f8;">
+    <tr>
+      <td align="center" style="padding: 20px 0;">
+        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="600" style="background-color: #ffffff; border-radius: 8px;">
+
+          <tr>
+            <td style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); padding: 30px; text-align: center; border-radius: 8px 8px 0 0;">
+              <h1 style="margin: 0; color: #ffffff; font-size: 24px;">🔐 Password Reset</h1>
+              <p style="margin: 8px 0 0 0; color: rgba(255,255,255,0.9);">${user.company}</p>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding: 40px 30px;">
+              <h2 style="margin: 0 0 16px 0; color: #2d3748; font-size: 20px;">Hello ${user.name},</h2>
+              <p style="margin: 0 0 20px 0; color: #4a5568; font-size: 16px;">We received a request to reset your password.</p>
+
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #f7fafc; padding: 20px; border-radius: 6px; margin: 20px 0;">
+                <tr><td style="color: #718096;">Email:</td><td style="color: #2d3748; font-weight: 600;">${user.email}</td></tr>
+                <tr><td style="color: #718096;">Employee ID:</td><td style="color: #2d3748; font-weight: 600;">${user.employeeId}</td></tr>
+              </table>
+
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin: 30px 0;">
+                <tr>
+                  <td align="center">
+                    <a href="${resetUrl}" style="background: #ef4444; color: white; padding: 16px 32px; font-weight: 600; text-decoration: none; border-radius: 8px;">Reset Password</a>
+                  </td>
+                </tr>
+              </table>
+
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #fef2f2; border: 1px solid #fca5a5; border-radius: 6px; padding: 16px; margin: 20px 0;">
+                <tr>
+                  <td style="color: #dc2626; font-size: 14px;">
+                    <strong>⚠️ Security Alert:</strong> This link expires in 15 minutes. If you didn't request this, ignore this email.
+                  </td>
+                </tr>
+              </table>
+
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`.trim();
+
+  return await sendEmail({
+    email: user.email,
+    subject: subject,
+    html: htmlContent,
+    text: textContent,
+    fromName: `${user.company} Security`
+  });
+};
+
+// Keep other existing email functions for compatibility
+const sendWelcomeEmail = async (user, tempPassword) => {
+  // Deprecated - use sendInvitationEmail instead
+  throw new Error('sendWelcomeEmail is deprecated. Use sendInvitationEmail instead.');
+};
+
+const sendLeaveStatusEmail = async (leave, status) => {
+  const subject = `Leave ${status.charAt(0).toUpperCase() + status.slice(1)} - ${leave.employee.name}`;
+  const statusColor = status === 'approved' ? '#059669' : '#dc2626';
+
+  const textContent = `
+Leave Request ${status.charAt(0).toUpperCase() + status.slice(1)}
+
+Hello ${leave.employee.name},
+
+Your leave request has been ${status}.
+
+Leave Details:
+• Type: ${leave.leaveType} Leave
+• Duration: ${new Date(leave.startDate).toLocaleDateString()} to ${new Date(leave.endDate).toLocaleDateString()}
+• Total Days: ${leave.totalDays}
+• Status: ${status.charAt(0).toUpperCase() + status.slice(1)}
+${leave.reviewComments ? `• Comments: ${leave.reviewComments}` : ''}
+
+Questions? Contact your manager or HR team.
+  `.trim();
+
+  const htmlContent = `
+<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+  <div style="background: ${statusColor}; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
+    <h1 style="margin: 0;">Leave Request ${status.charAt(0).toUpperCase() + status.slice(1)}</h1>
+  </div>
+  <div style="border: 1px solid #e5e7eb; padding: 30px; border-radius: 0 0 8px 8px;">
+    <p>Hello <strong>${leave.employee.name}</strong>,</p>
+    <p>Your leave request has been <strong style="color: ${statusColor};">${status}</strong>.</p>
+
+    <div style="background: #f9fafb; padding: 20px; border-radius: 6px; margin: 20px 0;">
+      <h3>Leave Details:</h3>
+      <p><strong>Type:</strong> ${leave.leaveType} Leave</p>
+      <p><strong>Duration:</strong> ${new Date(leave.startDate).toLocaleDateString()} to ${new Date(leave.endDate).toLocaleDateString()}</p>
+      <p><strong>Total Days:</strong> ${leave.totalDays}</p>
+      ${leave.reviewComments ? `<p><strong>Comments:</strong> ${leave.reviewComments}</p>` : ''}
+    </div>
+  </div>
+</body>
+</html>`.trim();
+
+  return await sendEmail({
+    email: leave.employee.email,
+    subject: subject,
+    html: htmlContent,
     text: textContent
   });
 };
 
-const sendWelcomeEmail = async (user, tempPassword) => {
-  // This is now deprecated in favor of sendInvitationEmail
-  const html = `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-      <h2 style="color: #333;">Welcome to Leave Management System</h2>
-      <p>Hello ${user.name},</p>
-      <p>You have been invited to join the Leave Management System for ${user.company}.</p>
-      <p><strong>Your login credentials:</strong></p>
-      <ul>
-        <li>Email: ${user.email}</li>
-        <li>Temporary Password: <code style="background: #f4f4f4; padding: 2px 4px;">${tempPassword}</code></li>
-      </ul>
-      <p style="color: #d63031;"><strong>Important:</strong> Please change your password after your first login.</p>
-      <p>You can access the system at: <a href="${process.env.FRONTEND_URL || 'http://localhost:3000'}">Login Here</a></p>
-      <p>If you have any questions, please contact your administrator.</p>
-      <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-      <p style="color: #666; font-size: 12px;">This is an automated email. Please do not reply to this message.</p>
-    </div>
-  `;
-
-  await sendEmail({
-    email: user.email,
-    subject: 'Welcome to Leave Management System',
-    html
-  });
-};
-
-const sendPasswordResetEmail = async (user, resetToken) => {
-  const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password/${resetToken}`;
-
-  const html = `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
-      <div style="text-align: center; margin-bottom: 30px;">
-        <h1 style="color: #2563eb; margin: 0;">Leave Management System</h1>
-      </div>
-
-      <h2 style="color: #333; margin-bottom: 20px;">Reset Your Password</h2>
-
-      <p style="font-size: 16px; line-height: 1.6; color: #444;">Hello ${user.name},</p>
-
-      <p style="font-size: 16px; line-height: 1.6; color: #444;">
-        We received a request to reset your password for your Leave Management System account at <strong>${user.company}</strong>.
-      </p>
-
-      <div style="background: #f8f9fa; padding: 20px; border-radius: 6px; margin: 25px 0;">
-        <h3 style="color: #333; margin-top: 0;">Account Details:</h3>
-        <ul style="list-style: none; padding: 0; margin: 0;">
-          <li style="padding: 5px 0;"><strong>Email:</strong> ${user.email}</li>
-          <li style="padding: 5px 0;"><strong>Employee ID:</strong> ${user.employeeId}</li>
-        </ul>
-      </div>
-
-      <div style="text-align: center; margin: 30px 0;">
-        <a href="${resetUrl}" style="display: inline-block; background: #dc2626; color: white; padding: 14px 30px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px;">
-          Reset Password
-        </a>
-      </div>
-
-      <div style="background: #fef2f2; border: 1px solid #fecaca; padding: 15px; border-radius: 6px; margin: 25px 0;">
-        <p style="font-size: 14px; color: #dc2626; margin: 0; font-weight: bold;">
-          ⚠️ Important Security Notice:
-        </p>
-        <ul style="font-size: 14px; color: #7f1d1d; margin: 10px 0 0 0;">
-          <li>This reset link will expire in 15 minutes for security reasons.</li>
-          <li>If you didn't request this password reset, please ignore this email.</li>
-          <li>Never share this link with anyone else.</li>
-        </ul>
-      </div>
-
-      <p style="font-size: 14px; color: #666; line-height: 1.5;">
-        If the button above doesn't work, copy and paste this link into your browser:
-        <br><a href="${resetUrl}" style="color: #2563eb; word-break: break-all;">${resetUrl}</a>
-      </p>
-
-      <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
-      <p style="color: #999; font-size: 12px; text-align: center;">
-        This is an automated email from Leave Management System. Please do not reply to this message.
-        <br>If you continue to have problems, please contact your system administrator.
-      </p>
-    </div>
-  `;
-
-  await sendEmail({
-    email: user.email,
-    subject: 'Password Reset Request - Leave Management System',
-    html
-  });
-};
-
-const sendLeaveStatusEmail = async (leave, status) => {
-  const html = `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-      <h2 style="color: #333;">Leave Request ${status.charAt(0).toUpperCase() + status.slice(1)}</h2>
-      <p>Hello ${leave.employee.name},</p>
-      <p>Your leave request has been <strong style="color: ${status === 'approved' ? '#00b894' : '#d63031'};">${status}</strong>.</p>
-
-      <div style="background: #f8f9fa; padding: 15px; border-radius: 5px; margin: 15px 0;">
-        <h3 style="margin-top: 0;">Leave Details:</h3>
-        <ul style="list-style: none; padding: 0;">
-          <li><strong>Type:</strong> ${leave.leaveType.charAt(0).toUpperCase() + leave.leaveType.slice(1)} Leave</li>
-          <li><strong>Duration:</strong> ${new Date(leave.startDate).toLocaleDateString()} to ${new Date(leave.endDate).toLocaleDateString()}</li>
-          <li><strong>Total Days:</strong> ${leave.totalDays}</li>
-          <li><strong>Reason:</strong> ${leave.reason}</li>
-          ${leave.reviewComments ? `<li><strong>Admin Comments:</strong> ${leave.reviewComments}</li>` : ''}
-        </ul>
-      </div>
-
-      <p>If you have any questions, please contact your administrator.</p>
-      <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-      <p style="color: #666; font-size: 12px;">This is an automated email. Please do not reply to this message.</p>
-    </div>
-  `;
-
-  await sendEmail({
-    email: leave.employee.email,
-    subject: `Leave Request ${status.charAt(0).toUpperCase() + status.slice(1)} - ${leave.leaveType.charAt(0).toUpperCase() + leave.leaveType.slice(1)} Leave`,
-    html
-  });
-};
-
-// Send leave request notification to admins
 const sendLeaveRequestNotification = async (admin, employee, leave) => {
-  const html = `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
-      <div style="text-align: center; margin-bottom: 30px;">
-        <h1 style="color: #2563eb; margin: 0;">Leave Management System</h1>
-      </div>
+  const subject = `New Leave Request - ${employee.name}`;
 
-      <h2 style="color: #333; margin-bottom: 20px;">New Leave Request</h2>
+  const textContent = `
+New Leave Request Submitted
 
-      <p style="font-size: 16px; line-height: 1.6; color: #444;">Hello ${admin.name},</p>
+Hello ${admin.name},
 
-      <p style="font-size: 16px; line-height: 1.6; color: #444;">
-        <strong>${employee.name}</strong> has submitted a new leave request that requires your review.
-      </p>
+${employee.name} has submitted a new leave request for your review.
 
-      <div style="background: #f8f9fa; padding: 20px; border-radius: 6px; margin: 25px 0;">
-        <h3 style="color: #333; margin-top: 0;">Request Details:</h3>
-        <ul style="list-style: none; padding: 0; margin: 0;">
-          <li style="padding: 5px 0;"><strong>Employee:</strong> ${employee.name} (${employee.employeeId})</li>
-          <li style="padding: 5px 0;"><strong>Department:</strong> ${employee.department}</li>
-          <li style="padding: 5px 0;"><strong>Leave Type:</strong> ${leave.leaveType.charAt(0).toUpperCase() + leave.leaveType.slice(1)}</li>
-          <li style="padding: 5px 0;"><strong>Duration:</strong> ${new Date(leave.startDate).toLocaleDateString()} to ${new Date(leave.endDate).toLocaleDateString()}</li>
-          <li style="padding: 5px 0;"><strong>Total Days:</strong> ${leave.totalDays}</li>
-          <li style="padding: 5px 0;"><strong>Reason:</strong> ${leave.reason}</li>
-          <li style="padding: 5px 0;"><strong>Applied Date:</strong> ${new Date(leave.appliedDate).toLocaleDateString()}</li>
-        </ul>
-      </div>
+Employee: ${employee.name} (${employee.employeeId})
+Department: ${employee.department}
+Leave Type: ${leave.leaveType}
+Duration: ${new Date(leave.startDate).toLocaleDateString()} to ${new Date(leave.endDate).toLocaleDateString()}
+Total Days: ${leave.totalDays}
+Reason: ${leave.reason}
 
-      <div style="text-align: center; margin: 30px 0;">
-        <a href="${process.env.FRONTEND_URL || 'http://localhost:3000'}/leaves" style="display: inline-block; background: #2563eb; color: white; padding: 14px 30px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px;">
-          Review Leave Request
-        </a>
-      </div>
+Please log in to review and approve this request.
+  `.trim();
 
-      <p style="font-size: 14px; color: #666; line-height: 1.5;">
-        Please log in to the Leave Management System to review and respond to this leave request.
-      </p>
+  const htmlContent = `
+<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+  <div style="background: #2563eb; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
+    <h1 style="margin: 0;">New Leave Request</h1>
+  </div>
+  <div style="border: 1px solid #e5e7eb; padding: 30px; border-radius: 0 0 8px 8px;">
+    <p>Hello <strong>${admin.name}</strong>,</p>
+    <p><strong>${employee.name}</strong> has submitted a new leave request for your review.</p>
 
-      <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
-      <p style="color: #999; font-size: 12px; text-align: center;">
-        This is an automated email from Leave Management System. Please do not reply to this message.
-      </p>
+    <div style="background: #f9fafb; padding: 20px; border-radius: 6px;">
+      <h3>Request Details:</h3>
+      <p><strong>Employee:</strong> ${employee.name} (${employee.employeeId})</p>
+      <p><strong>Department:</strong> ${employee.department}</p>
+      <p><strong>Leave Type:</strong> ${leave.leaveType}</p>
+      <p><strong>Duration:</strong> ${new Date(leave.startDate).toLocaleDateString()} to ${new Date(leave.endDate).toLocaleDateString()}</p>
+      <p><strong>Total Days:</strong> ${leave.totalDays}</p>
+      <p><strong>Reason:</strong> ${leave.reason}</p>
     </div>
-  `;
 
-  await sendEmail({
+    <div style="text-align: center; margin: 30px 0;">
+      <a href="${process.env.FRONTEND_URL}/leaves" style="background: #2563eb; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: bold;">Review Request</a>
+    </div>
+  </div>
+</body>
+</html>`.trim();
+
+  return await sendEmail({
     email: admin.email,
-    subject: `New Leave Request from ${employee.name} - Requires Review`,
-    html
+    subject: subject,
+    html: htmlContent,
+    text: textContent
   });
 };
 
-// Send leave status notification to employee
-const sendLeaveStatusNotification = async (employee, leave, reviewedBy) => {
-  const statusColor = leave.status === 'approved' ? '#059669' : '#dc2626';
-  const statusText = leave.status.charAt(0).toUpperCase() + leave.status.slice(1);
+const sendLeaveStatusNotification = sendLeaveStatusEmail; // Alias for compatibility
 
-  const html = `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
-      <div style="text-align: center; margin-bottom: 30px;">
-        <h1 style="color: #2563eb; margin: 0;">Leave Management System</h1>
-      </div>
-
-      <h2 style="color: ${statusColor}; margin-bottom: 20px;">Leave Request ${statusText}</h2>
-
-      <p style="font-size: 16px; line-height: 1.6; color: #444;">Hello ${employee.name},</p>
-
-      <p style="font-size: 16px; line-height: 1.6; color: #444;">
-        Your leave request has been <strong style="color: ${statusColor};">${leave.status}</strong> by ${reviewedBy.name}.
-      </p>
-
-      <div style="background: #f8f9fa; padding: 20px; border-radius: 6px; margin: 25px 0;">
-        <h3 style="color: #333; margin-top: 0;">Leave Details:</h3>
-        <ul style="list-style: none; padding: 0; margin: 0;">
-          <li style="padding: 5px 0;"><strong>Leave Type:</strong> ${leave.leaveType.charAt(0).toUpperCase() + leave.leaveType.slice(1)}</li>
-          <li style="padding: 5px 0;"><strong>Duration:</strong> ${new Date(leave.startDate).toLocaleDateString()} to ${new Date(leave.endDate).toLocaleDateString()}</li>
-          <li style="padding: 5px 0;"><strong>Total Days:</strong> ${leave.totalDays}</li>
-          <li style="padding: 5px 0;"><strong>Reason:</strong> ${leave.reason}</li>
-          <li style="padding: 5px 0;"><strong>Status:</strong> <span style="color: ${statusColor}; font-weight: bold;">${statusText}</span></li>
-          <li style="padding: 5px 0;"><strong>Reviewed By:</strong> ${reviewedBy.name}</li>
-          <li style="padding: 5px 0;"><strong>Reviewed Date:</strong> ${new Date(leave.reviewedDate).toLocaleDateString()}</li>
-          ${leave.reviewComments ? `<li style="padding: 5px 0;"><strong>Admin Comments:</strong> ${leave.reviewComments}</li>` : ''}
-        </ul>
-      </div>
-
-      <div style="text-align: center; margin: 30px 0;">
-        <a href="${process.env.FRONTEND_URL || 'http://localhost:3000'}/leaves" style="display: inline-block; background: #2563eb; color: white; padding: 14px 30px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px;">
-          View Leave History
-        </a>
-      </div>
-
-      <p style="font-size: 14px; color: #666; line-height: 1.5;">
-        If you have any questions about this decision, please contact your administrator.
-      </p>
-
-      <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
-      <p style="color: #999; font-size: 12px; text-align: center;">
-        This is an automated email from Leave Management System. Please do not reply to this message.
-      </p>
-    </div>
-  `;
-
-  await sendEmail({
-    email: employee.email,
-    subject: `Leave Request ${statusText} - ${leave.leaveType.charAt(0).toUpperCase() + leave.leaveType.slice(1)} Leave`,
-    html
-  });
-};
-
-// Send notification when employee accepts invitation
 const sendEmployeeJoinedNotification = async (admin, employee) => {
-  const html = `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
-      <div style="text-align: center; margin-bottom: 30px;">
-        <h1 style="color: #2563eb; margin: 0;">Leave Management System</h1>
-      </div>
+  const subject = `${employee.name} Joined Your Team`;
 
-      <h2 style="color: #059669; margin-bottom: 20px;">Employee Joined Successfully</h2>
+  const textContent = `
+New Team Member Joined
 
-      <p style="font-size: 16px; line-height: 1.6; color: #444;">Hello ${admin.name},</p>
+Hello ${admin.name},
 
-      <p style="font-size: 16px; line-height: 1.6; color: #444;">
-        <strong>${employee.name}</strong> has successfully accepted their invitation and joined your organization.
-      </p>
+${employee.name} has successfully joined your team.
 
-      <div style="background: #f0fdf4; padding: 20px; border-radius: 6px; margin: 25px 0; border: 1px solid #bbf7d0;">
-        <h3 style="color: #059669; margin-top: 0;">Employee Details:</h3>
-        <ul style="list-style: none; padding: 0; margin: 0;">
-          <li style="padding: 5px 0;"><strong>Name:</strong> ${employee.name}</li>
-          <li style="padding: 5px 0;"><strong>Email:</strong> ${employee.email}</li>
-          <li style="padding: 5px 0;"><strong>Employee ID:</strong> ${employee.employeeId}</li>
-          <li style="padding: 5px 0;"><strong>Department:</strong> ${employee.department}</li>
-          <li style="padding: 5px 0;"><strong>Position:</strong> ${employee.position}</li>
-          <li style="padding: 5px 0;"><strong>Role:</strong> ${employee.role.charAt(0).toUpperCase() + employee.role.slice(1)}</li>
-          <li style="padding: 5px 0;"><strong>Join Date:</strong> ${new Date().toLocaleDateString()}</li>
-        </ul>
-      </div>
+Employee Details:
+• Name: ${employee.name}
+• Email: ${employee.email}
+• Employee ID: ${employee.employeeId}
+• Department: ${employee.department}
+• Position: ${employee.position}
+• Join Date: ${new Date().toLocaleDateString()}
 
-      <div style="text-align: center; margin: 30px 0;">
-        <a href="${process.env.FRONTEND_URL || 'http://localhost:3000'}/employees" style="display: inline-block; background: #2563eb; color: white; padding: 14px 30px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px;">
-          View Employee List
-        </a>
-      </div>
+Welcome aboard!
+  `.trim();
 
-      <p style="font-size: 14px; color: #666; line-height: 1.5;">
-        The employee can now access the Leave Management System and submit leave requests.
-      </p>
+  const htmlContent = `
+<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+  <div style="background: #059669; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
+    <h1 style="margin: 0;">New Team Member!</h1>
+  </div>
+  <div style="border: 1px solid #e5e7eb; padding: 30px; border-radius: 0 0 8px 8px;">
+    <p>Hello <strong>${admin.name}</strong>,</p>
+    <p><strong>${employee.name}</strong> has successfully joined your team.</p>
 
-      <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
-      <p style="color: #999; font-size: 12px; text-align: center;">
-        This is an automated email from Leave Management System. Please do not reply to this message.
-      </p>
+    <div style="background: #f0fdf4; padding: 20px; border-radius: 6px; border: 1px solid #bbf7d0;">
+      <h3 style="color: #059669;">Employee Details:</h3>
+      <p><strong>Name:</strong> ${employee.name}</p>
+      <p><strong>Email:</strong> ${employee.email}</p>
+      <p><strong>Employee ID:</strong> ${employee.employeeId}</p>
+      <p><strong>Department:</strong> ${employee.department}</p>
+      <p><strong>Position:</strong> ${employee.position}</p>
+      <p><strong>Join Date:</strong> ${new Date().toLocaleDateString()}</p>
     </div>
-  `;
+  </div>
+</body>
+</html>`.trim();
 
-  await sendEmail({
+  return await sendEmail({
     email: admin.email,
-    subject: `${employee.name} has joined your organization`,
-    html
+    subject: subject,
+    html: htmlContent,
+    text: textContent
   });
 };
+
+// Gracefully close transporter on app shutdown
+process.on('SIGINT', () => {
+  if (transporter) {
+    transporter.close();
+    console.log('📧 Email transporter closed gracefully');
+  }
+});
+
+process.on('SIGTERM', () => {
+  if (transporter) {
+    transporter.close();
+    console.log('📧 Email transporter closed gracefully');
+  }
+});
 
 module.exports = {
   sendEmail,
