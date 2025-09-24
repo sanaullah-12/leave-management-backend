@@ -1,25 +1,20 @@
 const nodemailer = require('nodemailer');
 
-// Create single transporter instance
-let transporter = null;
-
+// Create fresh transporter for each request to prevent hanging
 const createTransporter = () => {
-  if (!transporter) {
-    transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: parseInt(process.env.SMTP_PORT) || 587,
-      secure: false, // Use STARTTLS
-      auth: {
-        user: process.env.SMTP_EMAIL,
-        pass: process.env.SMTP_PASSWORD
-      },
-      tls: {
-        rejectUnauthorized: true,
-        minVersion: 'TLSv1.2'
-      }
-    });
-  }
-  return transporter;
+  return nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: parseInt(process.env.SMTP_PORT) || 587,
+    secure: false, // Use STARTTLS
+    auth: {
+      user: process.env.SMTP_EMAIL,
+      pass: process.env.SMTP_PASSWORD
+    },
+    tls: {
+      rejectUnauthorized: true,
+      minVersion: 'TLSv1.2'
+    }
+  });
 };
 
 // Base email function - Nodemailer only
@@ -59,6 +54,10 @@ const sendEmail = async ({ email, subject, html, text, fromName }) => {
     console.log('📧 Response:', result.response);
     console.log('📧 Accepted recipients:', result.accepted);
 
+    // Close transporter to prevent hanging connections in production
+    transporter.close();
+    console.log('🔐 SMTP connection closed');
+
     return {
       success: true,
       messageId: result.messageId,
@@ -71,6 +70,13 @@ const sendEmail = async ({ email, subject, html, text, fromName }) => {
   } catch (error) {
     console.error('❌ Nodemailer email failed:', error.message);
     console.error('Full error:', error);
+
+    // Close transporter on error to prevent hanging
+    if (transporter) {
+      transporter.close();
+      console.log('🔐 SMTP connection closed (error)');
+    }
+
     throw new Error(`Email delivery failed: ${error.message}`);
   }
 };
