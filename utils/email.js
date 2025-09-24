@@ -54,14 +54,16 @@ const sendEmail = async (options) => {
       throw new Error('SMTP configuration incomplete. Required: SMTP_HOST, SMTP_EMAIL, SMTP_PASSWORD');
     }
 
-    const transporter = nodemailer.createTransporter({
+    const transporter = nodemailer.createTransport({
       host: process.env.SMTP_HOST,
       port: parseInt(process.env.SMTP_PORT) || 587,
       secure: false, // true for 465, false for other ports
       auth: {
         user: process.env.SMTP_EMAIL,
         pass: process.env.SMTP_PASSWORD,
-      }
+      },
+      debug: process.env.NODE_ENV !== 'production',
+      logger: process.env.NODE_ENV !== 'production'
     });
 
     const mailOptions = {
@@ -72,7 +74,7 @@ const sendEmail = async (options) => {
       to: options.email,
       subject: options.subject,
       html: options.html,
-      text: options.text
+      text: options.text || options.html?.replace(/<[^>]*>/g, '') || options.subject
     };
 
     try {
