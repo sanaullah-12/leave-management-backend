@@ -212,40 +212,87 @@ router.post('/invite-employee', authenticateToken, async (req, res) => {
     
     await employee.save();
 
-    // Send invitation email asynchronously (non-blocking)
+    // Send invitation email synchronously to ensure it works
     const { sendInvitationEmail } = require('../utils/email');
-    console.log('🚀 Starting async invitation email to:', email);
+    console.log('🚀 Starting invitation email (synchronous) to:', email);
 
-    // Immediately respond to frontend with success
-    res.status(201).json({
-      message: 'Employee invitation sent successfully',
-      employee: {
-        id: employee._id,
-        name: employee.name,
-        email: employee.email,
-        employeeId: employee.employeeId,
-        department: employee.department,
-        position: employee.position,
-        status: employee.status
-      }
-    });
+    try {
+      console.log('🔍 DEBUG: Starting invitation email process');
+      console.log('🔍 Request body:', JSON.stringify(req.body, null, 2));
+      console.log('🔍 Recipient email:', email);
+      console.log('🔍 Inviter name:', req.user.name);
+      console.log('🔍 Company name:', req.user.company.name);
+      console.log('🔍 Employee object keys:', Object.keys(employee.toObject()));
+      console.log('🔍 Invitation token length:', invitationToken?.length);
 
-    // Send email asynchronously without blocking the response
-    sendInvitationEmail(
-      {
+      const emailPayload = {
         ...employee.toObject(),
         company: req.user.company.name
-      },
-      invitationToken,
-      req.user.name,
-      'employee'
-    ).then(() => {
-      console.log('✅ Invitation email sent successfully to:', email);
-    }).catch((emailError) => {
-      console.error('❌ Async email sending error for', email, ':', emailError.message);
-      console.error('❌ Full email error:', emailError);
-      // Email failure doesn't affect the invitation creation since we already responded
-    });
+      };
+      console.log('🔍 Email payload keys:', Object.keys(emailPayload));
+      console.log('🔍 Environment check:');
+      console.log('  - NODE_ENV:', process.env.NODE_ENV);
+      console.log('  - SMTP_HOST:', process.env.SMTP_HOST);
+      console.log('  - SMTP_EMAIL:', process.env.SMTP_EMAIL);
+      console.log('  - FROM_EMAIL:', process.env.FROM_EMAIL);
+      console.log('  - FRONTEND_URL:', process.env.FRONTEND_URL);
+
+      const emailResult = await sendInvitationEmail(
+        emailPayload,
+        invitationToken,
+        req.user.name,
+        'employee'
+      );
+
+      console.log('✅ VERBOSE: Invitation email sent successfully to:', email);
+      console.log('✅ SMTP Response:', JSON.stringify(emailResult, null, 2));
+      console.log('✅ Message ID:', emailResult.messageId);
+      console.log('✅ Accepted:', emailResult.accepted);
+      console.log('✅ Rejected:', emailResult.rejected);
+      console.log('✅ Provider:', emailResult.provider);
+
+      // Respond with success including email confirmation
+      res.status(201).json({
+        message: 'Employee invitation sent successfully',
+        employee: {
+          id: employee._id,
+          name: employee.name,
+          email: employee.email,
+          employeeId: employee.employeeId,
+          department: employee.department,
+          position: employee.position,
+          status: employee.status
+        },
+        emailSent: true,
+        emailMessageId: emailResult.messageId
+      });
+
+    } catch (emailError) {
+      console.error('❌ VERBOSE: Email sending error for', email);
+      console.error('❌ Error message:', emailError.message);
+      console.error('❌ Error code:', emailError.code);
+      console.error('❌ Error response:', emailError.response);
+      console.error('❌ Error responseCode:', emailError.responseCode);
+      console.error('❌ Full email error stack:', emailError.stack);
+      console.error('❌ Full email error object:', JSON.stringify(emailError, Object.getOwnPropertyNames(emailError), 2));
+
+      // Still respond with success for employee creation, but note email failure
+      res.status(201).json({
+        message: 'Employee invitation created but email failed',
+        employee: {
+          id: employee._id,
+          name: employee.name,
+          email: employee.email,
+          employeeId: employee.employeeId,
+          department: employee.department,
+          position: employee.position,
+          status: employee.status
+        },
+        emailSent: false,
+        emailError: emailError.message,
+        warning: 'Email delivery failed - please contact the employee manually'
+      });
+    }
 
   } catch (error) {
     console.error('Invite error:', error);
