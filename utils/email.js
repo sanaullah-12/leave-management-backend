@@ -107,7 +107,7 @@ const sendEmail = async ({ email, subject, html, text, fromName }) => {
 // Employee invitation email
 const sendInvitationEmail = async (employee, token, inviterName, role = 'employee') => {
   try {
-    const inviteUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify-invitation?token=${token}`;
+    const inviteUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/invite/${token}`;
 
     const subject = `${employee.company} - Team Access Invitation`;
 
