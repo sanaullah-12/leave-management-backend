@@ -1,4 +1,5 @@
 const nodemailer = require('nodemailer');
+const { sendEmailWithSendGrid, isConfigured: isSendGridConfigured } = require('./sendgridEmail');
 
 // Create fresh transporter for each request to prevent hanging
 const createTransporter = () => {
@@ -25,15 +26,29 @@ const createTransporter = () => {
   });
 };
 
-// Base email function - Nodemailer only
+// Smart email function - tries SendGrid first, falls back to SMTP
 const sendEmail = async ({ email, subject, html, text, fromName }) => {
+  // Try SendGrid first if configured (recommended for Railway)
+  if (isSendGridConfigured()) {
+    try {
+      console.log('🚀 Using SendGrid API for email delivery');
+      return await sendEmailWithSendGrid({ email, subject, html, text, fromName });
+    } catch (error) {
+      console.error('⚠️ SendGrid failed, falling back to SMTP:', error.message);
+      // Continue to SMTP fallback below
+    }
+  }
+
+  // Fallback to SMTP (requires proper Gmail App Password on Railway)
   try {
-    console.log('📧 Nodemailer: Sending email to:', email);
+    console.log('📧 Using SMTP for email delivery');
+    console.log('📧 Recipient:', email);
     console.log('📧 Subject:', subject);
 
     const transporter = createTransporter();
 
     // Verify connection
+    console.log('🔍 Verifying SMTP connection...');
     await transporter.verify();
     console.log('✅ SMTP connection verified');
 
@@ -54,15 +69,15 @@ const sendEmail = async ({ email, subject, html, text, fromName }) => {
       }
     };
 
-    console.log('📤 Sending email via Nodemailer...');
+    console.log('📤 Sending email via SMTP...');
     const result = await transporter.sendMail(mailOptions);
 
-    console.log('✅ Email sent successfully via Nodemailer!');
+    console.log('✅ Email sent successfully via SMTP!');
     console.log('📧 Message ID:', result.messageId);
     console.log('📧 Response:', result.response);
     console.log('📧 Accepted recipients:', result.accepted);
 
-    // Close transporter to prevent hanging connections in production
+    // Close transporter to prevent hanging connections
     transporter.close();
     console.log('🔐 SMTP connection closed');
 
@@ -72,15 +87,15 @@ const sendEmail = async ({ email, subject, html, text, fromName }) => {
       response: result.response,
       accepted: result.accepted,
       rejected: result.rejected,
-      provider: 'Nodemailer-SMTP'
+      provider: 'SMTP-Fallback'
     };
 
   } catch (error) {
-    console.error('❌ Nodemailer email failed:', error.message);
+    console.error('❌ SMTP email failed:', error.message);
     console.error('Full error:', error);
 
-    // Close transporter on error to prevent hanging
-    if (transporter) {
+    // Close transporter on error
+    if (typeof transporter !== 'undefined' && transporter) {
       transporter.close();
       console.log('🔐 SMTP connection closed (error)');
     }
