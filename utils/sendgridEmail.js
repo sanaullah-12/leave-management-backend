@@ -1,15 +1,27 @@
-const sgMail = require('@sendgrid/mail');
+// Safe SendGrid import - handle missing package gracefully
+let sgMail;
+try {
+  sgMail = require('@sendgrid/mail');
+} catch (error) {
+  console.warn('⚠️ @sendgrid/mail package not found - SendGrid features disabled');
+  sgMail = null;
+}
 
 // Configure SendGrid API key
-if (process.env.SENDGRID_API_KEY) {
+if (sgMail && process.env.SENDGRID_API_KEY) {
   sgMail.setApiKey(process.env.SENDGRID_API_KEY);
   console.log('✅ SendGrid configured with API key');
 } else {
-  console.warn('⚠️ SendGrid API key not found - falling back to SMTP');
+  console.warn('⚠️ SendGrid API key not found or package missing - falling back to SMTP');
 }
 
 // SendGrid email function
 const sendEmailWithSendGrid = async ({ email, subject, html, text, fromName }) => {
+  // Check if SendGrid is available
+  if (!sgMail) {
+    throw new Error('SendGrid package not available - @sendgrid/mail not installed');
+  }
+
   try {
     console.log('📧 SendGrid: Sending email to:', email);
 
@@ -70,5 +82,5 @@ const sendEmailWithSendGrid = async ({ email, subject, html, text, fromName }) =
 
 module.exports = {
   sendEmailWithSendGrid,
-  isConfigured: () => !!process.env.SENDGRID_API_KEY
+  isConfigured: () => !!(sgMail && process.env.SENDGRID_API_KEY)
 };
