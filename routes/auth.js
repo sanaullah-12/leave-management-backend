@@ -184,29 +184,14 @@ router.post('/invite-employee', authenticateToken, async (req, res) => {
   console.log('🟢 Method:', req.method, 'URL:', req.url);
   console.log('🟢 Body:', req.body);
   console.log('🟢 User:', req.user?.email);
-  console.log('🟢 Headers:', req.headers['content-type']);
 
   const startTime = Date.now();
-  const timeoutMs = 25000; // 25 second timeout
-
-  // Set up timeout to prevent hanging
-  const timeoutHandler = setTimeout(() => {
-    if (!res.headersSent) {
-      console.error('🚨 INVITE ROUTE TIMEOUT after 25 seconds');
-      res.status(408).json({
-        message: 'Request timeout - email processing took too long',
-        error: 'TIMEOUT_ERROR',
-        timestamp: new Date().toISOString()
-      });
-    }
-  }, timeoutMs);
 
   try {
     console.log('🚀 INVITE ROUTE START:', new Date().toISOString());
 
     // Only admins can invite employees
     if (req.user.role !== 'admin') {
-      clearTimeout(timeoutHandler);
       return res.status(403).json({ message: 'Only admins can invite employees' });
     }
 
@@ -217,7 +202,6 @@ router.post('/invite-employee', authenticateToken, async (req, res) => {
     console.log('🔍 Checking for existing user:', email);
     const existingUser = await User.findOne({ email });
     if (existingUser) {
-      clearTimeout(timeoutHandler);
       console.log('❌ Email already exists:', email);
       return res.status(400).json({ message: 'Email already registered' });
     }
@@ -239,114 +223,59 @@ router.post('/invite-employee', authenticateToken, async (req, res) => {
 
     // Generate invitation token
     console.log('🔑 Generating invitation token...');
-    const tokenStart = Date.now();
     const invitationToken = employee.generateInvitationToken();
-    console.log(`✅ Token generated in ${Date.now() - tokenStart}ms`);
 
     console.log('💾 Saving employee to database...');
-    const saveStart = Date.now();
     await employee.save();
-    console.log(`✅ Employee saved in ${Date.now() - saveStart}ms`);
+    console.log('✅ Employee saved to database');
 
-    // Send invitation email synchronously to ensure it works
-    const { sendInvitationEmail } = require('../utils/email');
-    console.log('🚀 Starting invitation email (synchronous) to:', email);
-
-    try {
-      console.log('📧 Sending invitation email to:', email);
-
-      const emailPayload = {
+    // Queue email for background processing instead of sending synchronously
+    const emailQueue = require('../utils/emailQueue');
+    const emailJobId = emailQueue.add('INVITATION_EMAIL', {
+      employee: {
         ...employee.toObject(),
         company: req.user.company.name
-      };
+      },
+      token: invitationToken,
+      inviterName: req.user.name,
+      role: 'employee'
+    }, 'high'); // High priority for invitations
 
-      const emailResult = await sendInvitationEmail(
-        emailPayload,
-        invitationToken,
-        req.user.name,
-        'employee'
-      );
+    const totalTime = Date.now() - startTime;
+    console.log(`✅ Employee created and email queued in ${totalTime}ms`);
+    console.log(`📬 Email job ID: ${emailJobId}`);
 
-      const totalTime = Date.now() - startTime;
-      console.log('✅ Invitation email sent successfully to:', email);
-      console.log('✅ Message ID:', emailResult.messageId);
-      console.log(`✅ Total invite process time: ${totalTime}ms`);
-
-      // Clear timeout and respond with success
-      clearTimeout(timeoutHandler);
-
-      if (!res.headersSent) {
-        res.status(201).json({
-          message: 'Employee invitation sent successfully',
-          employee: {
-            id: employee._id,
-            name: employee.name,
-            email: employee.email,
-            employeeId: employee.employeeId,
-            department: employee.department,
-            position: employee.position,
-            status: employee.status
-          },
-          emailSent: true,
-          emailMessageId: emailResult.messageId,
-          processingTime: totalTime
-        });
-        console.log('📤 SUCCESS response sent to frontend');
-      } else {
-        console.log('⚠️ Headers already sent, skipping response');
-      }
-
-    } catch (emailError) {
-      const totalTime = Date.now() - startTime;
-      console.error('❌ Email sending failed for', email, '- Error:', emailError.message);
-      console.error(`❌ Failed after ${totalTime}ms`);
-
-      // Clear timeout and respond with email failure
-      clearTimeout(timeoutHandler);
-
-      if (!res.headersSent) {
-        res.status(201).json({
-          message: 'Employee invitation created but email failed',
-          employee: {
-            id: employee._id,
-            name: employee.name,
-            email: employee.email,
-            employeeId: employee.employeeId,
-            department: employee.department,
-            position: employee.position,
-            status: employee.status
-          },
-          emailSent: false,
-          emailError: emailError.message,
-          warning: 'Email delivery failed - please contact the employee manually',
-          processingTime: totalTime
-        });
-        console.log('📤 ERROR response sent to frontend');
-      } else {
-        console.log('⚠️ Headers already sent, skipping error response');
-      }
-    }
+    // Respond immediately with success
+    res.status(201).json({
+      message: 'Employee invitation created successfully - email will be sent shortly',
+      employee: {
+        id: employee._id,
+        name: employee.name,
+        email: employee.email,
+        employeeId: employee.employeeId,
+        department: employee.department,
+        position: employee.position,
+        status: employee.status
+      },
+      emailQueued: true,
+      emailJobId: emailJobId,
+      processingTime: totalTime,
+      note: 'Email delivery is processing in background - employee will receive invitation shortly'
+    });
+    console.log('📤 SUCCESS response sent to frontend');
 
   } catch (error) {
     const totalTime = Date.now() - startTime;
-    console.error('💥 Invite route fatal error:', error.message);
+    console.error('💥 Invite route error:', error.message);
     console.error(`💥 Failed after ${totalTime}ms`);
-    console.error('💥 Full error:', error);
 
-    // Clear timeout and send error response
-    clearTimeout(timeoutHandler);
-
-    if (!res.headersSent) {
-      res.status(500).json({
-        message: 'Failed to invite employee',
-        error: error.message,
-        processingTime: totalTime,
-        timestamp: new Date().toISOString()
-      });
-      console.log('📤 FATAL ERROR response sent to frontend');
-    } else {
-      console.log('⚠️ Headers already sent, cannot send error response');
-    }
+    res.status(500).json({
+      message: 'Failed to invite employee',
+      error: error.message,
+      processingTime: totalTime,
+      timestamp: new Date().toISOString()
+    });
+    console.log('📤 ERROR response sent to frontend');
   }
 });
 
@@ -810,9 +739,9 @@ router.get('/leave-balance/:employeeId?', authenticateToken, async (req, res) =>
     // If employeeId is provided and user is admin, get that employee's balance
     // Otherwise, get current user's balance
     if (employeeId && req.user.role === 'admin') {
-      const employee = await User.findOne({ 
-        _id: employeeId, 
-        company: req.user.company._id 
+      const employee = await User.findOne({
+        _id: employeeId,
+        company: req.user.company._id
       });
       if (!employee) {
         return res.status(404).json({ message: 'Employee not found' });
@@ -833,9 +762,66 @@ router.get('/leave-balance/:employeeId?', authenticateToken, async (req, res) =>
 
   } catch (error) {
     console.error('Get leave balance error:', error);
-    res.status(500).json({ 
-      message: 'Failed to get leave balance', 
-      error: error.message 
+    res.status(500).json({
+      message: 'Failed to get leave balance',
+      error: error.message
+    });
+  }
+});
+
+// Get email queue status (Admin only)
+router.get('/email-queue/status', authenticateToken, async (req, res) => {
+  try {
+    // Only admins can check email queue status
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Only admins can check email queue status' });
+    }
+
+    const emailQueue = require('../utils/emailQueue');
+    const status = emailQueue.getStatus();
+
+    res.status(200).json({
+      message: 'Email queue status retrieved successfully',
+      ...status,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('Get email queue status error:', error);
+    res.status(500).json({
+      message: 'Failed to get email queue status',
+      error: error.message
+    });
+  }
+});
+
+// Get specific email job status
+router.get('/email-queue/job/:jobId', authenticateToken, async (req, res) => {
+  try {
+    // Only admins can check email job status
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Only admins can check email job status' });
+    }
+
+    const { jobId } = req.params;
+    const emailQueue = require('../utils/emailQueue');
+    const job = emailQueue.getJob(parseInt(jobId));
+
+    if (!job) {
+      return res.status(404).json({ message: 'Email job not found' });
+    }
+
+    res.status(200).json({
+      message: 'Email job status retrieved successfully',
+      job: job,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('Get email job status error:', error);
+    res.status(500).json({
+      message: 'Failed to get email job status',
+      error: error.message
     });
   }
 });

@@ -2,7 +2,7 @@ const nodemailer = require('nodemailer');
 
 // Create fresh transporter for each request to prevent hanging
 const createTransporter = () => {
-  return nodemailer.createTransport({
+  return nodemailer.createTransporter({
     host: process.env.SMTP_HOST,
     port: parseInt(process.env.SMTP_PORT) || 587,
     secure: false, // Use STARTTLS
@@ -13,7 +13,15 @@ const createTransporter = () => {
     tls: {
       rejectUnauthorized: true,
       minVersion: 'TLSv1.2'
-    }
+    },
+    // Connection timeouts and limits
+    connectionTimeout: 10000, // 10 seconds to connect
+    greetingTimeout: 5000,    // 5 seconds for greeting
+    socketTimeout: 15000,     // 15 seconds for socket inactivity
+    // Pool settings for better performance
+    pool: false, // Don't use connection pooling to prevent hanging
+    maxConnections: 1,
+    maxMessages: 1
   });
 };
 
