@@ -42,6 +42,9 @@ const authRoutes = require("./routes/auth");
 const leaveRoutes = require("./routes/leaves");
 const userRoutes = require("./routes/users");
 const debugRoutes = require("./routes/debug");
+const attendanceRoutes = require("./routes/attendance");
+const biometricRoutes = require("./routes/biometric");
+const employeesFixRoutes = require("./routes/employees-fix");
 // const notificationRoutes = require("./routes/notifications"); // Removed for Socket.IO implementation
 
 const app = express();
@@ -369,6 +372,9 @@ app.use("/api/auth", authRoutes);
 app.use("/api/leaves", leaveRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/debug", debugRoutes);
+app.use("/api/attendance", attendanceRoutes);
+app.use("/api/biometric", biometricRoutes);
+app.use("/api/employees", employeesFixRoutes);
 // app.use("/api/notifications", notificationRoutes); // Removed for Socket.IO implementation
 
 // Health check route with database status
