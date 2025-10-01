@@ -23,6 +23,7 @@ JSZKLib = null;
 const attendanceSyncService = require('../services/attendanceSync');
 const enhancedAttendanceSyncService = require('../services/enhancedAttendanceSync');
 const zktecoRealDataService = require('../services/zktecoRealDataService');
+const AttendanceDbService = require('../services/attendanceDbService');
 
 // Global handler for unhandled promise rejections (especially js-zklib buffer issues)
 process.on('unhandledRejection', (reason, promise) => {
@@ -904,6 +905,170 @@ router.get('/attendance/:ip/:employeeId', authenticateToken, authorizeRoles('adm
     res.status(500).json({
       success: false,
       message: 'Failed to fetch attendance records from machine'
+    });
+  }
+});
+
+// NEW: Fetch attendance records from database (replaces machine fetching)
+router.get('/db/attendance/:employeeId', authenticateToken, authorizeRoles('admin'), async (req, res) => {
+  try {
+    const { employeeId } = req.params;
+    const { startDate, endDate, days = 7 } = req.query;
+
+    console.log(`📊 Fetching attendance from DATABASE for employee ${employeeId}`);
+
+    // Calculate date range
+    let startDateStr, endDateStr;
+
+    if (startDate && endDate) {
+      startDateStr = startDate;
+      endDateStr = endDate;
+    } else {
+      // Fallback to days-based logic
+      const endDateObj = new Date();
+      const startDateObj = new Date();
+      startDateObj.setDate(endDateObj.getDate() - parseInt(days));
+
+      startDateStr = startDateObj.toISOString().split('T')[0];
+      endDateStr = endDateObj.toISOString().split('T')[0];
+    }
+
+    console.log(`📅 Fetching from database: ${startDateStr} to ${endDateStr}`);
+
+    // Use the new database service
+    const result = await AttendanceDbService.getEmployeeAttendance(
+      employeeId,
+      startDateStr,
+      endDateStr,
+      req.user.company // Pass company ID for multi-tenancy
+    );
+
+    if (!result.success) {
+      return res.status(500).json({
+        success: false,
+        message: `Failed to fetch attendance from database: ${result.error}`,
+        error: result.error
+      });
+    }
+
+    console.log(`✅ Successfully fetched ${result.totalRecords} records from database`);
+
+    res.json(result);
+
+  } catch (error) {
+    console.error('❌ Failed to fetch attendance from database:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch attendance records from database',
+      error: error.message
+    });
+  }
+});
+
+// NEW: Get attendance summary from database  
+router.get('/db/summary/:employeeId', authenticateToken, authorizeRoles('admin'), async (req, res) => {
+  try {
+    const { employeeId } = req.params;
+    const { startDate, endDate, days = 7 } = req.query;
+
+    console.log(`📊 Fetching attendance summary from DATABASE for employee ${employeeId}`);
+
+    // Calculate date range
+    let startDateStr, endDateStr;
+
+    if (startDate && endDate) {
+      startDateStr = startDate;
+      endDateStr = endDate;
+    } else {
+      // Fallback to days-based logic
+      const endDateObj = new Date();
+      const startDateObj = new Date();
+      startDateObj.setDate(endDateObj.getDate() - parseInt(days));
+
+      startDateStr = startDateObj.toISOString().split('T')[0];
+      endDateStr = endDateObj.toISOString().split('T')[0];
+    }
+
+    console.log(`📅 Fetching summary from database: ${startDateStr} to ${endDateStr}`);
+
+    // Use the new database service
+    const result = await AttendanceDbService.getEmployeeAttendanceSummary(
+      employeeId,
+      startDateStr,
+      endDateStr
+    );
+
+    if (!result.success) {
+      return res.status(500).json({
+        success: false,
+        message: `Failed to fetch attendance summary from database: ${result.error}`,
+        error: result.error
+      });
+    }
+
+    console.log(`✅ Successfully generated summary for ${result.totalDays} days from database`);
+
+    res.json(result);
+
+  } catch (error) {
+    console.error('❌ Failed to fetch attendance summary from database:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch attendance summary from database',
+      error: error.message
+    });
+  }
+});
+
+// NEW: Get attendance statistics from database
+router.get('/db/stats', authenticateToken, authorizeRoles('admin'), async (req, res) => {
+  try {
+    const { startDate, endDate, days = 30 } = req.query;
+
+    console.log(`📊 Fetching attendance statistics from DATABASE`);
+
+    // Calculate date range
+    let startDateStr, endDateStr;
+
+    if (startDate && endDate) {
+      startDateStr = startDate;
+      endDateStr = endDate;
+    } else {
+      // Fallback to days-based logic
+      const endDateObj = new Date();
+      const startDateObj = new Date();
+      startDateObj.setDate(endDateObj.getDate() - parseInt(days));
+
+      startDateStr = startDateObj.toISOString().split('T')[0];
+      endDateStr = endDateObj.toISOString().split('T')[0];
+    }
+
+    console.log(`📅 Fetching stats from database: ${startDateStr} to ${endDateStr}`);
+
+    // Use the new database service
+    const result = await AttendanceDbService.getAttendanceStats(
+      startDateStr,
+      endDateStr
+    );
+
+    if (!result.success) {
+      return res.status(500).json({
+        success: false,
+        message: `Failed to fetch attendance statistics from database: ${result.error}`,
+        error: result.error
+      });
+    }
+
+    console.log(`✅ Successfully generated statistics: ${result.totalRecords} records, ${result.uniqueEmployeeCount} employees`);
+
+    res.json(result);
+
+  } catch (error) {
+    console.error('❌ Failed to fetch attendance statistics from database:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch attendance statistics from database',
+      error: error.message
     });
   }
 });
