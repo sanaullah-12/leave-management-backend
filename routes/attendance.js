@@ -24,6 +24,7 @@ const attendanceSyncService = require("../services/attendanceSync");
 const enhancedAttendanceSyncService = require("../services/enhancedAttendanceSync");
 const zktecoRealDataService = require("../services/zktecoRealDataService");
 const AttendanceDbService = require("../services/attendanceDbService");
+const AttendanceSettingsService = require("../services/AttendanceSettingsService");
 
 // Global handler for unhandled promise rejections (especially js-zklib buffer issues)
 process.on("unhandledRejection", (reason, promise) => {
@@ -811,21 +812,33 @@ router.get(
             `✅ Retrieved ${employees.length} employees from ZKTeco device`
           );
 
-          // Format employees for API response
+          // Format employees for API response with UserID as primary identifier
           const formattedEmployees = employees.map((user) => ({
             machineId: user.uid || user.userId || user.id || "unknown",
             name: user.name || `Employee ${user.uid || "Unknown"}`,
-            employeeId:
-              user.cardno ||
-              user.cardNumber ||
-              user.employeeId ||
-              user.uid ||
-              "NO_CARD",
-            department: user.department || user.role || "Unknown Department",
+            // FIXED: Use UserID for accurate attendance correlation
+            employeeId: user.userId || user.rawData?.userid || user.uid || "unknown",
+            // Keep card number as separate reference field
+            cardNumber: user.cardno || user.cardNumber || null,
+            // Show department info
+            department:
+              user.role === 14
+                ? "Admin"
+                : user.role === 0
+                ? "Employee"
+                : `Role ${user.role}`,
             enrolledAt: user.enrolledAt || user.timestamp || new Date(),
             isActive: user.role !== "0" && user.role !== 0,
             privilege: user.privilege || 0,
             role: user.role || 0,
+            // Enhanced metadata for debugging
+            idMapping: {
+              uid: user.uid,
+              userId: user.userId || user.rawData?.userid,
+              cardno: user.cardno || user.cardNumber,
+              originalEmployeeId: user.employeeId,
+              source: "ZKTeco_UserID_primary",
+            },
             rawData: user,
           }));
 
@@ -1331,6 +1344,35 @@ router.get(
         `📅 Fetching from database for frontend: ${startDateStr} to ${endDateStr}`
       );
 
+      // Get effective cutoff time for late detection using settings service
+      let cutoffTime = "09:00"; // fallback default
+      try {
+        // First try to get machine work time
+        let machineWorkTime = null;
+        for (const [ip, zkInstance] of zkInstances.entries()) {
+          try {
+            if (typeof zkInstance.getInfo === "function") {
+              const deviceInfo = await zkInstance.getInfo();
+              if (deviceInfo && deviceInfo.workTime) {
+                machineWorkTime = deviceInfo.workTime;
+                console.log(`⏰ Found machine work time: ${machineWorkTime} from ${ip}`);
+                break;
+              }
+            }
+          } catch (err) {
+            // Continue to next machine
+          }
+        }
+        
+        // Get effective cutoff time (Custom > Machine > Default)
+        cutoffTime = await AttendanceSettingsService.getEffectiveCutoffTime(machineWorkTime);
+        
+      } catch (err) {
+        console.log(
+          `⚠️ Could not fetch late time settings, using default: ${cutoffTime}`
+        );
+      }
+
       // Get attendance data from database
       const result = await AttendanceDbService.getEmployeeAttendance(
         employeeId,
@@ -1355,17 +1397,18 @@ router.get(
           endDateStr
         );
 
-      // Transform data to match frontend expected format
+      // Transform data to match frontend expected format with late time detection
       const transformedData = transformToFrontendFormat(
         result,
         summaryResult.success ? summaryResult : null,
         startDateStr,
         endDateStr,
-        parseInt(days)
+        parseInt(days),
+        cutoffTime
       );
 
       console.log(
-        `✅ Successfully transformed ${result.totalRecords} records for frontend`
+        `✅ Successfully transformed ${result.totalRecords} records for frontend with late detection (cutoff: ${cutoffTime})`
       );
 
       res.json({
@@ -1386,13 +1429,15 @@ router.get(
 /**
  * Transform database attendance data to frontend expected format
  * Shows raw timestamp records without daily grouping calculations
+ * Includes late time detection functionality
  */
 function transformToFrontendFormat(
   attendanceResult,
   summaryResult,
   startDate,
   endDate,
-  days
+  days,
+  cutoffTime = "09:00"
 ) {
   const { attendance, employeeId, totalRecords } = attendanceResult;
 
@@ -1411,24 +1456,64 @@ function transformToFrontendFormat(
   const attendanceRate =
     totalDays > 0 ? Math.round((presentDays / totalDays) * 100) : 0;
 
+  // Helper function to calculate late time
+  const calculateLateTime = (timestamp, cutoffTime) => {
+    const recordTime = new Date(timestamp);
+    const [cutoffHour, cutoffMinute] = cutoffTime.split(":").map(Number);
+
+    // Create cutoff time for the same date
+    const cutoffDateTime = new Date(recordTime);
+    cutoffDateTime.setHours(cutoffHour, cutoffMinute, 0, 0);
+
+    // Calculate if late and by how many minutes
+    if (recordTime > cutoffDateTime) {
+      const lateMinutes = Math.floor(
+        (recordTime - cutoffDateTime) / (1000 * 60)
+      );
+      return {
+        isLate: true,
+        lateMinutes: lateMinutes,
+        lateDisplay:
+          lateMinutes >= 60
+            ? `${Math.floor(lateMinutes / 60)}h ${lateMinutes % 60}m`
+            : `${lateMinutes}m`,
+      };
+    }
+
+    return {
+      isLate: false,
+      lateMinutes: 0,
+      lateDisplay: null,
+    };
+  };
+
   // Transform records to frontend format - showing raw timestamp data
-  const transformedRecords = attendance.map((record) => ({
-    id: record.uid.toString(),
-    employeeId: record.employeeId,
-    date: record.date,
-    time: record.time,
-    type: record.type,
-    status: record.stateText,
-    timestamp: record.timestamp,
-    fullTimestamp: record.timestamp.toISOString(), // Full ISO timestamp
-    dateDisplay: record.timestamp.toLocaleDateString(), // Formatted date
-    timeDisplay: record.timestamp.toLocaleTimeString(), // Formatted time
-    rawState: record.state, // Raw state number from database
-    machineData: record.rawData,
-    recordId: `${record.employeeId}-${
-      record.uid
-    }-${record.timestamp.getTime()}`,
-  }));
+  const transformedRecords = attendance.map((record) => {
+    const lateInfo = calculateLateTime(record.timestamp, cutoffTime);
+
+    return {
+      id: record.uid.toString(),
+      employeeId: record.employeeId,
+      date: record.date,
+      time: record.time,
+      type: record.type,
+      status: record.stateText,
+      timestamp: record.timestamp,
+      fullTimestamp: record.timestamp.toISOString(), // Full ISO timestamp
+      dateDisplay: record.timestamp.toLocaleDateString(), // Formatted date
+      timeDisplay: record.timestamp.toLocaleTimeString(), // Formatted time
+      rawState: record.state, // Raw state number from database
+      machineData: record.rawData,
+      recordId: `${record.employeeId}-${
+        record.uid
+      }-${record.timestamp.getTime()}`,
+      // Late time detection properties
+      isLate: lateInfo.isLate,
+      lateMinutes: lateInfo.lateMinutes,
+      lateDisplay: lateInfo.lateDisplay,
+      cutoffTime: cutoffTime,
+    };
+  });
 
   // Sort records by timestamp (oldest first for filtering)
   transformedRecords.sort(
@@ -1466,6 +1551,11 @@ function transformToFrontendFormat(
     }
   });
 
+  // Calculate late days count from filtered records
+  const lateDaysCount = filteredRecords.filter(
+    (record) => record.isLate
+  ).length;
+
   // Sort filtered records by timestamp (newest first for display)
   filteredRecords.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
@@ -1481,7 +1571,7 @@ function transformToFrontendFormat(
       totalDays,
       presentDays,
       absentDays,
-      lateDays: 0, // Removed late calculation
+      lateDays: lateDaysCount, // Now calculated based on late detection
       attendanceRate,
       avgWorkingHours: 0, // Removed working hours calculation
     },
@@ -1498,48 +1588,35 @@ router.put(
   "/settings/late-time",
   authenticateToken,
   authorizeRoles("admin"),
-  (req, res) => {
+  async (req, res) => {
     try {
       const { cutoffTime, useCustomCutoff = false } = req.body;
+      const userId = req.user._id;
 
-      if (useCustomCutoff && !cutoffTime) {
-        return res.status(400).json({
+      // Use the settings service to update and persist settings
+      const result = await AttendanceSettingsService.updateLateTimeSettings(
+        { cutoffTime, useCustomCutoff },
+        userId
+      );
+
+      if (result.success) {
+        res.json({
+          success: true,
+          message: result.message,
+          settings: result.settings,
+        });
+      } else {
+        res.status(400).json({
           success: false,
-          message: "Cutoff time is required when using custom cutoff",
+          message: result.message,
         });
       }
-
-      // Validate time format (HH:MM)
-      if (useCustomCutoff) {
-        const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
-        if (!timeRegex.test(cutoffTime)) {
-          return res.status(400).json({
-            success: false,
-            message: "Invalid time format. Use HH:MM format (e.g., 09:00)",
-          });
-        }
-      }
-
-      // Store settings (in production, save to database)
-      const settings = {
-        useCustomCutoff,
-        cutoffTime: useCustomCutoff ? cutoffTime : "09:00",
-        updatedAt: new Date(),
-        updatedBy: req.user._id,
-      };
-
-      console.log(`⚙️ Updated late time settings:`, settings);
-
-      res.json({
-        success: true,
-        message: "Late time settings updated successfully",
-        settings,
-      });
     } catch (error) {
       console.error("❌ Failed to update late time settings:", error);
       res.status(500).json({
         success: false,
         message: "Failed to update late time settings",
+        error: error.message,
       });
     }
   }
@@ -1601,26 +1678,36 @@ router.get(
         }
       }
 
-      // Default settings with machine info if available
-      const settings = {
-        useCustomCutoff: false,
-        cutoffTime: machineDefaultTime,
-        machineDefault: true,
-        description: machineSettings
-          ? `Using time rules from ZKTeco machine ${machineSettings.ip}`
-          : "Using default time rules (no machine connected)",
-        machineSettings,
-      };
-
-      res.json({
-        success: true,
-        settings,
-      });
+      // Get settings from database with machine information
+      const result = await AttendanceSettingsService.getSettingsWithMachineInfo(machineSettings);
+      
+      if (result.success) {
+        res.json({
+          success: true,
+          settings: result.settings,
+        });
+      } else {
+        // Fallback to basic defaults if database fails
+        res.json({
+          success: true,
+          settings: {
+            useCustomCutoff: false,
+            cutoffTime: machineDefaultTime,
+            machineDefault: true,
+            description: machineSettings
+              ? `Using time rules from ZKTeco machine ${machineSettings.ip}`
+              : "Using default time rules (no machine connected)",
+            machineSettings,
+            error: result.error
+          },
+        });
+      }
     } catch (error) {
       console.error("❌ Failed to fetch late time settings:", error);
       res.status(500).json({
         success: false,
         message: "Failed to fetch late time settings",
+        error: error.message,
       });
     }
   }
