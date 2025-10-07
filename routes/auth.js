@@ -1,49 +1,68 @@
-const express = require('express');
-const { generateToken } = require('../utils/jwt');
-const { authenticateToken } = require('../middleware/auth');
-const User = require('../models/User');
-const Company = require('../models/Company');
+const express = require("express");
+const { generateToken } = require("../utils/jwt");
+const { authenticateToken } = require("../middleware/auth");
+const User = require("../models/User");
+const Company = require("../models/Company");
 
 const router = express.Router();
 
 // Register company admin
-router.post('/register-company', async (req, res) => {
-  console.log('=== REGISTRATION REQUEST ===');
-  console.log('Request body:', req.body);
-  console.log('Headers:', req.headers);
-  console.log('MongoDB status:', require('mongoose').connection.readyState);
-  
+router.post("/register-company", async (req, res) => {
+  console.log("=== REGISTRATION REQUEST ===");
+  console.log("Request body:", req.body);
+  console.log("Headers:", req.headers);
+  console.log("MongoDB status:", require("mongoose").connection.readyState);
+
   try {
-    const { companyName, companyEmail, adminName, adminEmail, password, phone } = req.body;
-    
+    const {
+      companyName,
+      companyEmail,
+      adminName,
+      adminEmail,
+      password,
+      phone,
+    } = req.body;
+
     // Validate required fields
-    if (!companyName || !companyEmail || !adminName || !adminEmail || !password) {
-      console.log('Missing required fields');
+    if (
+      !companyName ||
+      !companyEmail ||
+      !adminName ||
+      !adminEmail ||
+      !password
+    ) {
+      console.log("Missing required fields");
       return res.status(400).json({
-        message: 'Missing required fields',
-        required: ['companyName', 'companyEmail', 'adminName', 'adminEmail', 'password']
+        message: "Missing required fields",
+        required: [
+          "companyName",
+          "companyEmail",
+          "adminName",
+          "adminEmail",
+          "password",
+        ],
       });
     }
 
     // Check if company already exists
-    const existingCompany = await Company.findOne({ 
-      $or: [{ name: companyName }, { email: companyEmail }] 
+    const existingCompany = await Company.findOne({
+      $or: [{ name: companyName }, { email: companyEmail }],
     });
     if (existingCompany) {
-      return res.status(400).json({ message: 'Company already exists' });
+      return res.status(400).json({ message: "Company already exists" });
     }
 
     // Check if admin email already exists
     const existingUser = await User.findOne({ email: adminEmail });
     if (existingUser) {
-      return res.status(400).json({ message: 'Email already registered' });
+      return res.status(400).json({ message: "Email already registered" });
     }
 
     // Create company
     const company = new Company({
       name: companyName,
       email: companyEmail,
-      phone
+      phone,
     });
     await company.save();
 
@@ -52,110 +71,118 @@ router.post('/register-company', async (req, res) => {
       name: adminName,
       email: adminEmail,
       password,
-      role: 'admin',
-      employeeId: 'ADMIN001',
-      department: 'Administration',
-      position: 'Administrator',
+      role: "admin",
+      employeeId: "ADMIN001",
+      department: "Administration",
+      position: "Administrator",
       joinDate: new Date(),
       company: company._id,
-      phone: phone || '',
-      status: 'active', // Admin is automatically active when creating company
-      isActive: true // Ensure admin is active
+      phone: phone || "",
+      status: "active", // Admin is automatically active when creating company
+      isActive: true, // Ensure admin is active
     });
-    
-    console.log('Creating admin user with data:', {
+
+    console.log("Creating admin user with data:", {
       name: adminName,
       email: adminEmail,
-      role: 'admin',
-      department: 'Administration',
-      position: 'Administrator',
-      status: 'active'
+      role: "admin",
+      department: "Administration",
+      position: "Administrator",
+      status: "active",
     });
-    
+
     await admin.save();
-    console.log('Admin user created successfully:', admin._id);
+    console.log("Admin user created successfully:", admin._id);
 
     // Generate token
-    const token = generateToken({ 
-      id: admin._id, 
+    const token = generateToken({
+      id: admin._id,
       role: admin.role,
-      company: company._id 
+      company: company._id,
     });
 
     res.status(201).json({
-      message: 'Company registered successfully',
+      message: "Company registered successfully",
       token,
       user: {
         id: admin._id,
         name: admin.name,
         email: admin.email,
         role: admin.role,
-        company: company.name
-      }
+        company: company.name,
+      },
     });
-
   } catch (error) {
-    console.error('Registration error:', error);
-    console.error('Error stack:', error.stack);
-    console.error('Request body:', req.body);
-    
+    console.error("Registration error:", error);
+    console.error("Error stack:", error.stack);
+    console.error("Request body:", req.body);
+
     // Handle specific validation errors
-    if (error.name === 'ValidationError') {
-      const validationErrors = Object.values(error.errors).map(err => err.message);
-      return res.status(400).json({ 
-        message: 'Validation failed', 
-        errors: validationErrors 
+    if (error.name === "ValidationError") {
+      const validationErrors = Object.values(error.errors).map(
+        (err) => err.message
+      );
+      return res.status(400).json({
+        message: "Validation failed",
+        errors: validationErrors,
       });
     }
-    
+
     // Handle MongoDB duplicate key errors
     if (error.code === 11000) {
       const field = Object.keys(error.keyValue)[0];
-      return res.status(400).json({ 
+      return res.status(400).json({
         message: `${field} already exists`,
-        error: `Duplicate ${field}: ${error.keyValue[field]}`
+        error: `Duplicate ${field}: ${error.keyValue[field]}`,
       });
     }
-    
-    res.status(500).json({ 
-      message: 'Registration failed', 
+
+    res.status(500).json({
+      message: "Registration failed",
       error: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
     });
   }
 });
 
 // Login
-router.post('/login', async (req, res) => {
+router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
     // Find user and include password for comparison
-    const user = await User.findOne({ email }).select('+password').populate('company');
+    const user = await User.findOne({ email })
+      .select("+password")
+      .populate("company");
 
     if (!user || !user.isActive) {
-      return res.status(401).json({ message: 'Invalid credentials' });
+      return res.status(401).json({ message: "Invalid credentials" });
     }
 
-    if (user.status !== 'active') {
-      return res.status(401).json({ message: 'Account not verified. Please check your email for verification link.' });
+    if (user.status !== "active") {
+      return res
+        .status(401)
+        .json({
+          message:
+            "Account not verified. Please check your email for verification link.",
+        });
     }
 
     // Check password
     const isPasswordValid = await user.comparePassword(password);
     if (!isPasswordValid) {
-      return res.status(401).json({ message: 'Invalid credentials' });
+      return res.status(401).json({ message: "Invalid credentials" });
     }
 
     // Generate token
-    const token = generateToken({ 
-      id: user._id, 
+    const token = generateToken({
+      id: user._id,
       role: user.role,
-      company: user.company._id 
+      company: user.company._id,
     });
 
     res.status(200).json({
-      message: 'Login successful',
+      message: "Login successful",
       token,
       user: {
         id: user._id,
@@ -165,81 +192,103 @@ router.post('/login', async (req, res) => {
         employeeId: user.employeeId,
         department: user.department,
         position: user.position,
-        company: user.company.name
-      }
+        company: user.company.name,
+      },
     });
-
   } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({ 
-      message: 'Login failed', 
-      error: error.message 
+    console.error("Login error:", error);
+    res.status(500).json({
+      message: "Login failed",
+      error: error.message,
     });
   }
 });
 
 // Invite employee
-router.post('/invite-employee', authenticateToken, async (req, res) => {
-  console.log('🟢 === INVITE ROUTE HIT === REQUEST RECEIVED ===');
-  console.log('🟢 Method:', req.method, 'URL:', req.url);
-  console.log('🟢 Body:', req.body);
-  console.log('🟢 User:', req.user?.email);
+router.post("/invite-employee", authenticateToken, async (req, res) => {
+  console.log("🟢 === INVITE ROUTE HIT === REQUEST RECEIVED ===");
+  console.log("🟢 Method:", req.method, "URL:", req.url);
+  console.log("🟢 Body:", req.body);
+  console.log("🟢 User:", req.user?.email);
 
   const startTime = Date.now();
 
   try {
-    console.log('🚀 INVITE ROUTE START:', new Date().toISOString());
+    console.log("🚀 INVITE ROUTE START:", new Date().toISOString());
 
     // Only admins can invite employees
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Only admins can invite employees' });
+    if (req.user.role !== "admin") {
+      return res
+        .status(403)
+        .json({ message: "Only admins can invite employees" });
     }
 
-    const { name, email, department, position, joinDate } = req.body;
-    console.log('📝 Processing invite for:', email);
+    const { name, email, department, position, joinDate, employeeId } =
+      req.body;
+    console.log("📝 Processing invite for:", email);
+    console.log("🆔 Custom Employee ID provided:", employeeId);
 
     // Check if email already exists
-    console.log('🔍 Checking for existing user:', email);
+    console.log("🔍 Checking for existing user:", email);
     const existingUser = await User.findOne({ email });
     if (existingUser) {
-      console.log('❌ Email already exists:', email);
-      return res.status(400).json({ message: 'Email already registered' });
+      console.log("❌ Email already exists:", email);
+      return res.status(400).json({ message: "Email already registered" });
     }
-    console.log('✅ Email available:', email);
+    console.log("✅ Email available:", email);
+
+    // Check if custom employeeId already exists (if provided)
+    if (employeeId) {
+      console.log("🔍 Checking for existing employeeId:", employeeId);
+      const existingEmployee = await User.findOne({
+        employeeId,
+        company: req.user.company,
+      });
+      if (existingEmployee) {
+        console.log("❌ Employee ID already exists:", employeeId);
+        return res.status(400).json({ message: "Employee ID already exists" });
+      }
+      console.log("✅ Employee ID available:", employeeId);
+    }
 
     // Create employee with pending status (no password yet)
-    console.log('👤 Creating employee record...');
+    console.log("👤 Creating employee record...");
     const employee = new User({
       name,
       email,
-      role: 'employee',
+      role: "employee",
       department,
       position,
       joinDate: new Date(joinDate),
       company: req.user.company,
       invitedBy: req.user._id,
-      status: 'pending'
+      status: "pending",
+      ...(employeeId && { employeeId }), // Use custom employeeId if provided
     });
 
     // Generate invitation token
-    console.log('🔑 Generating invitation token...');
+    console.log("🔑 Generating invitation token...");
     const invitationToken = employee.generateInvitationToken();
 
-    console.log('💾 Saving employee to database...');
+    console.log("💾 Saving employee to database...");
     await employee.save();
-    console.log('✅ Employee saved to database');
+    console.log("✅ Employee saved to database");
 
     // Queue email for background processing instead of sending synchronously
-    const emailQueue = require('../utils/emailQueue');
-    const emailJobId = emailQueue.add('INVITATION_EMAIL', {
-      employee: {
-        ...employee.toObject(),
-        company: req.user.company.name
+    const emailQueue = require("../utils/emailQueue");
+    const emailJobId = emailQueue.add(
+      "INVITATION_EMAIL",
+      {
+        employee: {
+          ...employee.toObject(),
+          company: req.user.company.name,
+        },
+        token: invitationToken,
+        inviterName: req.user.name,
+        role: "employee",
       },
-      token: invitationToken,
-      inviterName: req.user.name,
-      role: 'employee'
-    }, 'high'); // High priority for invitations
+      "high"
+    ); // High priority for invitations
 
     const totalTime = Date.now() - startTime;
     console.log(`✅ Employee created and email queued in ${totalTime}ms`);
@@ -247,7 +296,8 @@ router.post('/invite-employee', authenticateToken, async (req, res) => {
 
     // Respond immediately with success
     res.status(201).json({
-      message: 'Employee invitation created successfully - email will be sent shortly',
+      message:
+        "Employee invitation created successfully - email will be sent shortly",
       employee: {
         id: employee._id,
         name: employee.name,
@@ -255,82 +305,88 @@ router.post('/invite-employee', authenticateToken, async (req, res) => {
         employeeId: employee.employeeId,
         department: employee.department,
         position: employee.position,
-        status: employee.status
+        status: employee.status,
       },
       emailQueued: true,
       emailJobId: emailJobId,
       processingTime: totalTime,
-      note: 'Email delivery is processing in background - employee will receive invitation shortly'
+      note: "Email delivery is processing in background - employee will receive invitation shortly",
     });
-    console.log('📤 SUCCESS response sent to frontend');
-
+    console.log("📤 SUCCESS response sent to frontend");
   } catch (error) {
     const totalTime = Date.now() - startTime;
-    console.error('💥 Invite route error:', error.message);
+    console.error("💥 Invite route error:", error.message);
     console.error(`💥 Failed after ${totalTime}ms`);
 
     res.status(500).json({
-      message: 'Failed to invite employee',
+      message: "Failed to invite employee",
       error: error.message,
       processingTime: totalTime,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     });
-    console.log('📤 ERROR response sent to frontend');
+    console.log("📤 ERROR response sent to frontend");
   }
 });
 
 // Invite admin
-router.post('/invite-admin', authenticateToken, async (req, res) => {
+router.post("/invite-admin", authenticateToken, async (req, res) => {
   try {
     // Only admins can invite other admins
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Only admins can invite other admins' });
+    if (req.user.role !== "admin") {
+      return res
+        .status(403)
+        .json({ message: "Only admins can invite other admins" });
     }
 
-    const { name, email, department = 'Administration', position = 'Administrator' } = req.body;
+    const {
+      name,
+      email,
+      department = "Administration",
+      position = "Administrator",
+    } = req.body;
 
     // Check if email already exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
-      return res.status(400).json({ message: 'Email already registered' });
+      return res.status(400).json({ message: "Email already registered" });
     }
 
     // Create admin with pending status
     const admin = new User({
       name,
       email,
-      role: 'admin',
+      role: "admin",
       department,
       position,
       joinDate: new Date(),
       company: req.user.company,
       invitedBy: req.user._id,
-      status: 'pending'
+      status: "pending",
     });
 
     // Generate invitation token
     const invitationToken = admin.generateInvitationToken();
-    
+
     await admin.save();
 
     // Send invitation email
-    const { sendInvitationEmail } = require('../utils/email');
-    console.log('🚀 Sending admin invitation email to:', email);
-    
+    const { sendInvitationEmail } = require("../utils/email");
+    console.log("🚀 Sending admin invitation email to:", email);
+
     try {
       await sendInvitationEmail(
         {
           ...admin.toObject(),
-          company: req.user.company.name
+          company: req.user.company.name,
         },
         invitationToken,
         req.user.name,
-        'admin'
+        "admin"
       );
 
-      console.log('✅ Admin invitation email sent successfully');
+      console.log("✅ Admin invitation email sent successfully");
       res.status(201).json({
-        message: 'Admin invitation sent successfully',
+        message: "Admin invitation sent successfully",
         admin: {
           id: admin._id,
           name: admin.name,
@@ -338,18 +394,18 @@ router.post('/invite-admin', authenticateToken, async (req, res) => {
           employeeId: admin.employeeId,
           department: admin.department,
           position: admin.position,
-          status: admin.status
-        }
+          status: admin.status,
+        },
       });
-
     } catch (emailError) {
-      console.error('❌ Admin email sending error:', emailError.message);
-      console.error('❌ Full admin email error:', emailError);
+      console.error("❌ Admin email sending error:", emailError.message);
+      console.error("❌ Full admin email error:", emailError);
 
       // Return success but with email warning - don't fail the invitation
       return res.status(201).json({
-        message: 'Admin invitation created successfully, but email delivery failed. Please share the invitation link manually.',
-        warning: 'Email delivery failed',
+        message:
+          "Admin invitation created successfully, but email delivery failed. Please share the invitation link manually.",
+        warning: "Email delivery failed",
         emailError: emailError.message,
         admin: {
           id: admin._id,
@@ -358,32 +414,33 @@ router.post('/invite-admin', authenticateToken, async (req, res) => {
           employeeId: admin.employeeId,
           department: admin.department,
           position: admin.position,
-          status: admin.status
+          status: admin.status,
         },
         invitationToken: invitationToken,
-        manualInviteUrl: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify-invitation/${invitationToken}`,
+        manualInviteUrl: `${
+          process.env.FRONTEND_URL || "http://localhost:3000"
+        }/verify-invitation/${invitationToken}`,
         troubleshooting: {
-          message: 'Check Railway logs for detailed email configuration issues',
-          debugEndpoint: '/api/debug/email-config',
-          testEndpoint: '/api/debug/test-email'
-        }
+          message: "Check Railway logs for detailed email configuration issues",
+          debugEndpoint: "/api/debug/email-config",
+          testEndpoint: "/api/debug/test-email",
+        },
       });
     }
-
   } catch (error) {
-    console.error('Invite admin error:', error);
-    res.status(500).json({ 
-      message: 'Failed to invite admin', 
-      error: error.message 
+    console.error("Invite admin error:", error);
+    res.status(500).json({
+      message: "Failed to invite admin",
+      error: error.message,
     });
   }
 });
 
 // Get current user profile
-router.get('/profile', authenticateToken, async (req, res) => {
+router.get("/profile", authenticateToken, async (req, res) => {
   try {
-    const user = await User.findById(req.user._id).populate('company');
-    
+    const user = await User.findById(req.user._id).populate("company");
+
     res.status(200).json({
       user: {
         id: user._id,
@@ -394,75 +451,84 @@ router.get('/profile', authenticateToken, async (req, res) => {
         department: user.department,
         position: user.position,
         joinDate: user.joinDate,
-        company: user.company.name
-      }
+        company: user.company.name,
+      },
     });
   } catch (error) {
-    res.status(500).json({ message: 'Failed to get profile', error: error.message });
+    res
+      .status(500)
+      .json({ message: "Failed to get profile", error: error.message });
   }
 });
 
 // Verify invitation and set password
-router.post('/verify-invitation/:token', async (req, res) => {
+router.post("/verify-invitation/:token", async (req, res) => {
   try {
     const { token } = req.params;
     const { password } = req.body;
 
     if (!password) {
-      return res.status(400).json({ message: 'Password is required' });
+      return res.status(400).json({ message: "Password is required" });
     }
 
     if (password.length < 6) {
-      return res.status(400).json({ message: 'Password must be at least 6 characters long' });
+      return res
+        .status(400)
+        .json({ message: "Password must be at least 6 characters long" });
     }
 
     // Hash the token to compare with database
-    const crypto = require('crypto');
-    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+    const crypto = require("crypto");
+    const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
 
     // Find user by invitation token
     const user = await User.findOne({
       invitationToken: hashedToken,
-      invitationExpires: { $gt: Date.now() }
-    }).populate('company');
+      invitationExpires: { $gt: Date.now() },
+    }).populate("company");
 
     if (!user) {
-      return res.status(400).json({ message: 'Invalid or expired invitation token' });
+      return res
+        .status(400)
+        .json({ message: "Invalid or expired invitation token" });
     }
 
     // Set password and activate user
     user.password = password;
-    user.status = 'active';
+    user.status = "active";
     user.invitationToken = undefined;
     user.invitationExpires = undefined;
-    
+
     await user.save();
 
     // Generate JWT token
-    const jwtToken = generateToken({ 
-      id: user._id, 
+    const jwtToken = generateToken({
+      id: user._id,
       role: user.role,
-      company: user.company._id 
+      company: user.company._id,
     });
 
     // Send notification to admins about employee joining
-    const { sendEmployeeJoinedNotification } = require('../utils/email');
-    const admins = await User.find({ 
-      company: user.company._id, 
-      role: 'admin', 
-      status: 'active' 
+    const { sendEmployeeJoinedNotification } = require("../utils/email");
+    const admins = await User.find({
+      company: user.company._id,
+      role: "admin",
+      status: "active",
     });
 
     for (const admin of admins) {
       try {
         await sendEmployeeJoinedNotification(admin, user);
       } catch (emailError) {
-        console.error('Failed to send employee joined notification:', emailError);
+        console.error(
+          "Failed to send employee joined notification:",
+          emailError
+        );
       }
     }
 
     res.status(200).json({
-      message: 'Account verified successfully',
+      message: "Account verified successfully",
       token: jwtToken,
       user: {
         id: user._id,
@@ -473,36 +539,39 @@ router.post('/verify-invitation/:token', async (req, res) => {
         department: user.department,
         position: user.position,
         company: user.company.name,
-        status: user.status
-      }
+        status: user.status,
+      },
     });
-
   } catch (error) {
-    console.error('Verification error:', error);
-    res.status(500).json({ 
-      message: 'Failed to verify invitation', 
-      error: error.message 
+    console.error("Verification error:", error);
+    res.status(500).json({
+      message: "Failed to verify invitation",
+      error: error.message,
     });
   }
 });
 
 // Get invitation details (for verification page)
-router.get('/invitation/:token', async (req, res) => {
+router.get("/invitation/:token", async (req, res) => {
   try {
     const { token } = req.params;
 
     // Hash the token to compare with database
-    const crypto = require('crypto');
-    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+    const crypto = require("crypto");
+    const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
 
     // Find user by invitation token
     const user = await User.findOne({
       invitationToken: hashedToken,
-      invitationExpires: { $gt: Date.now() }
-    }).populate('company').populate('invitedBy', 'name');
+      invitationExpires: { $gt: Date.now() },
+    })
+      .populate("company")
+      .populate("invitedBy", "name");
 
     if (!user) {
-      return res.status(400).json({ message: 'Invalid or expired invitation token' });
+      return res
+        .status(400)
+        .json({ message: "Invalid or expired invitation token" });
     }
 
     res.status(200).json({
@@ -513,38 +582,38 @@ router.get('/invitation/:token', async (req, res) => {
         department: user.department,
         position: user.position,
         company: user.company.name,
-        invitedBy: user.invitedBy.name
-      }
+        invitedBy: user.invitedBy.name,
+      },
     });
-
   } catch (error) {
-    console.error('Get invitation error:', error);
-    res.status(500).json({ 
-      message: 'Failed to get invitation details', 
-      error: error.message 
+    console.error("Get invitation error:", error);
+    res.status(500).json({
+      message: "Failed to get invitation details",
+      error: error.message,
     });
   }
 });
 
 // Forgot password - Request reset link
-router.post('/forgot-password', async (req, res) => {
+router.post("/forgot-password", async (req, res) => {
   try {
     const { email } = req.body;
 
     if (!email) {
-      return res.status(400).json({ message: 'Email is required' });
+      return res.status(400).json({ message: "Email is required" });
     }
 
     // Find user by email
-    const user = await User.findOne({ 
+    const user = await User.findOne({
       email: email.toLowerCase(),
-      status: 'active' // Only active users can reset password
-    }).populate('company');
+      status: "active", // Only active users can reset password
+    }).populate("company");
 
     if (!user) {
       // For security, always send success response even if user doesn't exist
-      return res.status(200).json({ 
-        message: 'If an account exists with that email, you will receive a password reset link shortly.' 
+      return res.status(200).json({
+        message:
+          "If an account exists with that email, you will receive a password reset link shortly.",
       });
     }
 
@@ -553,158 +622,164 @@ router.post('/forgot-password', async (req, res) => {
     await user.save();
 
     // Send password reset email
-    const { sendPasswordResetEmail } = require('../utils/email');
+    const { sendPasswordResetEmail } = require("../utils/email");
     await sendPasswordResetEmail(
       {
         ...user.toObject(),
-        company: user.company.name
+        company: user.company.name,
       },
       resetToken
     );
 
     res.status(200).json({
-      message: 'If an account exists with that email, you will receive a password reset link shortly.'
+      message:
+        "If an account exists with that email, you will receive a password reset link shortly.",
     });
-
   } catch (error) {
-    console.error('Forgot password error:', error);
-    res.status(500).json({ 
-      message: 'Failed to process password reset request', 
-      error: error.message 
+    console.error("Forgot password error:", error);
+    res.status(500).json({
+      message: "Failed to process password reset request",
+      error: error.message,
     });
   }
 });
 
 // Reset password with token
-router.post('/reset-password/:token', async (req, res) => {
+router.post("/reset-password/:token", async (req, res) => {
   try {
     const { token } = req.params;
     const { password } = req.body;
 
     if (!password) {
-      return res.status(400).json({ message: 'Password is required' });
+      return res.status(400).json({ message: "Password is required" });
     }
 
     if (password.length < 6) {
-      return res.status(400).json({ message: 'Password must be at least 6 characters long' });
+      return res
+        .status(400)
+        .json({ message: "Password must be at least 6 characters long" });
     }
 
     // Hash the token to compare with database
-    const crypto = require('crypto');
-    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+    const crypto = require("crypto");
+    const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
 
     // Find user by reset token
     const user = await User.findOne({
       passwordResetToken: hashedToken,
-      passwordResetExpires: { $gt: Date.now() }
+      passwordResetExpires: { $gt: Date.now() },
     });
 
     if (!user) {
-      return res.status(400).json({ message: 'Invalid or expired password reset token' });
+      return res
+        .status(400)
+        .json({ message: "Invalid or expired password reset token" });
     }
 
     // Update password and clear reset fields
     user.password = password;
     user.passwordResetToken = undefined;
     user.passwordResetExpires = undefined;
-    
+
     await user.save();
 
     res.status(200).json({
-      message: 'Password reset successfully. You can now log in with your new password.'
+      message:
+        "Password reset successfully. You can now log in with your new password.",
     });
-
   } catch (error) {
-    console.error('Reset password error:', error);
-    res.status(500).json({ 
-      message: 'Failed to reset password', 
-      error: error.message 
+    console.error("Reset password error:", error);
+    res.status(500).json({
+      message: "Failed to reset password",
+      error: error.message,
     });
   }
 });
 
 // Validate reset token (for frontend to check if token is valid)
-router.get('/reset-password/:token', async (req, res) => {
+router.get("/reset-password/:token", async (req, res) => {
   try {
     const { token } = req.params;
 
     // Hash the token to compare with database
-    const crypto = require('crypto');
-    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+    const crypto = require("crypto");
+    const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
 
     // Find user by reset token
     const user = await User.findOne({
       passwordResetToken: hashedToken,
-      passwordResetExpires: { $gt: Date.now() }
-    }).select('name email');
+      passwordResetExpires: { $gt: Date.now() },
+    }).select("name email");
 
     if (!user) {
-      return res.status(400).json({ message: 'Invalid or expired password reset token' });
+      return res
+        .status(400)
+        .json({ message: "Invalid or expired password reset token" });
     }
 
     res.status(200).json({
       valid: true,
       user: {
         name: user.name,
-        email: user.email
-      }
+        email: user.email,
+      },
     });
-
   } catch (error) {
-    console.error('Validate reset token error:', error);
-    res.status(500).json({ 
-      message: 'Failed to validate reset token', 
-      error: error.message 
+    console.error("Validate reset token error:", error);
+    res.status(500).json({
+      message: "Failed to validate reset token",
+      error: error.message,
     });
   }
 });
 
 // Change password (for authenticated users)
-router.put('/change-password', authenticateToken, async (req, res) => {
+router.put("/change-password", authenticateToken, async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
 
-    const user = await User.findById(req.user._id).select('+password');
-    
+    const user = await User.findById(req.user._id).select("+password");
+
     // Verify current password
     const isPasswordValid = await user.comparePassword(currentPassword);
     if (!isPasswordValid) {
-      return res.status(400).json({ message: 'Current password is incorrect' });
+      return res.status(400).json({ message: "Current password is incorrect" });
     }
 
     // Update password
     user.password = newPassword;
     await user.save();
 
-    res.status(200).json({ message: 'Password changed successfully' });
-
+    res.status(200).json({ message: "Password changed successfully" });
   } catch (error) {
-    res.status(500).json({ 
-      message: 'Failed to change password', 
-      error: error.message 
+    res.status(500).json({
+      message: "Failed to change password",
+      error: error.message,
     });
   }
 });
 
 // Update employee leave quota (Admin only)
-router.put('/leave-quota/:employeeId', authenticateToken, async (req, res) => {
+router.put("/leave-quota/:employeeId", authenticateToken, async (req, res) => {
   try {
     // Only admins can set leave quotas
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Only admins can set leave quotas' });
+    if (req.user.role !== "admin") {
+      return res
+        .status(403)
+        .json({ message: "Only admins can set leave quotas" });
     }
 
     const { employeeId } = req.params;
     const { leaveQuota } = req.body;
 
     // Find employee in the same company
-    const employee = await User.findOne({ 
-      _id: employeeId, 
-      company: req.user.company._id 
+    const employee = await User.findOne({
+      _id: employeeId,
+      company: req.user.company._id,
     });
 
     if (!employee) {
-      return res.status(404).json({ message: 'Employee not found' });
+      return res.status(404).json({ message: "Employee not found" });
     }
 
     // Update leave quota
@@ -712,116 +787,120 @@ router.put('/leave-quota/:employeeId', authenticateToken, async (req, res) => {
     await employee.save();
 
     res.status(200).json({
-      message: 'Leave quota updated successfully',
+      message: "Leave quota updated successfully",
       employee: {
         id: employee._id,
         name: employee.name,
         email: employee.email,
-        leaveQuota: employee.leaveQuota
-      }
+        leaveQuota: employee.leaveQuota,
+      },
     });
-
   } catch (error) {
-    console.error('Update leave quota error:', error);
-    res.status(500).json({ 
-      message: 'Failed to update leave quota', 
-      error: error.message 
+    console.error("Update leave quota error:", error);
+    res.status(500).json({
+      message: "Failed to update leave quota",
+      error: error.message,
     });
   }
 });
 
 // Get employee leave balance
-router.get('/leave-balance/:employeeId?', authenticateToken, async (req, res) => {
-  try {
-    const { employeeId } = req.params;
-    let targetUserId;
+router.get(
+  "/leave-balance/:employeeId?",
+  authenticateToken,
+  async (req, res) => {
+    try {
+      const { employeeId } = req.params;
+      let targetUserId;
 
-    // If employeeId is provided and user is admin, get that employee's balance
-    // Otherwise, get current user's balance
-    if (employeeId && req.user.role === 'admin') {
-      const employee = await User.findOne({
-        _id: employeeId,
-        company: req.user.company._id
-      });
-      if (!employee) {
-        return res.status(404).json({ message: 'Employee not found' });
+      // If employeeId is provided and user is admin, get that employee's balance
+      // Otherwise, get current user's balance
+      if (employeeId && req.user.role === "admin") {
+        const employee = await User.findOne({
+          _id: employeeId,
+          company: req.user.company._id,
+        });
+        if (!employee) {
+          return res.status(404).json({ message: "Employee not found" });
+        }
+        targetUserId = employee._id;
+      } else {
+        targetUserId = req.user._id;
       }
-      targetUserId = employee._id;
-    } else {
-      targetUserId = req.user._id;
+
+      const user = await User.findById(targetUserId);
+      const leaveBalances = await user.getAllLeaveBalances();
+
+      res.status(200).json({
+        employeeId: targetUserId,
+        name: user.name,
+        leaveBalances,
+      });
+    } catch (error) {
+      console.error("Get leave balance error:", error);
+      res.status(500).json({
+        message: "Failed to get leave balance",
+        error: error.message,
+      });
     }
-
-    const user = await User.findById(targetUserId);
-    const leaveBalances = await user.getAllLeaveBalances();
-
-    res.status(200).json({
-      employeeId: targetUserId,
-      name: user.name,
-      leaveBalances
-    });
-
-  } catch (error) {
-    console.error('Get leave balance error:', error);
-    res.status(500).json({
-      message: 'Failed to get leave balance',
-      error: error.message
-    });
   }
-});
+);
 
 // Get email queue status (Admin only)
-router.get('/email-queue/status', authenticateToken, async (req, res) => {
+router.get("/email-queue/status", authenticateToken, async (req, res) => {
   try {
     // Only admins can check email queue status
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Only admins can check email queue status' });
+    if (req.user.role !== "admin") {
+      return res
+        .status(403)
+        .json({ message: "Only admins can check email queue status" });
     }
 
-    const emailQueue = require('../utils/emailQueue');
+    const emailQueue = require("../utils/emailQueue");
     const status = emailQueue.getStatus();
 
     res.status(200).json({
-      message: 'Email queue status retrieved successfully',
+      message: "Email queue status retrieved successfully",
       ...status,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     });
-
   } catch (error) {
-    console.error('Get email queue status error:', error);
+    console.error("Get email queue status error:", error);
     res.status(500).json({
-      message: 'Failed to get email queue status',
-      error: error.message
+      message: "Failed to get email queue status",
+      error: error.message,
     });
   }
 });
 
 // Get specific email job status
-router.get('/email-queue/job/:jobId', authenticateToken, async (req, res) => {
+router.get("/email-queue/job/:jobId", authenticateToken, async (req, res) => {
   try {
     // Only admins can check email job status
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Only admins can check email job status' });
+    if (req.user.role !== "admin") {
+      return res
+        .status(403)
+        .json({ message: "Only admins can check email job status" });
     }
 
     const { jobId } = req.params;
-    const emailQueue = require('../utils/emailQueue');
+    const emailQueue = require("../utils/emailQueue");
     const job = emailQueue.getJob(parseInt(jobId));
 
     if (!job) {
-      return res.status(404).json({ message: 'Email job not found' });
+      return res.status(404).json({ message: "Email job not found" });
     }
 
     res.status(200).json({
-      message: 'Email job status retrieved successfully',
+      message: "Email job status retrieved successfully",
       job: job,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     });
-
   } catch (error) {
-    console.error('Get email job status error:', error);
+    console.error("Get email job status error:", error);
     res.status(500).json({
-      message: 'Failed to get email job status',
-      error: error.message
+      message: "Failed to get email job status",
+      error: error.message,
     });
   }
 });

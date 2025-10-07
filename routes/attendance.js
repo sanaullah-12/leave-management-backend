@@ -817,7 +817,8 @@ router.get(
             machineId: user.uid || user.userId || user.id || "unknown",
             name: user.name || `Employee ${user.uid || "Unknown"}`,
             // FIXED: Use UserID for accurate attendance correlation
-            employeeId: user.userId || user.rawData?.userid || user.uid || "unknown",
+            employeeId:
+              user.userId || user.rawData?.userid || user.uid || "unknown",
             // Keep card number as separate reference field
             cardNumber: user.cardno || user.cardNumber || null,
             // Show department info
@@ -828,7 +829,7 @@ router.get(
                 ? "Employee"
                 : `Role ${user.role}`,
             enrolledAt: user.enrolledAt || user.timestamp || new Date(),
-            isActive: user.role !== "0" && user.role !== 0,
+            isActive: true, // All enrolled users are active
             privilege: user.privilege || 0,
             role: user.role || 0,
             // Enhanced metadata for debugging
@@ -1310,6 +1311,82 @@ router.get(
   }
 );
 
+// Employee-specific route - view own attendance only
+router.get(
+  "/my-attendance",
+  authenticateToken,
+  authorizeRoles("employee"),
+  async (req, res) => {
+    try {
+      // Get employee ID from JWT token - SECURE!
+      const employeeId = req.user.employeeId;
+      const { startDate, endDate, days = 7 } = req.query;
+
+      console.log(
+        `📊 Employee ${req.user.name} (${employeeId}) viewing own attendance`
+      );
+
+      // Calculate date range
+      let startDateStr, endDateStr;
+
+      if (startDate && endDate) {
+        startDateStr = new Date(startDate).toISOString().split("T")[0];
+        endDateStr = new Date(endDate).toISOString().split("T")[0];
+      } else {
+        const endDateObj = new Date();
+        const startDateObj = new Date();
+        startDateObj.setDate(endDateObj.getDate() - parseInt(days));
+
+        startDateStr = startDateObj.toISOString().split("T")[0];
+        endDateStr = endDateObj.toISOString().split("T")[0];
+      }
+
+      console.log(`📅 Date range: ${startDateStr} to ${endDateStr}`);
+
+      const result = await AttendanceDbService.getEmployeeAttendance(
+        employeeId,
+        startDateStr,
+        endDateStr,
+        req.user.company
+      );
+
+      const summary = await AttendanceDbService.getEmployeeAttendanceSummary(
+        employeeId,
+        startDateStr,
+        endDateStr,
+        req.user.company
+      );
+
+      res.json({
+        success: true,
+        employeeId: employeeId,
+        employeeName: req.user.name,
+        dateRange: {
+          from: startDateStr,
+          to: endDateStr,
+          days: parseInt(days),
+        },
+        summary: summary,
+        records: result.attendance,
+        totalRecords: result.totalRecords,
+        source: "database",
+        fetchedAt: new Date().toISOString(),
+        security: "JWT_validated_employee_only",
+      });
+    } catch (error) {
+      console.error("Employee attendance fetch error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to fetch your attendance data",
+        error:
+          process.env.NODE_ENV === "development"
+            ? error.message
+            : "Internal server error",
+      });
+    }
+  }
+);
+
 // NEW: Get attendance data formatted for frontend compatibility
 router.get(
   "/db/frontend/:employeeId",
@@ -1355,7 +1432,9 @@ router.get(
               const deviceInfo = await zkInstance.getInfo();
               if (deviceInfo && deviceInfo.workTime) {
                 machineWorkTime = deviceInfo.workTime;
-                console.log(`⏰ Found machine work time: ${machineWorkTime} from ${ip}`);
+                console.log(
+                  `⏰ Found machine work time: ${machineWorkTime} from ${ip}`
+                );
                 break;
               }
             }
@@ -1363,10 +1442,11 @@ router.get(
             // Continue to next machine
           }
         }
-        
+
         // Get effective cutoff time (Custom > Machine > Default)
-        cutoffTime = await AttendanceSettingsService.getEffectiveCutoffTime(machineWorkTime);
-        
+        cutoffTime = await AttendanceSettingsService.getEffectiveCutoffTime(
+          machineWorkTime
+        );
       } catch (err) {
         console.log(
           `⚠️ Could not fetch late time settings, using default: ${cutoffTime}`
@@ -1427,6 +1507,43 @@ router.get(
 );
 
 /**
+ * Calculate working days between two dates (excludes weekends)
+ * @param {string} startDate - Start date (YYYY-MM-DD)
+ * @param {string} endDate - End date (YYYY-MM-DD)
+ * @returns {number} Number of working days (Monday to Friday)
+ */
+function calculateWorkingDays(startDate, endDate) {
+  let workingDays = 0;
+  const currentDate = new Date(startDate);
+  const end = new Date(endDate);
+
+  while (currentDate <= end) {
+    const dayOfWeek = currentDate.getDay();
+    // 0 = Sunday, 6 = Saturday - exclude these
+    if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+      workingDays++;
+    }
+    currentDate.setDate(currentDate.getDate() + 1);
+  }
+
+  return workingDays;
+}
+
+/**
+ * Filter attendance records to exclude weekend records
+ * @param {Array} attendanceRecords - Array of attendance records
+ * @returns {Array} Filtered records excluding weekends
+ */
+function filterWorkingDayRecords(attendanceRecords) {
+  return attendanceRecords.filter((record) => {
+    const recordDate = new Date(record.date);
+    const dayOfWeek = recordDate.getDay();
+    // 0 = Sunday, 6 = Saturday - exclude these
+    return dayOfWeek !== 0 && dayOfWeek !== 6;
+  });
+}
+
+/**
  * Transform database attendance data to frontend expected format
  * Shows raw timestamp records without daily grouping calculations
  * Includes late time detection functionality
@@ -1441,20 +1558,44 @@ function transformToFrontendFormat(
 ) {
   const { attendance, employeeId, totalRecords } = attendanceResult;
 
-  // Calculate date range info
+  // Calculate date range info - ENHANCED with working days
   const startDateObj = new Date(startDate);
   const endDateObj = new Date(endDate);
-  const totalDays =
+
+  // Calculate total calendar days (old method for reference)
+  const totalCalendarDays =
     Math.ceil((endDateObj - startDateObj) / (1000 * 60 * 60 * 24)) + 1;
 
-  // Basic statistics without complex calculations
+  // Calculate working days only (exclude weekends)
+  const totalWorkingDays = calculateWorkingDays(startDate, endDate);
+
+  // Filter attendance records to exclude weekend records
+  const workingDayRecords = filterWorkingDayRecords(attendance);
+
+  // Calculate present days from working day records only
+  const uniqueWorkingDatesWithRecords = new Set(
+    workingDayRecords.map((record) => record.date)
+  );
+  const presentWorkingDays = uniqueWorkingDatesWithRecords.size;
+
+  // Calculate attendance rate based on working days only
+  const attendanceRate =
+    totalWorkingDays > 0
+      ? Math.round((presentWorkingDays / totalWorkingDays) * 100)
+      : 0;
+
+  // Legacy calculations for compatibility
   const uniqueDatesWithRecords = new Set(
     attendance.map((record) => record.date)
   );
   const presentDays = uniqueDatesWithRecords.size;
-  const absentDays = totalDays - presentDays;
-  const attendanceRate =
-    totalDays > 0 ? Math.round((presentDays / totalDays) * 100) : 0;
+
+  // Calculate absent days based on working days
+  const absentWorkingDays = totalWorkingDays - presentWorkingDays;
+
+  // Legacy calculation for compatibility (calendar days)
+  const totalCalendarDaysUsed = totalCalendarDays;
+  const absentCalendarDays = totalCalendarDaysUsed - presentDays;
 
   // Helper function to calculate late time
   const calculateLateTime = (timestamp, cutoffTime) => {
@@ -1527,6 +1668,19 @@ function transformToFrontendFormat(
   transformedRecords.forEach((record) => {
     const dateKey = record.date;
 
+    // WEEKEND FILTER: Skip weekend records (Saturday=6, Sunday=0)
+    const recordDate = new Date(record.date);
+    const dayOfWeek = recordDate.getDay();
+
+    if (dayOfWeek === 0 || dayOfWeek === 6) {
+      console.log(
+        `🚫 Skipping weekend record: ${record.date} (${
+          dayOfWeek === 0 ? "Sunday" : "Saturday"
+        })`
+      );
+      return; // Skip weekend records completely
+    }
+
     // If this is the first record for this date, keep it
     if (!dailyFilteredRecords[dateKey]) {
       dailyFilteredRecords[dateKey] = record;
@@ -1565,15 +1719,28 @@ function transformToFrontendFormat(
     dateRange: {
       from: startDate,
       to: endDate,
-      days: totalDays,
+      days: totalWorkingDays, // Now represents working days only
+      calendarDays: totalCalendarDays, // Total calendar days for reference
     },
     summary: {
-      totalDays,
-      presentDays,
-      absentDays,
+      // ENHANCED: Working days based calculations
+      totalDays: totalWorkingDays, // Working days only (Mon-Fri)
+      presentDays: presentWorkingDays, // Present working days only
+      absentDays: absentWorkingDays, // Absent working days only
       lateDays: lateDaysCount, // Now calculated based on late detection
-      attendanceRate,
+      attendanceRate, // Now based on working days (much more accurate)
       avgWorkingHours: 0, // Removed working hours calculation
+
+      // Legacy data for compatibility
+      legacy: {
+        totalCalendarDays: totalCalendarDays,
+        presentCalendarDays: presentDays,
+        absentCalendarDays: absentCalendarDays,
+        calendarAttendanceRate:
+          totalCalendarDays > 0
+            ? Math.round((presentDays / totalCalendarDays) * 100)
+            : 0,
+      },
     },
     records: filteredRecords, // Use filtered records instead of all records
     source: "database",
@@ -1581,6 +1748,42 @@ function transformToFrontendFormat(
     originalTotalRecords: totalRecords, // Keep original count for reference
     fetchedAt: new Date(),
   };
+
+  // Enhanced logging for weekend exclusion debugging
+  const totalOriginalRecords = attendance.length;
+  const weekendRecordsFiltered = totalOriginalRecords - filteredRecords.length;
+
+  console.log(`📊 WEEKEND EXCLUSION STATS:`);
+  console.log(`   📅 Date Range: ${startDate} to ${endDate}`);
+  console.log(`   📆 Total Calendar Days: ${totalCalendarDays}`);
+  console.log(
+    `   💼 Total Working Days: ${totalWorkingDays} (excluded ${
+      totalCalendarDays - totalWorkingDays
+    } weekend days)`
+  );
+  console.log(`   📋 Original Records: ${totalOriginalRecords}`);
+  console.log(`   🚫 Weekend Records Filtered: ${weekendRecordsFiltered}`);
+  console.log(`   ✅ Working Day Records Shown: ${filteredRecords.length}`);
+  console.log(`   ✅ Present Working Days: ${presentWorkingDays}`);
+  console.log(`   ❌ Absent Working Days: ${absentWorkingDays}`);
+  console.log(`   📈 Working Days Attendance Rate: ${attendanceRate}%`);
+  console.log(
+    `   📊 Calendar Days Attendance Rate: ${
+      totalCalendarDays > 0
+        ? Math.round((presentDays / totalCalendarDays) * 100)
+        : 0
+    }%`
+  );
+  console.log(
+    `   🎯 Improvement: +${
+      attendanceRate -
+      (totalCalendarDays > 0
+        ? Math.round((presentDays / totalCalendarDays) * 100)
+        : 0)
+    }%`
+  );
+
+  return result;
 }
 
 // Update late time calculation settings
@@ -1679,8 +1882,10 @@ router.get(
       }
 
       // Get settings from database with machine information
-      const result = await AttendanceSettingsService.getSettingsWithMachineInfo(machineSettings);
-      
+      const result = await AttendanceSettingsService.getSettingsWithMachineInfo(
+        machineSettings
+      );
+
       if (result.success) {
         res.json({
           success: true,
@@ -1698,7 +1903,7 @@ router.get(
               ? `Using time rules from ZKTeco machine ${machineSettings.ip}`
               : "Using default time rules (no machine connected)",
             machineSettings,
-            error: result.error
+            error: result.error,
           },
         });
       }

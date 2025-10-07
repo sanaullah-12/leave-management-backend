@@ -3,10 +3,9 @@
  * Handles database operations for attendance settings
  */
 
-const AttendanceSettings = require('../models/AttendanceSettings');
+const AttendanceSettings = require("../models/AttendanceSettings");
 
 class AttendanceSettingsService {
-  
   /**
    * Get current attendance settings with proper fallbacks
    */
@@ -19,21 +18,21 @@ class AttendanceSettingsService {
         machineSettings: settings.machineSettings,
         metadata: {
           updatedAt: settings.updatedAt,
-          updatedBy: settings.updatedBy
-        }
+          updatedBy: settings.updatedBy,
+        },
       };
     } catch (error) {
-      console.error('❌ Failed to get attendance settings:', error);
-      
+      console.error("❌ Failed to get attendance settings:", error);
+
       // Return safe defaults on error
       return {
         success: false,
         settings: {
           useCustomCutoff: false,
           cutoffTime: "09:00",
-          description: "Default settings (database error)"
+          description: "Default settings (database error)",
         },
-        error: error.message
+        error: error.message,
       };
     }
   }
@@ -47,7 +46,7 @@ class AttendanceSettingsService {
       if (newSettings.useCustomCutoff && !newSettings.cutoffTime) {
         return {
           success: false,
-          message: "Cutoff time is required when using custom cutoff"
+          message: "Cutoff time is required when using custom cutoff",
         };
       }
 
@@ -57,7 +56,7 @@ class AttendanceSettingsService {
         if (!timeRegex.test(newSettings.cutoffTime)) {
           return {
             success: false,
-            message: "Invalid time format. Use HH:MM format (e.g., 09:00)"
+            message: "Invalid time format. Use HH:MM format (e.g., 09:00)",
           };
         }
       }
@@ -66,29 +65,30 @@ class AttendanceSettingsService {
       const updatedSettings = await AttendanceSettings.updateLateTimeSettings(
         {
           useCustomCutoff: newSettings.useCustomCutoff,
-          cutoffTime: newSettings.useCustomCutoff ? newSettings.cutoffTime : "09:00"
+          cutoffTime: newSettings.useCustomCutoff
+            ? newSettings.cutoffTime
+            : "09:00",
         },
         userId
       );
 
-      console.log('✅ Late time settings updated in database:', {
+      console.log("✅ Late time settings updated in database:", {
         useCustomCutoff: updatedSettings.lateTimeSettings.useCustomCutoff,
         cutoffTime: updatedSettings.lateTimeSettings.cutoffTime,
-        updatedBy: updatedSettings.updatedBy
+        updatedBy: updatedSettings.updatedBy,
       });
 
       return {
         success: true,
         message: "Late time settings updated successfully",
-        settings: updatedSettings.lateTimeSettings
+        settings: updatedSettings.lateTimeSettings,
       };
-
     } catch (error) {
-      console.error('❌ Failed to update late time settings:', error);
+      console.error("❌ Failed to update late time settings:", error);
       return {
         success: false,
         message: "Failed to update late time settings",
-        error: error.message
+        error: error.message,
       };
     }
   }
@@ -114,9 +114,8 @@ class AttendanceSettingsService {
 
       console.log(`⏰ Using DEFAULT cutoff time: ${settings.cutoffTime}`);
       return settings.cutoffTime;
-
     } catch (error) {
-      console.error('❌ Error getting effective cutoff time:', error);
+      console.error("❌ Error getting effective cutoff time:", error);
       console.log(`⏰ Using FALLBACK cutoff time: 09:00`);
       return "09:00";
     }
@@ -128,33 +127,32 @@ class AttendanceSettingsService {
   static async getSettingsWithMachineInfo(machineSettings = null) {
     try {
       const result = await this.getSettings();
-      
+
       if (!result.success) {
         throw new Error(result.error);
       }
 
       const settings = result.settings;
-      
+
       // Enhance settings with machine information
       const enhancedSettings = {
         ...settings,
         machineDefault: !settings.useCustomCutoff,
-        description: settings.useCustomCutoff 
+        description: settings.useCustomCutoff
           ? `Custom cutoff time: ${settings.cutoffTime}`
           : machineSettings
-            ? `Using time rules from ZKTeco machine ${machineSettings.ip}`
-            : "Using default time rules (no machine connected)",
-        machineSettings: machineSettings
+          ? `Using time rules from ZKTeco machine ${machineSettings.ip}`
+          : "Using default time rules (no machine connected)",
+        machineSettings: machineSettings,
       };
 
       return {
         success: true,
-        settings: enhancedSettings
+        settings: enhancedSettings,
       };
-
     } catch (error) {
-      console.error('❌ Failed to get enhanced settings:', error);
-      
+      console.error("❌ Failed to get enhanced settings:", error);
+
       // Return safe defaults
       return {
         success: false,
@@ -163,9 +161,9 @@ class AttendanceSettingsService {
           cutoffTime: "09:00",
           machineDefault: true,
           description: "Default time rules (error loading settings)",
-          machineSettings: null
+          machineSettings: null,
         },
-        error: error.message
+        error: error.message,
       };
     }
   }
@@ -175,33 +173,35 @@ class AttendanceSettingsService {
    */
   static async initializeDefaultSettings(userId = null) {
     try {
-      const existingSettings = await AttendanceSettings.findOne({ isActive: true });
-      
+      const existingSettings = await AttendanceSettings.findOne({
+        isActive: true,
+      });
+
       if (!existingSettings) {
         const defaultSettings = new AttendanceSettings({
           lateTimeSettings: {
             useCustomCutoff: false,
             cutoffTime: "09:00",
-            description: "Default late time settings"
+            description: "Default late time settings",
           },
           machineSettings: {
             defaultIP: "192.168.1.201",
             connectionTimeout: 5000,
-            syncInterval: 300000
+            syncInterval: 300000,
           },
           createdBy: userId,
           updatedBy: userId,
-          isActive: true
+          isActive: true,
         });
 
         await defaultSettings.save();
-        console.log('✅ Initialized default attendance settings');
+        console.log("✅ Initialized default attendance settings");
         return defaultSettings;
       }
 
       return existingSettings;
     } catch (error) {
-      console.error('❌ Failed to initialize default settings:', error);
+      console.error("❌ Failed to initialize default settings:", error);
       throw error;
     }
   }

@@ -20,27 +20,34 @@ router.get(
       const users = await zkService.getUsers();
       await zkService.disconnect();
 
-    const formattedEmployees = users.map(user => ({
-      machineId: user.uid || user.userId || user.id || 'unknown',
-      name: user.name || 'Unknown Name',
-      // FIXED: Use UserID for accurate attendance correlation
-      employeeId: user.userId || user.rawData?.userid || user.uid || 'unknown',
-      // Keep card number as separate reference
-      cardNumber: user.cardno || user.cardNumber || null,
-      department: user.role === 14 ? 'Admin' : user.role === 0 ? 'Employee' : `Role ${user.role}`,
-      enrolledAt: user.timestamp || new Date(),
-      isActive: user.role !== '0' && user.role !== 0,
-      privilege: user.privilege || 0,
-      role: user.role || 0,
-      // Enhanced metadata for clarity
-      idMapping: {
-        uid: user.uid,
-        userId: user.userId || user.rawData?.userid,
-        cardno: user.cardno || user.cardNumber,
-        source: 'ZKTeco_UserID_primary'
-      },
-      rawData: user
-    }));      res.json({
+      const formattedEmployees = users.map((user) => ({
+        machineId: user.uid || user.userId || user.id || "unknown",
+        name: user.name || "Unknown Name",
+        // FIXED: Use UserID for accurate attendance correlation
+        employeeId:
+          user.userId || user.rawData?.userid || user.uid || "unknown",
+        // Keep card number as separate reference
+        cardNumber: user.cardno || user.cardNumber || null,
+        department:
+          user.role === 14
+            ? "Admin"
+            : user.role === 0
+            ? "Employee"
+            : `Role ${user.role}`,
+        enrolledAt: user.timestamp || new Date(),
+        isActive: true, // All enrolled users are active
+        privilege: user.privilege || 0,
+        role: user.role || 0,
+        // Enhanced metadata for clarity
+        idMapping: {
+          uid: user.uid,
+          userId: user.userId || user.rawData?.userid,
+          cardno: user.cardno || user.cardNumber,
+          source: "ZKTeco_UserID_primary",
+        },
+        rawData: user,
+      }));
+      res.json({
         success: true,
         employees: formattedEmployees,
         count: formattedEmployees.length,
