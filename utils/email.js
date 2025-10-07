@@ -1,5 +1,8 @@
-const nodemailer = require('nodemailer');
-const { sendEmailWithSendGrid, isConfigured: isSendGridConfigured } = require('./sendgridEmail');
+const nodemailer = require("nodemailer");
+const {
+  sendEmailWithSendGrid,
+  isConfigured: isSendGridConfigured,
+} = require("./sendgridEmail");
 
 // Create fresh transporter for each request to prevent hanging
 const createTransporter = () => {
@@ -9,20 +12,20 @@ const createTransporter = () => {
     secure: false, // Use STARTTLS
     auth: {
       user: process.env.SMTP_EMAIL,
-      pass: process.env.SMTP_PASSWORD
+      pass: process.env.SMTP_PASSWORD,
     },
     tls: {
       rejectUnauthorized: true,
-      minVersion: 'TLSv1.2'
+      minVersion: "TLSv1.2",
     },
     // Connection timeouts and limits
     connectionTimeout: 10000, // 10 seconds to connect
-    greetingTimeout: 5000,    // 5 seconds for greeting
-    socketTimeout: 15000,     // 15 seconds for socket inactivity
+    greetingTimeout: 5000, // 5 seconds for greeting
+    socketTimeout: 15000, // 15 seconds for socket inactivity
     // Pool settings for better performance
     pool: false, // Don't use connection pooling to prevent hanging
     maxConnections: 1,
-    maxMessages: 1
+    maxMessages: 1,
   });
 };
 
@@ -31,55 +34,68 @@ const sendEmail = async ({ email, subject, html, text, fromName }) => {
   // Try SendGrid first if configured (recommended for Railway)
   if (isSendGridConfigured()) {
     try {
-      console.log('🚀 Using SendGrid API for email delivery');
-      return await sendEmailWithSendGrid({ email, subject, html, text, fromName });
+      console.log("🚀 Using SendGrid API for email delivery");
+      return await sendEmailWithSendGrid({
+        email,
+        subject,
+        html,
+        text,
+        fromName,
+      });
     } catch (error) {
-      console.error('⚠️ SendGrid failed, falling back to SMTP:', error.message);
+      console.error("⚠️ SendGrid failed, falling back to SMTP:", error.message);
       // Continue to SMTP fallback below
     }
   }
 
   // Fallback to SMTP (requires proper Gmail App Password on Railway)
   try {
-    console.log('📧 Using SMTP for email delivery');
-    console.log('📧 Recipient:', email);
-    console.log('📧 Subject:', subject);
+    console.log("📧 Using SMTP for email delivery");
+    console.log("📧 Recipient:", email);
+    console.log("📧 Subject:", subject);
 
     const transporter = createTransporter();
 
     // Verify connection
-    console.log('🔍 Verifying SMTP connection...');
+    console.log("🔍 Verifying SMTP connection...");
     await transporter.verify();
-    console.log('✅ SMTP connection verified');
+    console.log("✅ SMTP connection verified");
 
     // Generate text from HTML if not provided
-    const textContent = text || html.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+    const textContent =
+      text ||
+      html
+        .replace(/<[^>]*>/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
 
     const mailOptions = {
-      from: `${fromName || process.env.FROM_NAME || 'Leave Management System'} <${process.env.FROM_EMAIL || process.env.SMTP_EMAIL}>`,
+      from: `${
+        fromName || process.env.FROM_NAME || "Leave Management System"
+      } <${process.env.FROM_EMAIL || process.env.SMTP_EMAIL}>`,
       to: email,
       subject: subject,
       text: textContent,
       html: html,
       headers: {
-        'X-Mailer': 'Leave Management System',
-        'X-Priority': '3',
-        'X-MSMail-Priority': 'Normal',
-        'Importance': 'Normal'
-      }
+        "X-Mailer": "Leave Management System",
+        "X-Priority": "3",
+        "X-MSMail-Priority": "Normal",
+        Importance: "Normal",
+      },
     };
 
-    console.log('📤 Sending email via SMTP...');
+    console.log("📤 Sending email via SMTP...");
     const result = await transporter.sendMail(mailOptions);
 
-    console.log('✅ Email sent successfully via SMTP!');
-    console.log('📧 Message ID:', result.messageId);
-    console.log('📧 Response:', result.response);
-    console.log('📧 Accepted recipients:', result.accepted);
+    console.log("✅ Email sent successfully via SMTP!");
+    console.log("📧 Message ID:", result.messageId);
+    console.log("📧 Response:", result.response);
+    console.log("📧 Accepted recipients:", result.accepted);
 
     // Close transporter to prevent hanging connections
     transporter.close();
-    console.log('🔐 SMTP connection closed');
+    console.log("🔐 SMTP connection closed");
 
     return {
       success: true,
@@ -87,17 +103,16 @@ const sendEmail = async ({ email, subject, html, text, fromName }) => {
       response: result.response,
       accepted: result.accepted,
       rejected: result.rejected,
-      provider: 'SMTP-Fallback'
+      provider: "SMTP-Fallback",
     };
-
   } catch (error) {
-    console.error('❌ SMTP email failed:', error.message);
-    console.error('Full error:', error);
+    console.error("❌ SMTP email failed:", error.message);
+    console.error("Full error:", error);
 
     // Close transporter on error
-    if (typeof transporter !== 'undefined' && transporter) {
+    if (typeof transporter !== "undefined" && transporter) {
       transporter.close();
-      console.log('🔐 SMTP connection closed (error)');
+      console.log("🔐 SMTP connection closed (error)");
     }
 
     throw new Error(`Email delivery failed: ${error.message}`);
@@ -105,9 +120,16 @@ const sendEmail = async ({ email, subject, html, text, fromName }) => {
 };
 
 // Employee invitation email
-const sendInvitationEmail = async (employee, token, inviterName, role = 'employee') => {
+const sendInvitationEmail = async (
+  employee,
+  token,
+  inviterName,
+  role = "employee"
+) => {
   try {
-    const inviteUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/invite/${token}`;
+    const inviteUrl = `${
+      process.env.FRONTEND_URL || "http://localhost:3000"
+    }/invite/${token}`;
 
     const subject = `${employee.company} - Team Access Invitation`;
 
@@ -165,11 +187,10 @@ const sendInvitationEmail = async (employee, token, inviterName, role = 'employe
       email: employee.email,
       subject,
       html,
-      fromName: employee.company
+      fromName: employee.company,
     });
-
   } catch (error) {
-    console.error('❌ Failed to send invitation email:', error);
+    console.error("❌ Failed to send invitation email:", error);
     throw error;
   }
 };
@@ -177,7 +198,9 @@ const sendInvitationEmail = async (employee, token, inviterName, role = 'employe
 // Password reset email
 const sendPasswordResetEmail = async (user, token) => {
   try {
-    const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password?token=${token}`;
+    const resetUrl = `${
+      process.env.FRONTEND_URL || "http://localhost:3000"
+    }/reset-password?token=${token}`;
 
     const subject = `${user.company} - Password Reset Request`;
 
@@ -235,17 +258,104 @@ const sendPasswordResetEmail = async (user, token) => {
       email: user.email,
       subject,
       html,
-      fromName: user.company
+      fromName: user.company,
     });
-
   } catch (error) {
-    console.error('❌ Failed to send password reset email:', error);
+    console.error("❌ Failed to send password reset email:", error);
     throw error;
   }
+};
+
+// Send leave request notification to admins
+const sendLeaveRequestNotification = async (admin, employee, leave) => {
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+      <h1 style="color: #2563eb;">Leave Management System</h1>
+      <h2 style="color: #333;">New Leave Request</h2>
+      <p>Hello ${admin.name},</p>
+      <p><strong>${
+        employee.name
+      }</strong> has submitted a new leave request.</p>
+
+      <div style="background: #f8f9fa; padding: 20px; border-radius: 6px; margin: 25px 0;">
+        <h3>Request Details:</h3>
+        <p><strong>Employee:</strong> ${employee.name} (${
+    employee.employeeId
+  })</p>
+        <p><strong>Department:</strong> ${employee.department}</p>
+        <p><strong>Leave Type:</strong> ${leave.leaveType}</p>
+        <p><strong>Duration:</strong> ${new Date(
+          leave.startDate
+        ).toLocaleDateString()} to ${new Date(
+    leave.endDate
+  ).toLocaleDateString()}</p>
+        <p><strong>Total Days:</strong> ${leave.totalDays}</p>
+        <p><strong>Reason:</strong> ${leave.reason}</p>
+      </div>
+
+      <div style="text-align: center;">
+        <a href="${
+          process.env.FRONTEND_URL || "http://localhost:3000"
+        }/leaves" style="background: #2563eb; color: white; padding: 14px 30px; text-decoration: none; border-radius: 6px; font-weight: bold;">
+          Review Leave Request
+        </a>
+      </div>
+    </div>
+  `;
+
+  await sendEmail({
+    email: admin.email,
+    subject: `New Leave Request from ${employee.name} - Requires Review`,
+    html,
+    category: "leave-notification",
+  });
+};
+
+// Send leave status notification to employee
+const sendLeaveStatusNotification = async (employee, leave, reviewedBy) => {
+  const statusColor = leave.status === "approved" ? "#059669" : "#dc2626";
+  const statusText =
+    leave.status.charAt(0).toUpperCase() + leave.status.slice(1);
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+      <h1 style="color: #2563eb;">Leave Management System</h1>
+      <h2 style="color: ${statusColor};">Leave Request ${statusText}</h2>
+      <p>Hello ${employee.name},</p>
+      <p>Your leave request has been <strong style="color: ${statusColor};">${
+    leave.status
+  }</strong> by ${reviewedBy.name}.</p>
+
+      <div style="background: #f8f9fa; padding: 20px; border-radius: 6px;">
+        <h3>Leave Details:</h3>
+        <p><strong>Leave Type:</strong> ${leave.leaveType}</p>
+        <p><strong>Duration:</strong> ${new Date(
+          leave.startDate
+        ).toLocaleDateString()} to ${new Date(
+    leave.endDate
+  ).toLocaleDateString()}</p>
+        <p><strong>Status:</strong> <span style="color: ${statusColor};">${statusText}</span></p>
+        ${
+          leave.reviewComments
+            ? `<p><strong>Comments:</strong> ${leave.reviewComments}</p>`
+            : ""
+        }
+      </div>
+    </div>
+  `;
+
+  await sendEmail({
+    email: employee.email,
+    subject: `Leave Request ${statusText} - ${leave.leaveType} Leave`,
+    html,
+    category: "leave-status",
+  });
 };
 
 module.exports = {
   sendEmail,
   sendInvitationEmail,
-  sendPasswordResetEmail
+  sendPasswordResetEmail,
+  sendLeaveRequestNotification,
+  sendLeaveStatusNotification,
 };
