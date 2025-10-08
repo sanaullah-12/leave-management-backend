@@ -10,13 +10,24 @@ try {
 }
 
 // Configure SendGrid API key
-if (sgMail && process.env.SENDGRID_API_KEY) {
-  sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+const sendGridApiKey = process.env.SENDGRID_API_KEY || process.env.SendGrid_Key;
+
+if (sgMail && sendGridApiKey) {
+  sgMail.setApiKey(sendGridApiKey);
   console.log("✅ SendGrid configured with API key");
+  console.log(
+    "🔑 Using API key source:",
+    process.env.SENDGRID_API_KEY ? "SENDGRID_API_KEY" : "SendGrid_Key"
+  );
 } else {
   console.warn(
     "⚠️ SendGrid API key not found or package missing - falling back to SMTP"
   );
+  console.warn(
+    "🔍 Checking for: SENDGRID_API_KEY =",
+    !!process.env.SENDGRID_API_KEY
+  );
+  console.warn("🔍 Checking for: SendGrid_Key =", !!process.env.SendGrid_Key);
 }
 
 // SendGrid email function
@@ -157,5 +168,6 @@ const sendEmailWithSendGrid = async ({
 
 module.exports = {
   sendEmailWithSendGrid,
-  isConfigured: () => !!(sgMail && process.env.SENDGRID_API_KEY),
+  isConfigured: () =>
+    !!(sgMail && (process.env.SENDGRID_API_KEY || process.env.SendGrid_Key)),
 };
