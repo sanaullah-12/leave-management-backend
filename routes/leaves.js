@@ -156,55 +156,67 @@ router.post("/", authenticateToken, async (req, res) => {
       status: "active",
     }).populate("company");
 
-    let emailNotificationsFailed = false;
-    let inAppNotificationsFailed = false;
-
-    for (const admin of admins) {
-      try {
-        // Try to send email notification
-        await sendLeaveRequestNotification(admin, user, leave);
-      } catch (emailError) {
-        console.error(
-          `Failed to send email notification to admin ${admin.email}:`,
-          emailError.message
-        );
-        emailNotificationsFailed = true;
-      }
-
-      try {
-        // Try to send in-app notification
-        await notifyLeaveRequest(leave, admin);
-      } catch (notificationError) {
-        console.error(
-          `Failed to send in-app notification to admin ${admin.name}:`,
-          notificationError.message
-        );
-        inAppNotificationsFailed = true;
-      }
-    }
-
-    // Prepare response message based on notification status
-    let message = "Leave request submitted successfully";
-    let warnings = [];
-
-    if (emailNotificationsFailed) {
-      warnings.push("Email notifications to admins may have failed");
-    }
-    if (inAppNotificationsFailed) {
-      warnings.push("In-app notifications may have failed");
-    }
-
-    if (warnings.length > 0) {
-      message +=
-        ". " +
-        warnings.join(", ") +
-        ", but your request is saved and will be reviewed.";
-    }
-
+    // Return success response immediately to prevent frontend timeout
     res.status(201).json({
-      message,
+      message: "Leave request submitted successfully",
       leave,
-      warnings: warnings.length > 0 ? warnings : undefined,
+      success: true,
+    });
+
+    // Send notifications to admins asynchronously (non-blocking)
+    // This happens after the response is sent to prevent timeout
+    setImmediate(async () => {
+      try {
+        console.log(
+          `📧 Sending notifications to ${admins.length} admin(s) asynchronously`
+        );
+
+        // Process notifications in background
+        const notificationPromises = admins.map(async (admin) => {
+          try {
+            // Send email notification with timeout
+            const emailPromise = Promise.race([
+              sendLeaveRequestNotification(admin, user, leave),
+              new Promise((_, reject) =>
+                setTimeout(
+                  () => reject(new Error("Email timeout after 8s")),
+                  8000
+                )
+              ),
+            ]);
+
+            await emailPromise;
+            console.log(`✅ Email notification sent to admin: ${admin.email}`);
+          } catch (emailError) {
+            console.error(
+              `❌ Failed to send email to admin ${admin.email}:`,
+              emailError.message
+            );
+          }
+
+          try {
+            // Send in-app notification
+            await notifyLeaveRequest(leave, admin);
+            console.log(`✅ In-app notification sent to admin: ${admin.name}`);
+          } catch (notificationError) {
+            console.error(
+              `❌ Failed to send in-app notification to admin ${admin.name}:`,
+              notificationError.message
+            );
+          }
+        });
+
+        // Wait for all notifications to complete (or timeout)
+        await Promise.allSettled(notificationPromises);
+        console.log(
+          `📧 Background notification processing completed for leave request ${leave._id}`
+        );
+      } catch (error) {
+        console.error(
+          `❌ Background notification processing failed:`,
+          error.message
+        );
+      }
     });
   } catch (error) {
     console.error("Leave submission error:", error);
@@ -712,9 +724,9 @@ router.get(
 
       // Ensure policy has correct values (in case company has old values)
       const correctedPolicy = {
-        annual: policy.annualLeave === 20 ? 10 : (policy.annualLeave || 10),
-        sick: policy.sickLeave === 10 ? 8 : (policy.sickLeave || 8),
-        casual: policy.casualLeave === 8 ? 10 : (policy.casualLeave || 10),
+        annual: policy.annualLeave === 20 ? 10 : policy.annualLeave || 10,
+        sick: policy.sickLeave === 10 ? 8 : policy.sickLeave || 8,
+        casual: policy.casualLeave === 8 ? 10 : policy.casualLeave || 10,
         maternityLeave: policy.maternityLeave || 90,
         paternityLeave: policy.paternityLeave || 15,
       };
