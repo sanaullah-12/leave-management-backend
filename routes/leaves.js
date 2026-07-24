@@ -624,6 +624,20 @@ router.get(
   authorizeRoles("admin"),
   async (req, res) => {
     try {
+      console.log("📊 === DASHBOARD STATS DEBUG ===");
+      console.log("📊 req.user exists:", !!req.user);
+      console.log("📊 req.user:", req.user);
+
+      if (!req.user) {
+        console.log("📊 ERROR: req.user is undefined!");
+        return res
+          .status(401)
+          .json({ message: "Authentication failed - user not found" });
+      }
+      console.log("📊 Dashboard stats request from user:", req.user.email);
+      console.log("📊 User company:", req.user.company);
+      console.log("📊 Company ID:", req.user.company?._id);
+
       const currentMonth = new Date();
       const startOfMonth = new Date(
         currentMonth.getFullYear(),
@@ -635,7 +649,8 @@ router.get(
         currentMonth.getMonth() + 1,
         0
       );
-
+      const companyId = req.user.company._id || req.user.company;
+      console.log("📊 Using company ID for queries:", companyId);
       // Total leaves this month
       const thisMonthLeaves = await Leave.countDocuments({
         company: req.user.company._id,
@@ -686,6 +701,14 @@ router.get(
         },
       ]);
 
+      console.log("📊 Final stats:", {
+        thisMonthLeaves,
+        pendingLeaves,
+        totalEmployees,
+        leavesByType,
+        leavesByStatus,
+      });
+
       res.status(200).json({
         thisMonthLeaves,
         pendingLeaves,
@@ -694,6 +717,7 @@ router.get(
         leavesByStatus,
       });
     } catch (error) {
+      console.error("📊 Dashboard stats error:", error);
       res.status(500).json({
         message: "Failed to get leave statistics",
         error: error.message,
@@ -914,5 +938,69 @@ router.post(
     }
   }
 );
+
+// ✅ ADD THIS ROUTE - Place it BEFORE any routes with /:id parameter
+router.get("/my-leaves", authenticateToken, async (req, res) => {
+  try {
+    console.log("📊 Fetching leaves for employee:", req.user.email);
+    console.log("📊 Employee ID:", req.user._id);
+    console.log("📊 Employee company:", req.user.company);
+
+    const leaves = await Leave.find({
+      employee: req.user._id,
+    })
+      .populate("employee", "name email employeeId")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    console.log("📊 Found leaves for employee:", leaves.length);
+    console.log("📊 Leaves data:", leaves);
+
+    res.status(200).json({
+      success: true,
+      count: leaves.length,
+      data: {
+        leaves: leaves,
+      },
+    });
+  } catch (error) {
+    console.error("❌ Error fetching employee leaves:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch leaves",
+      error: error.message,
+    });
+  }
+});
+
+// Make sure this route is AFTER the my-leaves route above
+router.get("/:id", authenticateToken, async (req, res) => {
+  try {
+    let query = { _id: req.params.id, company: req.user.company._id };
+
+    // If employee, only show their own leave
+    if (req.user.role === "employee") {
+      query.employee = req.user._id;
+    }
+
+    const leave = await Leave.findOne(query)
+      .populate(
+        "employee",
+        "name employeeId department position profilePicture"
+      )
+      .populate("reviewedBy", "name");
+
+    if (!leave) {
+      return res.status(404).json({ message: "Leave request not found" });
+    }
+
+    res.status(200).json({ leave });
+  } catch (error) {
+    res.status(500).json({
+      message: "Failed to get leave request",
+      error: error.message,
+    });
+  }
+});
 
 module.exports = router;

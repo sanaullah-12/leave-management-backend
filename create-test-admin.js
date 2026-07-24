@@ -6,7 +6,8 @@ const bcrypt = require('bcryptjs');
 
 async function createTestAdmin() {
   try {
-    await mongoose.connect(process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/leave-management-dev');
+    // Use the LOCAL dev database, not the production Atlas MONGODB_URI.
+    await mongoose.connect(process.env.LOCAL_MONGODB_URI || 'mongodb://127.0.0.1:27018/leave-management-dev');
 
     // Check if admin already exists
     const existingAdmin = await User.findOne({ email: 'test.admin@example.com' });

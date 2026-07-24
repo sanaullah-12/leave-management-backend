@@ -1,6 +1,6 @@
 const express = require("express");
 const net = require("net");
-const router = express.Router();
+const mongoose = require("mongoose");const router = express.Router();
 const { authenticateToken, authorizeRoles } = require("../middleware/auth");
 // Import ZKTeco libraries with fallback patterns
 let ZKLib, JSZKLib;
@@ -144,346 +144,104 @@ router.post(
         `🔗 Attempting to connect to ZKTeco biometric machine at ${ip}:${port}`
       );
 
-      // Check if ZKLib is available
-      if (!ZKLib) {
-        return res.status(500).json({
+      // ============================================================
+      // REAL protocol handshake (not just a local UDP socket bind).
+      // Uses ZKTecoService.connect(), which sends the ZKTeco
+      // CMD_CONNECT packet and waits for the device to reply — the
+      // SAME path employee-sync and door-unlock use. This makes all
+      // three agree: "Connected" now means the device actually
+      // answered, not that a UDP socket bound locally (which always
+      // "succeeds" and produced the old false-positive).
+      // ============================================================
+      const ZKTecoService = require("../services/zktecoService");
+      const probeService = new ZKTecoService(ip, parseInt(port) || 4370);
+
+      try {
+        // Real handshake — throws/times out if the device does not reply.
+        await probeService.connect();
+
+        // Confirm the device answers a real data command, not just the
+        // handshake, so we never report "Connected" for an unresponsive box.
+        let deviceInfo = { connection: "verified" };
+        try {
+          const users = await probeService.getUsers();
+          deviceInfo = {
+            connection: "verified",
+            library: "ZKLib",
+            enrolledUsers: Array.isArray(users) ? users.length : 0,
+          };
+        } catch (probeErr) {
+          // Handshake worked but data read failed — still a real connection.
+          deviceInfo = {
+            connection: "verified",
+            library: "ZKLib",
+            note: `handshake ok; data probe failed: ${probeErr.message}`,
+          };
+        }
+
+        // Record the live connection for status + sync services.
+        machineConnections.set(ip, {
+          ip,
+          port: parseInt(port) || 4370,
+          status: "connected",
+          connectedAt: new Date(),
+          lastPing: new Date(),
+          deviceInfo,
+          sdkType: "ZKLib",
+          connectionMethod: "zklib-handshake",
+          libraryWarnings: [],
+        });
+
+        console.log(
+          `✅ Verified ZKTeco connection to ${ip}:${port} (device replied to protocol)`
+        );
+
+        // Release the probe connection; sync/door open their own as needed.
+        try {
+          await probeService.disconnect();
+        } catch (_) {
+          /* best-effort */
+        }
+
+        return res.json({
+          success: true,
+          message: `Successfully connected to ZKTeco biometric machine at ${ip}:${port}`,
+          machine: {
+            ip,
+            port: parseInt(port) || 4370,
+            status: "connected",
+            connectedAt: new Date(),
+            deviceInfo,
+            sdkType: "ZKLib",
+            connectionMethod: "zklib-handshake",
+            warnings: [],
+          },
+        });
+      } catch (connectError) {
+        // Real failure — device did not respond to the protocol handshake.
+        console.error(
+          `❌ ZKTeco connection to ${ip}:${port} failed: ${connectError.message}`
+        );
+
+        // Clear any stale "connected" record for this IP.
+        machineConnections.delete(ip);
+
+        try {
+          await probeService.disconnect();
+        } catch (_) {
+          /* best-effort */
+        }
+
+        return res.status(502).json({
           success: false,
           message:
-            "ZKTeco libraries not available. Please check if zklib or node-zklib is properly installed.",
-          error: "LIBRARY_NOT_AVAILABLE",
+            "Unable to reach the ZKTeco device. It did not respond to the connection request. " +
+            "Check that the device is powered on, on the same network as this server, and reachable at the configured IP/port.",
+          error: connectError.message,
+          machine: { ip, port: parseInt(port) || 4370, status: "failed" },
         });
       }
 
-      // Create ZKTeco SDK connection with preference for zklib (more stable)
-      const connectionPromise = new Promise(async (resolve, reject) => {
-        try {
-          let zkInstance;
-          let deviceInfo;
-          let connectionMethod = "unknown";
-
-          // Strategy 1: Try zklib first (more stable, no buffer overflow issues)
-          try {
-            console.log(`🔌 Attempting connection with zklib (preferred)...`);
-            console.log(`🔌 Connecting to ${ip}:${port} with zklib...`);
-
-            // Add global error handler for zklib callback issues
-            const originalConsoleError = console.error;
-            let zkLibErrors = [];
-            console.error = (...args) => {
-              zkLibErrors.push(args.join(" "));
-              originalConsoleError(...args);
-            };
-
-            // Try different constructor patterns for zklib with enhanced error handling
-            let constructorSuccess = false;
-
-            try {
-              // Pattern 1: Options object (most compatible)
-              zkInstance = new ZKLib({
-                ip: ip,
-                port: parseInt(port) || 4370,
-                timeout: 10000,
-              });
-              constructorSuccess = true;
-              console.log(`✅ Options object constructor success`);
-            } catch (optionsError) {
-              console.log(
-                `⚠️ Options constructor failed: ${optionsError.message}`
-              );
-
-              try {
-                // Pattern 2: Simple constructor
-                zkInstance = new ZKLib(ip, parseInt(port) || 4370);
-                constructorSuccess = true;
-                console.log(`✅ Simple constructor success`);
-              } catch (simpleError) {
-                console.log(
-                  `⚠️ Simple constructor failed: ${simpleError.message}`
-                );
-
-                try {
-                  // Pattern 3: With timeout parameter
-                  zkInstance = new ZKLib(ip, parseInt(port) || 4370, 15000);
-                  constructorSuccess = true;
-                  console.log(`✅ Constructor with timeout success`);
-                } catch (timeoutError) {
-                  console.log(`⚠️ All zklib constructor patterns failed`);
-                  throw new Error(
-                    `zklib constructor failed: ${optionsError.message}`
-                  );
-                }
-              }
-            }
-
-            // Restore console.error
-            console.error = originalConsoleError;
-
-            if (!constructorSuccess) {
-              throw new Error(
-                "Failed to create zklib instance with any constructor pattern"
-              );
-            }
-
-            // Add comprehensive error handling for connection
-            try {
-              console.log(`🔌 Attempting to create socket connection...`);
-
-              // Wrap createSocket with enhanced error handling
-              const connectPromise = new Promise(async (resolve, reject) => {
-                try {
-                  // Add uncaught exception handler specifically for this connection
-                  const originalHandler =
-                    process.listeners("uncaughtException");
-                  process.removeAllListeners("uncaughtException");
-
-                  process.once("uncaughtException", (error) => {
-                    console.error(
-                      `🚫 Caught zklib uncaught exception: ${error.message}`
-                    );
-                    // Restore original handlers
-                    originalHandler.forEach((handler) =>
-                      process.on("uncaughtException", handler)
-                    );
-                    reject(new Error(`zklib internal error: ${error.message}`));
-                  });
-
-                  const result = await zkInstance.createSocket();
-
-                  // Restore original handlers on success
-                  originalHandler.forEach((handler) =>
-                    process.on("uncaughtException", handler)
-                  );
-                  resolve(result);
-                } catch (error) {
-                  reject(error);
-                }
-              });
-
-              const timeoutPromise = new Promise((_, reject) =>
-                setTimeout(
-                  () => reject(new Error("zklib connection timeout (15s)")),
-                  15000
-                )
-              );
-
-              await Promise.race([connectPromise, timeoutPromise]);
-              console.log(`✅ Socket connection established`);
-
-              // Try to get device information with timeout (only if method exists)
-              if (typeof zkInstance.getInfo === "function") {
-                try {
-                  console.log(`🔍 Attempting to get device info...`);
-                  const infoPromise = zkInstance.getInfo();
-                  const infoTimeoutPromise = new Promise((_, reject) =>
-                    setTimeout(
-                      () => reject(new Error("getInfo timeout (8s)")),
-                      8000
-                    )
-                  );
-
-                  deviceInfo = await Promise.race([
-                    infoPromise,
-                    infoTimeoutPromise,
-                  ]);
-                  console.log(`✅ Device info retrieved successfully`);
-                } catch (getInfoError) {
-                  console.log(`⚠️ getInfo failed: ${getInfoError.message}`);
-                  deviceInfo = {
-                    connection: "established",
-                    library: zkInstance.constructor.name,
-                    note: `getInfo failed: ${getInfoError.message}`,
-                    warning: "Device connected but info retrieval failed",
-                  };
-                }
-              } else {
-                console.log(
-                  "⚠️ getInfo method not available in this SDK instance"
-                );
-                deviceInfo = {
-                  connection: "established",
-                  library: zkInstance.constructor.name,
-                  note: "getInfo method not available",
-                };
-              }
-
-              connectionMethod = "zklib";
-              console.log(
-                `✅ Connected to ZKTeco device via zklib:`,
-                deviceInfo
-              );
-            } catch (connectionError) {
-              console.error(
-                `❌ zklib connection process failed: ${connectionError.message}`
-              );
-              throw connectionError;
-            }
-          } catch (zklibError) {
-            console.log(`⚠️ zklib connection failed: ${zklibError.message}`);
-
-            // Only try js-zklib if zklib completely failed to connect
-            if (
-              zklibError.message.includes("timeout") ||
-              zklibError.message.includes("ECONNREFUSED")
-            ) {
-              console.log(
-                `🔌 zklib failed due to network issue, trying js-zklib as last resort...`
-              );
-
-              // Strategy 2: Try js-zklib as fallback (but with heavy restrictions)
-              try {
-                zkInstance = new JSZKLib(ip, port, 8000); // Shorter timeout for js-zklib
-
-                // Add connection timeout for js-zklib
-                const jsConnectPromise = zkInstance.createSocket();
-                const jsTimeoutPromise = new Promise((_, reject) =>
-                  setTimeout(
-                    () =>
-                      reject(new Error("js-zklib connection timeout (15s)")),
-                    15000
-                  )
-                );
-
-                await Promise.race([jsConnectPromise, jsTimeoutPromise]);
-
-                // For js-zklib, skip getInfo to avoid timeout issues
-                connectionMethod = "js-zklib-limited";
-                deviceInfo = {
-                  connection: "established",
-                  library: "js-zklib",
-                  warning:
-                    "Limited functionality - data methods disabled to prevent crashes",
-                  note: "getInfo skipped to avoid timeouts",
-                };
-                console.log(`⚠️ Connected via js-zklib with HEAVY LIMITATIONS`);
-                console.warn(
-                  `🚫 js-zklib detected - data retrieval methods will be DISABLED`
-                );
-              } catch (jsZklibError) {
-                console.log(
-                  `❌ Both ZKTeco libraries failed:`,
-                  jsZklibError.message
-                );
-                throw new Error(
-                  `Connection failed with both libraries. zklib: ${zklibError.message}, js-zklib: ${jsZklibError.message}`
-                );
-              }
-            } else {
-              // If zklib failed for other reasons, try a basic TCP test before giving up
-              console.log(
-                `🔌 zklib failed, trying basic TCP connection test...`
-              );
-              try {
-                await testBasicTCPConnection(ip, port);
-                console.log(`✅ Basic TCP connection successful`);
-
-                // Create a minimal mock instance for basic functionality
-                zkInstance = {
-                  ip: ip,
-                  port: port,
-                  constructor: { name: "BasicTCP" },
-                  async createSocket() {
-                    return true;
-                  },
-                  async disconnect() {
-                    return true;
-                  },
-                  // No getInfo method - this is intentional
-                };
-
-                connectionMethod = "basic-tcp-fallback";
-                deviceInfo = {
-                  connection: "established",
-                  library: "BasicTCP",
-                  warning: "Using basic TCP connection - limited functionality",
-                  note: "zklib library had compatibility issues",
-                };
-
-                console.log(`⚠️ Using basic TCP fallback connection`);
-              } catch (tcpError) {
-                throw new Error(
-                  `All connection methods failed. zklib: ${zklibError.message}, TCP: ${tcpError.message}. js-zklib skipped to prevent instability.`
-                );
-              }
-            }
-          }
-
-          // Store ZKTeco instance and connection info
-          zkInstances.set(ip, zkInstance);
-          machineConnections.set(ip, {
-            ip,
-            port,
-            status: "connected",
-            connectedAt: new Date(),
-            lastPing: new Date(),
-            deviceInfo: deviceInfo || {},
-            sdkType: zkInstance.constructor.name,
-            connectionMethod,
-            libraryWarnings: connectionMethod.includes("js-zklib")
-              ? [
-                  "js-zklib may have buffer overflow issues with large datasets",
-                  "Some methods may fail unexpectedly",
-                  "Consider using zklib if possible",
-                ]
-              : [],
-          });
-
-          // Initialize all sync services with updated instances
-          attendanceSyncService.initialize(zkInstances, machineConnections);
-          enhancedAttendanceSyncService.initialize(
-            zkInstances,
-            machineConnections
-          );
-          zktecoRealDataService.initialize(zkInstances, machineConnections);
-
-          // DO NOT start scheduled sync - only fetch on demand to prevent background crashes
-          console.log(
-            "🔒 Scheduled sync disabled - attendance will be fetched on-demand only"
-          );
-
-          resolve({
-            success: true,
-            message: `Successfully connected to ZKTeco biometric machine via ${connectionMethod}`,
-            machine: {
-              ip,
-              port,
-              status: "connected",
-              connectedAt: new Date(),
-              deviceInfo: deviceInfo || {},
-              sdkType: zkInstance.constructor.name,
-              connectionMethod,
-              warnings: connectionMethod.includes("js-zklib")
-                ? [
-                    "Using js-zklib library which may have stability issues",
-                    "Some data retrieval methods may fail due to library bugs",
-                    "Consider upgrading to a newer ZKTeco device or using zklib",
-                  ]
-                : [],
-            },
-          });
-        } catch (error) {
-          console.log(
-            `❌ ZKTeco connection failed to ${ip}:${port} - ${error.message}`
-          );
-
-          // Store failed connection info
-          machineConnections.set(ip, {
-            ip,
-            port,
-            status: "failed",
-            error: error.message,
-            lastAttempt: new Date(),
-          });
-
-          reject({
-            success: false,
-            message: `Failed to connect to ZKTeco machine: ${error.message}`,
-            error: error.code || "ZKTECO_CONNECTION_ERROR",
-          });
-        }
-      });
-
-      const result = await connectionPromise;
-      res.json(result);
     } catch (error) {
       console.error("❌ Connection error:", error);
       res.status(500).json({
@@ -591,40 +349,45 @@ router.post(
         let zkInstance;
         // Try different constructor patterns for zklib
         try {
-          // Pattern 1: Options object with inport parameter
+          // `inport` is the LOCAL port we bind to and must NOT be the device
+          // port (4370), or the bind collides. Use a random high port.
+          const forceInport = Math.floor(Math.random() * 10000) + 40000;
           zkInstance = new ZKLib({
             ip: ip,
-            port: port,
-            inport: 4370,
+            port: parseInt(port) || 4370,
+            inport: forceInport,
             timeout: 10000,
           });
           console.log(
-            `✅ Force reconnect Pattern 1 success: Options object with inport`
+            `✅ Force reconnect Pattern 1 success (inport: ${forceInport})`
           );
         } catch (optionsError) {
           console.log(`⚠️ Options pattern failed: ${optionsError.message}`);
           try {
-            // Pattern 2: Direct parameters with inport
-            zkInstance = new ZKLib(ip, port, 10000, 4370);
+            // Retry with a different local port in case the first was in use.
+            const retryInport = Math.floor(Math.random() * 10000) + 40000;
+            zkInstance = new ZKLib({
+              ip: ip,
+              port: parseInt(port) || 4370,
+              inport: retryInport,
+              timeout: 15000,
+            });
             console.log(
-              `✅ Force reconnect Pattern 2 success: Direct parameters with inport`
+              `✅ Force reconnect Pattern 2 success (inport: ${retryInport})`
             );
           } catch (directError) {
-            console.log(`⚠️ Direct parameters failed: ${directError.message}`);
-            try {
-              // Pattern 3: Alternative constructor (ip, port, timeout, inport)
-              zkInstance = new ZKLib(ip, parseInt(port), 10000, parseInt(port));
+            console.log(`⚠️ Retry with new inport failed: ${directError.message}`);
+            {
+              // Last attempt before giving up: one more distinct local port.
+              const lastInport = Math.floor(Math.random() * 10000) + 40000;
+              zkInstance = new ZKLib({
+                ip: ip,
+                port: parseInt(port) || 4370,
+                inport: lastInport,
+                timeout: 20000,
+              });
               console.log(
-                `✅ Force reconnect Pattern 3 success: Alternative constructor`
-              );
-            } catch (altError) {
-              console.log(
-                `⚠️ Alternative constructor failed: ${altError.message}`
-              );
-              // Pattern 4: Try with minimal parameters
-              zkInstance = new ZKLib(ip, port);
-              console.log(
-                `✅ Force reconnect Pattern 4 success: Minimal parameters`
+                `✅ Force reconnect Pattern 3 success (inport: ${lastInport})`
               );
             }
           }
@@ -1398,8 +1161,25 @@ router.get(
       const { startDate, endDate, days = 7 } = req.query;
 
       console.log(
-        `📊 Fetching attendance from DATABASE for frontend compatibility - employee ${employeeId}`
+        `📊 Fetching attendance from LOCAL DATABASE for frontend compatibility - employee ${employeeId}`
       );
+      console.log(`📍 Database host: ${mongoose.connection.host}`);
+      console.log(`📍 Database name: ${mongoose.connection.db.databaseName}`);
+
+      // VERIFY LOCAL CONNECTION
+      if (
+        mongoose.connection.host !== "127.0.0.1" &&
+        mongoose.connection.host !== "localhost"
+      ) {
+        console.error("⚠️  WARNING: Not connected to local database!");
+        console.error("Current host:", mongoose.connection.host);
+        return res.status(500).json({
+          success: false,
+          message: "Error: Connected to remote database instead of local",
+          currentHost: mongoose.connection.host,
+          expectedHost: "127.0.0.1 or localhost",
+        });
+      }
 
       // Calculate date range
       let startDateStr, endDateStr;
@@ -1418,7 +1198,7 @@ router.get(
       }
 
       console.log(
-        `📅 Fetching from database for frontend: ${startDateStr} to ${endDateStr}`
+        `📅 Fetching from LOCAL database: ${startDateStr} to ${endDateStr}`
       );
 
       // Get effective cutoff time for late detection using settings service
@@ -1453,7 +1233,7 @@ router.get(
         );
       }
 
-      // Get attendance data from database
+      // Get attendance data from LOCAL database
       const result = await AttendanceDbService.getEmployeeAttendance(
         employeeId,
         startDateStr,
@@ -1464,7 +1244,7 @@ router.get(
       if (!result.success) {
         return res.status(500).json({
           success: false,
-          message: `Failed to fetch attendance from database: ${result.error}`,
+          message: `Failed to fetch attendance from LOCAL database: ${result.error}`,
           error: result.error,
         });
       }
@@ -1488,19 +1268,34 @@ router.get(
       );
 
       console.log(
-        `✅ Successfully transformed ${result.totalRecords} records for frontend with late detection (cutoff: ${cutoffTime})`
+        `✅ Successfully transformed ${result.totalRecords} records from LOCAL database`
+      );
+      console.log(
+        `📍 Confirmed database: ${mongoose.connection.db.databaseName} on ${mongoose.connection.host}`
       );
 
       res.json({
         success: true,
         ...transformedData,
+        databaseInfo: {
+          host: mongoose.connection.host,
+          database: mongoose.connection.db.databaseName,
+          isLocal:
+            mongoose.connection.host === "127.0.0.1" ||
+            mongoose.connection.host === "localhost",
+        },
       });
     } catch (error) {
-      console.error("❌ Failed to fetch attendance for frontend:", error);
+      console.error(
+        "❌ Failed to fetch attendance from LOCAL database:",
+        error
+      );
       res.status(500).json({
         success: false,
-        message: "Failed to fetch attendance records for frontend",
+        message: "Failed to fetch attendance records from LOCAL database",
         error: error.message,
+        databaseHost: mongoose.connection.host,
+        databaseName: mongoose.connection.db?.databaseName,
       });
     }
   }
@@ -2421,6 +2216,79 @@ router.post(
         success: false,
         message: "Failed to fetch real attendance data from machine",
       });
+    }
+  }
+);
+
+// ============================================================
+// Remote Door Unlock (access-control relay)
+// Reuses the SAME ZKTeco integration, service, and config that
+// attendance sync uses. Admin only. Opens the magnetic lock for
+// 10s; the device relay auto-releases (re-locks) afterward.
+// ============================================================
+router.post(
+  "/door/unlock",
+  authenticateToken,
+  authorizeRoles("admin"),
+  async (req, res) => {
+    // Reuse the configured device IP/port (env-driven, same as attendance).
+    const ip = req.body?.ip || process.env.ZKTECO_IP || "192.168.1.201";
+    const port = parseInt(
+      req.body?.port || process.env.ZKTECO_PORT || 4370,
+      10
+    );
+    const DURATION_SECONDS = 10;
+
+    // Audit context for logging (user, timestamp, target device).
+    const actor = {
+      id: req.user?._id?.toString(),
+      email: req.user?.email,
+      name: req.user?.name,
+    };
+    const requestedAt = new Date().toISOString();
+    console.log(
+      `🚪 [DOOR-UNLOCK] Requested by ${actor.email || actor.id} at ${requestedAt} → device ${ip}:${port}`
+    );
+
+    // Reuse the existing, working connection service — no new integration.
+    const ZKTecoService = require("../services/zktecoService");
+    const zkService = new ZKTecoService(ip, port);
+
+    try {
+      await zkService.connect();
+      const result = await zkService.unlockDoor(DURATION_SECONDS);
+
+      console.log(
+        `✅ [DOOR-UNLOCK] SUCCESS — ${actor.email || actor.id} opened door ${ip} for ${DURATION_SECONDS}s at ${requestedAt}`
+      );
+
+      return res.status(200).json({
+        success: true,
+        message: `Door unlocked for ${DURATION_SECONDS} seconds. It will lock automatically.`,
+        durationSeconds: result.durationSeconds,
+        device: { ip, port },
+        unlockedBy: actor.email || actor.name || actor.id,
+        timestamp: requestedAt,
+      });
+    } catch (error) {
+      console.error(
+        `❌ [DOOR-UNLOCK] FAILED — requested by ${actor.email || actor.id} for device ${ip} at ${requestedAt}: ${error.message}`
+      );
+
+      return res.status(500).json({
+        success: false,
+        message: "Failed to unlock door. Please try again.",
+        error: error.message,
+        device: { ip, port },
+        timestamp: requestedAt,
+      });
+    } finally {
+      // Always release the connection.
+      try {
+        await zkService.disconnect();
+      } catch (_) {
+        /* best-effort cleanup */
+      }
     }
   }
 );
