@@ -148,150 +148,134 @@ const connectDB = async (retryCount = 0) => {
   const maxRetries = 3;
 
   try {
-    // Environment-based database configuration
+    // FORCE LOCAL DATABASE CONNECTION - ALWAYS USE LOCAL IN DEVELOPMENT
     let connectionString;
-    const environment = process.env.NODE_ENV || "development";
+
+    // Check if this is actually production deployment (Railway/Vercel/etc)
+    const isActualProduction =
+      process.env.RAILWAY_ENVIRONMENT === "production" ||
+      process.env.VERCEL_ENV === "production" ||
+      (process.env.NODE_ENV === "production" &&
+        process.env.PORT &&
+        parseInt(process.env.PORT) !== 5000);
+
+    // Explicit opt-in to the real Atlas data while running locally.
+    // Required because the real users/employees live in Atlas, not locally.
     const useProductionDB = process.env.USE_PRODUCTION_DB === "true";
 
-    // Railway-specific: Ensure environment variables are loaded
-    if (environment === "production" && !process.env.MONGODB_URI) {
-      console.log(
-        "⚠️  MONGODB_URI not found, waiting for Railway environment..."
-      );
-      await new Promise((resolve) => setTimeout(resolve, 2000)); // Wait 2 seconds
-    }
-
-    if (environment === "production") {
+    if (isActualProduction || useProductionDB) {
       connectionString = process.env.MONGODB_URI;
       if (!connectionString) {
         console.error(
           "❌ CRITICAL: MONGODB_URI is not set in the production environment."
         );
-        console.error(
-          "Please set the MONGODB_URI environment variable in your Railway project settings."
-        );
-        // In a production environment, we should not fall back to a local database.
-        // We will stop the process here to make the configuration error obvious.
         process.exit(1);
       }
-      console.log("🚀 PRODUCTION MODE: Using MongoDB Atlas");
-    } else if (useProductionDB && process.env.MONGODB_URI) {
-      // Development with production database access
-      connectionString = process.env.MONGODB_URI;
-      console.log(
-        "⚠️  DEVELOPMENT MODE: Using PRODUCTION database (USE_PRODUCTION_DB=true)"
-      );
-      console.log(
-        "⚠️  WARNING: You are connecting to PRODUCTION data in development!"
-      );
+      if (isActualProduction) {
+        console.log("🚀 PRODUCTION DEPLOYMENT: Using MongoDB Atlas");
+      } else {
+        console.log(
+          "⚠️  USE_PRODUCTION_DB=true — LOCAL SERVER IS USING THE LIVE ATLAS DATABASE."
+        );
+        console.log(
+          "⚠️  Reads AND WRITES affect real production records. Set it to false when done."
+        );
+      }
     } else {
-      // Development/Local: Force local database
-      connectionString = "mongodb://127.0.0.1:27017/leave-management-dev";
-      console.log("🔒 DEVELOPMENT MODE: Using local database only");
-      console.log(
-        "💡 To use production data, set USE_PRODUCTION_DB=true in your .env file"
-      );
+      // FORCE LOCAL DATABASE - Ignore the production MONGODB_URI.
+      // Port 27018 is this app's dedicated mongo container, so we never collide
+      // with another project's mongo on the default 27017 (which requires auth).
+      connectionString =
+        process.env.LOCAL_MONGODB_URI ||
+        "mongodb://127.0.0.1:27018/leave-management-dev";
+      console.log("🔒 DEVELOPMENT MODE: FORCING LOCAL DATABASE CONNECTION");
+      console.log("📍 Connecting to:", connectionString);
+      console.log("🚫 Ignoring MONGODB_URI environment variable");
+      console.log("🚫 Ignoring NODE_ENV setting");
+      console.log("💡 Set USE_PRODUCTION_DB=true to use the live Atlas data.");
     }
 
     console.log("🔍 MONGODB CONNECTION DEBUG:");
     console.log("Retry attempt:", retryCount + 1, "/", maxRetries + 1);
-    console.log("Environment:", environment);
-    console.log(
-      "Database mode:",
-      environment === "production"
-        ? "Production (Atlas)"
-        : useProductionDB
-        ? "Development using Production DB"
-        : "Development (Local)"
-    );
-    console.log(
-      "Connection string:",
-      connectionString.replace(/\/\/[^:]*:[^@]*@/, "//***:***@")
-    ); // Hide credentials
+    console.log("NODE_ENV:", process.env.NODE_ENV);
+    console.log("PORT:", process.env.PORT);
+    console.log("RAILWAY_ENVIRONMENT:", process.env.RAILWAY_ENVIRONMENT);
+    console.log("VERCEL_ENV:", process.env.VERCEL_ENV);
+    console.log("Is Actual Production:", isActualProduction);
+    console.log("Connection string:", connectionString);
     console.log("Platform:", process.platform);
     console.log("Current time:", new Date().toISOString());
-    console.log("Railway PORT:", process.env.PORT || "Not set");
 
-    console.log(
-      environment === "production"
-        ? "📡 Attempting to connect to MongoDB Atlas..."
-        : useProductionDB
-        ? "📡 Attempting to connect to MongoDB Atlas (production data in dev)..."
-        : "📡 Attempting to connect to local MongoDB..."
-    );
+    console.log("📡 Attempting to connect to LOCAL MongoDB...");
     const startTime = Date.now();
 
-    // Railway-compatible connection options
+    // Local MongoDB connection options (simplified)
     await mongoose.connect(connectionString, {
-      serverSelectionTimeoutMS: 30000, // 30 seconds
-      socketTimeoutMS: 45000, // 45 seconds
-      connectTimeoutMS: 30000, // 30 seconds
+      serverSelectionTimeoutMS: 5000, // 5 seconds for local
+      socketTimeoutMS: 10000, // 10 seconds for local
+      connectTimeoutMS: 5000, // 5 seconds for local
       bufferCommands: false,
-      maxPoolSize: 5,
-      retryWrites: true,
-      w: "majority",
+      maxPoolSize: 10, // More connections for local
     });
 
     const connectionTime = Date.now() - startTime;
-    console.log("✅ MongoDB connected successfully!");
+    console.log("✅ LOCAL MongoDB connected successfully!");
     console.log(`Connection time: ${connectionTime}ms`);
     console.log("Database name:", mongoose.connection.db.databaseName);
     console.log("Connection host:", mongoose.connection.host);
     console.log("Connection ready state:", mongoose.connection.readyState);
+
+    // Verify it's actually local
+    if (
+      mongoose.connection.host === "127.0.0.1" ||
+      mongoose.connection.host === "localhost"
+    ) {
+      console.log("✅ CONFIRMED: Connected to LOCAL database");
+    } else {
+      console.log(
+        "⚠️  WARNING: Connected to REMOTE database:",
+        mongoose.connection.host
+      );
+    }
   } catch (error) {
-    console.error("❌ MongoDB connection failed:");
+    console.error("❌ LOCAL MongoDB connection failed:");
     console.error("Error name:", error.name);
     console.error("Error message:", error.message);
     console.error("Error code:", error.code);
-    console.error("Error codeName:", error.codeName);
 
-    if (error.reason) {
-      console.error("Error reason:", error.reason);
-    }
-
-    // Railway-specific error handling
+    // Local database specific error handling
     if (
+      error.message.includes("ECONNREFUSED") ||
+      error.message.includes("connect ECONNREFUSED")
+    ) {
+      console.error(
+        "🔌 Local MongoDB connection refused - is MongoDB running?"
+      );
+      console.error("💡 Start MongoDB with one of these commands:");
+      console.error("   • mongod");
+      console.error(
+        "   • brew services start mongodb/brew/mongodb-community (Mac)"
+      );
+      console.error("   • sudo systemctl start mongod (Linux)");
+      console.error("   • net start MongoDB (Windows)");
+    } else if (
       error.message.includes("ENOTFOUND") ||
       error.message.includes("getaddrinfo")
     ) {
+      console.error("🌐 DNS lookup failed for localhost - network issue");
       console.error(
-        "🌐 DNS lookup failed - Railway network issue or MongoDB Atlas unreachable"
+        "💡 Check: MongoDB is installed and running on localhost:27017"
       );
-      console.error(
-        "💡 Check: MongoDB Atlas cluster is active and network access allows Railway IPs"
-      );
-    } else if (
-      error.message.includes("authentication failed") ||
-      error.message.includes("AuthenticationFailed")
-    ) {
-      console.error(
-        "🔐 Authentication failed - check MongoDB Atlas credentials"
-      );
-      console.error(
-        "💡 Verify: Database user credentials in MONGODB_URI are correct"
-      );
-    } else if (
-      error.message.includes("timeout") ||
-      error.message.includes("serverSelectionTimeout")
-    ) {
-      console.error("⏰ Connection timeout - Railway to MongoDB Atlas timeout");
-      console.error(
-        "💡 Check: MongoDB Atlas network access whitelist includes Railway IPs"
-      );
-    } else if (error.message.includes("MongoServerSelectionError")) {
-      console.error(
-        "🔍 Server selection failed - MongoDB Atlas connectivity issue"
-      );
-      console.error(
-        "💡 Check: MongoDB Atlas cluster status and Railway network access"
-      );
+    } else if (error.message.includes("timeout")) {
+      console.error("⏰ Connection timeout to local MongoDB");
+      console.error("💡 Check: MongoDB service is running and responsive");
     }
 
-    // Retry logic for Railway
+    // Retry logic for local connection
     if (retryCount < maxRetries) {
-      const retryDelay = (retryCount + 1) * 3000; // 3s, 6s, 9s delays
+      const retryDelay = (retryCount + 1) * 2000; // 2s, 4s, 6s delays
       console.log(
-        `🔄 Retrying connection in ${retryDelay / 1000} seconds... (${
+        `🔄 Retrying LOCAL connection in ${retryDelay / 1000} seconds... (${
           retryCount + 1
         }/${maxRetries})`
       );
@@ -302,13 +286,19 @@ const connectDB = async (retryCount = 0) => {
 
     console.error("Full error object:", JSON.stringify(error, null, 2));
     console.log(
-      "💥 All retry attempts failed. MongoDB connection could not be established."
+      "💥 All retry attempts failed. LOCAL MongoDB connection could not be established."
     );
-    console.log("🔧 Railway Troubleshooting:");
-    console.log("   1. Check Railway environment variables are set");
-    console.log("   2. Verify MongoDB Atlas network access allows Railway");
-    console.log("   3. Confirm MongoDB Atlas cluster is active");
-    console.log("   4. Check Railway deployment logs for specific errors");
+    console.log("🔧 Local MongoDB Troubleshooting:");
+    console.log("   1. Install MongoDB Community Edition");
+    console.log("   2. Start MongoDB service:");
+    console.log("      • Windows: net start MongoDB");
+    console.log(
+      "      • Mac: brew services start mongodb/brew/mongodb-community"
+    );
+    console.log("      • Linux: sudo systemctl start mongod");
+    console.log("   3. Check if MongoDB is running: netstat -an | grep :27017");
+    console.log("   4. Verify MongoDB installation: mongod --version");
+    console.log("   5. Check MongoDB logs for errors");
   }
 };
 

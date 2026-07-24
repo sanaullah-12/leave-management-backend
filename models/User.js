@@ -22,8 +22,11 @@ const userSchema = new mongoose.Schema(
     password: {
       type: String,
       required: function () {
-        // Password is required only if user status is 'active' or user is not invited
-        return this.status === "active" || !this.invitationToken;
+        // Password is NOT required if:
+        // 1. User status is pending (invitation not yet accepted)
+        // 2. User has not been activated yet
+        // Only require password for active users without invitation tokens
+        return this.status === "active" && !this.isNew;
       },
       minlength: [6, "Password must be at least 6 characters"],
       select: false,
@@ -124,22 +127,34 @@ userSchema.pre("save", async function (next) {
 
   // Generate employee ID if not provided
   if (!this.employeeId && this.company) {
-    // Find the highest existing employee ID for this company
-    const latestEmployee = await this.constructor
-      .findOne({
-        company: this.company,
-        employeeId: { $regex: /^EMP\d{4}$/ },
-      })
-      .sort({ employeeId: -1 })
-      .select("employeeId");
+    try {
+      // CRITICAL FIX: Ensure company is an ObjectId
+      const companyId = this.company._id || this.company;
 
-    let nextNumber = 1;
-    if (latestEmployee && latestEmployee.employeeId) {
-      const currentNumber = parseInt(latestEmployee.employeeId.substring(3));
-      nextNumber = currentNumber + 1;
+      // Find the highest existing employee ID for this company
+      const latestEmployee = await this.constructor
+        .findOne({
+          company: companyId,
+          employeeId: { $regex: /^EMP\d{4}$/ },
+        })
+        .sort({ employeeId: -1 })
+        .select("employeeId")
+        .lean(); // Add lean() for better performance
+
+      let nextNumber = 1;
+      if (latestEmployee && latestEmployee.employeeId) {
+        const currentNumber = parseInt(latestEmployee.employeeId.substring(3));
+        if (!isNaN(currentNumber)) {
+          nextNumber = currentNumber + 1;
+        }
+      }
+
+      this.employeeId = `EMP${String(nextNumber).padStart(4, "0")}`;
+      console.log("✅ Generated employee ID:", this.employeeId);
+    } catch (error) {
+      console.error("❌ Error generating employee ID:", error);
+      // Don't fail the entire save operation, let validation handle it
     }
-
-    this.employeeId = `EMP${String(nextNumber).padStart(4, "0")}`;
   }
 
   next();

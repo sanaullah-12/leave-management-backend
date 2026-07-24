@@ -7,7 +7,10 @@ const authenticateToken = async (req, res, next) => {
 
   try {
     const authHeader = req.headers['authorization'];
+    console.log('🔵 Auth header:', authHeader);
+    
     const token = authHeader && authHeader.split(' ')[1];
+    console.log('🔵 Extracted token:', token ? `${token.substring(0, 20)}...` : 'No token');
 
     if (!token) {
       console.log('🔵 AUTH FAILED: No token');
@@ -30,6 +33,12 @@ const authenticateToken = async (req, res, next) => {
     }
 
     req.user = user;
+    console.log(`🔵 AUTH SUCCESS - User set:`, {
+      id: user._id,
+      email: user.email,
+      role: user.role,
+      company: user.company
+    });
     const totalTime = Date.now() - startTime;
     console.log(`🔵 AUTH SUCCESS in ${totalTime}ms, forwarding to route`);
     next();
