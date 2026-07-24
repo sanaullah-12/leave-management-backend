@@ -574,6 +574,71 @@ class ZKTecoService {
     }
   }
 
+  /**
+   * Remotely unlock the access-control door for `durationSeconds`, then the
+   * device relay releases and the magnetic lock re-engages automatically.
+   *
+   * Reuses the SAME connection path as attendance sync. Uses the ZKTeco
+   * native UNLOCK command (constants.Commands.UNLOCK = 31), whose payload is
+   * a 4-byte little-endian door-open duration in seconds — the identical
+   * low-level pattern the SDK's disableDevice() uses via executeCmd().
+   *
+   * @param {number} durationSeconds How long the relay stays open (default 10).
+   * @returns {Promise<{success: boolean, durationSeconds: number}>}
+   */
+  async unlockDoor(durationSeconds = 10) {
+    if (!this.isConnected || !this.zkInstance) {
+      await this.connect();
+    }
+
+    // ZKTeco UNLOCK command opcode (from zklib/constants.js Commands.UNLOCK).
+    const UNLOCK_COMMAND = 31;
+
+    // Payload: door-open duration as a 4-byte little-endian unsigned int.
+    const durationBuffer = Buffer.alloc(4);
+    durationBuffer.writeUInt32LE(durationSeconds, 0);
+
+    if (typeof this.zkInstance.executeCmd !== "function") {
+      throw new Error(
+        "ZKTeco SDK does not expose executeCmd — remote unlock is not supported by this device/library."
+      );
+    }
+
+    console.log(
+      `🚪 Sending remote UNLOCK to ZKTeco device at ${this.ip}:${this.port} (open for ${durationSeconds}s)...`
+    );
+
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error("Door unlock command timed out (10s)"));
+      }, 10000);
+
+      try {
+        this.zkInstance.executeCmd(UNLOCK_COMMAND, durationBuffer, (err) => {
+          clearTimeout(timer);
+          if (err) {
+            reject(
+              new Error(
+                `Device rejected unlock command: ${err.message || err}`
+              )
+            );
+          } else {
+            resolve();
+          }
+        });
+      } catch (syncError) {
+        clearTimeout(timer);
+        reject(syncError);
+      }
+    });
+
+    console.log(
+      `✅ ZKTeco relay triggered — door open for ${durationSeconds}s, will auto-lock after.`
+    );
+
+    return { success: true, durationSeconds };
+  }
+
   // Get available methods on the ZK instance
   getAvailableMethods() {
     if (!this.zkInstance) {
