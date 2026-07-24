@@ -1,11 +1,10 @@
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 
 /**
  * Service for fetching attendance data from MongoDB database instead of ZK machines
  * This service replaces the ZKTeco machine-based data fetching with database queries
  */
 class AttendanceDbService {
-  
   /**
    * Get attendance logs for a specific employee from database
    * @param {string} employeeId - Employee ID to fetch attendance for
@@ -14,34 +13,60 @@ class AttendanceDbService {
    * @param {string} companyId - Company ID for multi-tenancy (optional for now)
    * @returns {Object} Attendance data with success flag
    */
-  static async getEmployeeAttendance(employeeId, startDate, endDate, companyId = null) {
+  static async getEmployeeAttendance(
+    employeeId,
+    startDate,
+    endDate,
+    companyId = null
+  ) {
     try {
-      console.log(`📊 Fetching attendance from database for employee ${employeeId} (${startDate} to ${endDate})`);
+      console.log(
+        `📊 Fetching attendance from LOCAL database for employee ${employeeId} (${startDate} to ${endDate})`
+      );
 
-      // Get the attendancelogs collection directly
-      const attendanceCollection = mongoose.connection.db.collection('attendancelogs');
-      
+      // VERIFY LOCAL CONNECTION
+      const dbHost = mongoose.connection.host;
+      const dbName = mongoose.connection.db.databaseName;
+
+      console.log(`📍 Database host: ${dbHost}`);
+      console.log(`📍 Database name: ${dbName}`);
+
+      if (dbHost !== "127.0.0.1" && dbHost !== "localhost") {
+        console.error("⚠️  WARNING: Not connected to local database!");
+        console.error("Current host:", dbHost);
+        throw new Error(
+          `Connected to remote database (${dbHost}) instead of local database`
+        );
+      }
+
+      // Get the attendancelogs collection directly from LOCAL database
+      const attendanceCollection =
+        mongoose.connection.db.collection("attendancelogs");
+
       // Build query
       const query = {
         id: parseInt(employeeId), // id field is the employee identifier
         timestamp: {
-          $gte: new Date(startDate + 'T00:00:00.000Z'),
-          $lte: new Date(endDate + 'T23:59:59.999Z')
-        }
+          $gte: new Date(startDate + "T00:00:00.000Z"),
+          $lte: new Date(endDate + "T23:59:59.999Z"),
+        },
       };
 
-      console.log('🔍 Database query:', JSON.stringify(query, null, 2));
+      console.log("🔍 LOCAL Database query:", JSON.stringify(query, null, 2));
 
-      // Fetch attendance logs
+      // Fetch attendance logs from LOCAL database
       const attendanceLogs = await attendanceCollection
         .find(query)
         .sort({ timestamp: 1 })
         .toArray();
 
-      console.log(`✅ Found ${attendanceLogs.length} attendance records`);
+      console.log(
+        `✅ Found ${attendanceLogs.length} attendance records from LOCAL database`
+      );
+      console.log(`📍 Confirmed: Data from ${dbName} on ${dbHost}`);
 
       // Transform the data to match expected format
-      const transformedLogs = attendanceLogs.map(log => ({
+      const transformedLogs = attendanceLogs.map((log) => ({
         uid: log.uid,
         userId: log.id, // Map id to userId for backward compatibility
         employeeId: log.id.toString(),
@@ -49,14 +74,14 @@ class AttendanceDbService {
         state: log.state,
         stateText: this.getStateText(log.state),
         type: this.getAttendanceType(log.state),
-        date: log.timestamp.toISOString().split('T')[0],
-        time: log.timestamp.toISOString().split('T')[1].substr(0, 8),
+        date: log.timestamp.toISOString().split("T")[0],
+        time: log.timestamp.toISOString().split("T")[1].substr(0, 8),
         rawData: {
           uid: log.uid,
           id: log.id,
           state: log.state,
-          timestamp: log.timestamp
-        }
+          timestamp: log.timestamp,
+        },
       }));
 
       return {
@@ -65,15 +90,21 @@ class AttendanceDbService {
         employeeId,
         dateRange: { startDate, endDate },
         totalRecords: transformedLogs.length,
-        source: 'database'
+        source: "local_database",
+        databaseInfo: {
+          host: dbHost,
+          database: dbName,
+          isLocal: true,
+        },
       };
-
     } catch (error) {
-      console.error(`❌ Database attendance fetch failed:`, error);
+      console.error(`❌ LOCAL Database attendance fetch failed:`, error);
       return {
         success: false,
         error: error.message,
-        attendance: []
+        attendance: [],
+        databaseHost: mongoose.connection.host,
+        databaseName: mongoose.connection.db?.databaseName,
       };
     }
   }
@@ -86,26 +117,34 @@ class AttendanceDbService {
    * @param {string} companyId - Company ID for multi-tenancy (optional for now)
    * @returns {Object} Attendance data grouped by employee
    */
-  static async getMultipleEmployeeAttendance(employeeIds, startDate, endDate, companyId = null) {
+  static async getMultipleEmployeeAttendance(
+    employeeIds,
+    startDate,
+    endDate,
+    companyId = null
+  ) {
     try {
-      console.log(`📊 Fetching attendance from database for ${employeeIds.length} employees (${startDate} to ${endDate})`);
+      console.log(
+        `📊 Fetching attendance from database for ${employeeIds.length} employees (${startDate} to ${endDate})`
+      );
 
       // Get the attendancelogs collection directly
-      const attendanceCollection = mongoose.connection.db.collection('attendancelogs');
-      
+      const attendanceCollection =
+        mongoose.connection.db.collection("attendancelogs");
+
       // Convert employeeIds to integers
-      const employeeIdInts = employeeIds.map(id => parseInt(id));
-      
+      const employeeIdInts = employeeIds.map((id) => parseInt(id));
+
       // Build query
       const query = {
         id: { $in: employeeIdInts },
         timestamp: {
-          $gte: new Date(startDate + 'T00:00:00.000Z'),
-          $lte: new Date(endDate + 'T23:59:59.999Z')
-        }
+          $gte: new Date(startDate + "T00:00:00.000Z"),
+          $lte: new Date(endDate + "T23:59:59.999Z"),
+        },
       };
 
-      console.log('🔍 Database query:', JSON.stringify(query, null, 2));
+      console.log("🔍 Database query:", JSON.stringify(query, null, 2));
 
       // Fetch attendance logs
       const attendanceLogs = await attendanceCollection
@@ -117,13 +156,13 @@ class AttendanceDbService {
 
       // Group by employee ID
       const groupedAttendance = {};
-      
-      attendanceLogs.forEach(log => {
+
+      attendanceLogs.forEach((log) => {
         const empId = log.id.toString();
         if (!groupedAttendance[empId]) {
           groupedAttendance[empId] = [];
         }
-        
+
         groupedAttendance[empId].push({
           uid: log.uid,
           userId: log.id,
@@ -132,14 +171,14 @@ class AttendanceDbService {
           state: log.state,
           stateText: this.getStateText(log.state),
           type: this.getAttendanceType(log.state),
-          date: log.timestamp.toISOString().split('T')[0],
-          time: log.timestamp.toISOString().split('T')[1].substr(0, 8),
+          date: log.timestamp.toISOString().split("T")[0],
+          time: log.timestamp.toISOString().split("T")[1].substr(0, 8),
           rawData: {
             uid: log.uid,
             id: log.id,
             state: log.state,
-            timestamp: log.timestamp
-          }
+            timestamp: log.timestamp,
+          },
         });
       });
 
@@ -149,15 +188,14 @@ class AttendanceDbService {
         employeeIds,
         dateRange: { startDate, endDate },
         totalRecords: attendanceLogs.length,
-        source: 'database'
+        source: "database",
       };
-
     } catch (error) {
       console.error(`❌ Database attendance fetch failed:`, error);
       return {
         success: false,
         error: error.message,
-        attendance: {}
+        attendance: {},
       };
     }
   }
@@ -171,15 +209,19 @@ class AttendanceDbService {
    */
   static async getEmployeeAttendanceSummary(employeeId, startDate, endDate) {
     try {
-      const result = await this.getEmployeeAttendance(employeeId, startDate, endDate);
-      
+      const result = await this.getEmployeeAttendance(
+        employeeId,
+        startDate,
+        endDate
+      );
+
       if (!result.success) {
         return result;
       }
 
       const dailySummary = {};
-      
-      result.attendance.forEach(log => {
+
+      result.attendance.forEach((log) => {
         const date = log.date;
         if (!dailySummary[date]) {
           dailySummary[date] = {
@@ -188,33 +230,44 @@ class AttendanceDbService {
             checkIn: null,
             checkOut: null,
             totalHours: 0,
-            status: 'absent'
+            status: "absent",
           };
         }
-        
+
         dailySummary[date].records.push(log);
-        
+
         // Track check-in/check-out
-        if (log.state === 0) { // Check In
-          if (!dailySummary[date].checkIn || log.timestamp < dailySummary[date].checkIn.timestamp) {
+        if (log.state === 0) {
+          // Check In
+          if (
+            !dailySummary[date].checkIn ||
+            log.timestamp < dailySummary[date].checkIn.timestamp
+          ) {
             dailySummary[date].checkIn = log;
           }
-        } else if (log.state === 1) { // Check Out
-          if (!dailySummary[date].checkOut || log.timestamp > dailySummary[date].checkOut.timestamp) {
+        } else if (log.state === 1) {
+          // Check Out
+          if (
+            !dailySummary[date].checkOut ||
+            log.timestamp > dailySummary[date].checkOut.timestamp
+          ) {
             dailySummary[date].checkOut = log;
           }
         }
       });
 
       // Calculate working hours for each day
-      Object.keys(dailySummary).forEach(date => {
+      Object.keys(dailySummary).forEach((date) => {
         const day = dailySummary[date];
         if (day.checkIn && day.checkOut) {
-          const hours = (new Date(day.checkOut.timestamp) - new Date(day.checkIn.timestamp)) / (1000 * 60 * 60);
+          const hours =
+            (new Date(day.checkOut.timestamp) -
+              new Date(day.checkIn.timestamp)) /
+            (1000 * 60 * 60);
           day.totalHours = Math.round(hours * 100) / 100; // Round to 2 decimal places
-          day.status = 'present';
+          day.status = "present";
         } else if (day.checkIn) {
-          day.status = 'partial'; // Has check-in but no check-out
+          day.status = "partial"; // Has check-in but no check-out
         }
       });
 
@@ -224,14 +277,13 @@ class AttendanceDbService {
         dateRange: { startDate, endDate },
         dailySummary,
         totalDays: Object.keys(dailySummary).length,
-        source: 'database'
+        source: "database",
       };
-
     } catch (error) {
       console.error(`❌ Attendance summary failed:`, error);
       return {
         success: false,
-        error: error.message
+        error: error.message,
       };
     }
   }
@@ -243,29 +295,29 @@ class AttendanceDbService {
    */
   static getStateText(state) {
     const stateMap = {
-      0: 'Check In',
-      1: 'Check Out', 
-      2: 'Break Out',
-      3: 'Break In',
-      4: 'OT In',
-      5: 'OT Out'
+      0: "Check In",
+      1: "Check Out",
+      2: "Break Out",
+      3: "Break In",
+      4: "OT In",
+      5: "OT Out",
     };
-    return stateMap[state] || 'Unknown';
+    return stateMap[state] || "Unknown";
   }
 
   /**
    * Get attendance type for backward compatibility
-   * @param {number} state - State code from database  
+   * @param {number} state - State code from database
    * @returns {string} Attendance type
    */
   static getAttendanceType(state) {
-    if (state === 0) return 'check-in';
-    if (state === 1) return 'check-out';
-    if (state === 2) return 'break-out';
-    if (state === 3) return 'break-in';
-    if (state === 4) return 'ot-in';
-    if (state === 5) return 'ot-out';
-    return 'unknown';
+    if (state === 0) return "check-in";
+    if (state === 1) return "check-out";
+    if (state === 2) return "break-out";
+    if (state === 3) return "break-in";
+    if (state === 4) return "ot-in";
+    if (state === 5) return "ot-out";
+    return "unknown";
   }
 
   /**
@@ -276,42 +328,51 @@ class AttendanceDbService {
    */
   static async getAttendanceStats(startDate, endDate) {
     try {
-      console.log(`📊 Getting attendance statistics (${startDate} to ${endDate})`);
+      console.log(
+        `📊 Getting attendance statistics (${startDate} to ${endDate})`
+      );
 
-      const attendanceCollection = mongoose.connection.db.collection('attendancelogs');
-      
+      const attendanceCollection =
+        mongoose.connection.db.collection("attendancelogs");
+
       const query = {
         timestamp: {
-          $gte: new Date(startDate + 'T00:00:00.000Z'),
-          $lte: new Date(endDate + 'T23:59:59.999Z')
-        }
+          $gte: new Date(startDate + "T00:00:00.000Z"),
+          $lte: new Date(endDate + "T23:59:59.999Z"),
+        },
       };
 
       // Get total records count
       const totalRecords = await attendanceCollection.countDocuments(query);
 
       // Get unique employees count
-      const uniqueEmployees = await attendanceCollection.distinct('id', query);
+      const uniqueEmployees = await attendanceCollection.distinct("id", query);
 
       // Get state distribution
-      const stateDistribution = await attendanceCollection.aggregate([
-        { $match: query },
-        { $group: { _id: '$state', count: { $sum: 1 } } },
-        { $sort: { _id: 1 } }
-      ]).toArray();
+      const stateDistribution = await attendanceCollection
+        .aggregate([
+          { $match: query },
+          { $group: { _id: "$state", count: { $sum: 1 } } },
+          { $sort: { _id: 1 } },
+        ])
+        .toArray();
 
       // Get daily attendance counts
-      const dailyStats = await attendanceCollection.aggregate([
-        { $match: query },
-        {
-          $group: {
-            _id: { $dateToString: { format: "%Y-%m-%d", date: "$timestamp" } },
-            count: { $sum: 1 },
-            uniqueEmployees: { $addToSet: '$id' }
-          }
-        },
-        { $sort: { _id: 1 } }
-      ]).toArray();
+      const dailyStats = await attendanceCollection
+        .aggregate([
+          { $match: query },
+          {
+            $group: {
+              _id: {
+                $dateToString: { format: "%Y-%m-%d", date: "$timestamp" },
+              },
+              count: { $sum: 1 },
+              uniqueEmployees: { $addToSet: "$id" },
+            },
+          },
+          { $sort: { _id: 1 } },
+        ])
+        .toArray();
 
       return {
         success: true,
@@ -319,24 +380,23 @@ class AttendanceDbService {
         totalRecords,
         uniqueEmployeeCount: uniqueEmployees.length,
         uniqueEmployeeIds: uniqueEmployees,
-        stateDistribution: stateDistribution.map(s => ({
+        stateDistribution: stateDistribution.map((s) => ({
           state: s._id,
           stateText: this.getStateText(s._id),
-          count: s.count
+          count: s.count,
         })),
-        dailyStats: dailyStats.map(d => ({
+        dailyStats: dailyStats.map((d) => ({
           date: d._id,
           totalRecords: d.count,
-          uniqueEmployees: d.uniqueEmployees.length
+          uniqueEmployees: d.uniqueEmployees.length,
         })),
-        source: 'database'
+        source: "database",
       };
-
     } catch (error) {
       console.error(`❌ Attendance stats failed:`, error);
       return {
         success: false,
-        error: error.message
+        error: error.message,
       };
     }
   }

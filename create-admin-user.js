@@ -9,9 +9,10 @@ const Company = require("./models/Company");
 async function createTestAdmin() {
   try {
     // Connect to MongoDB
+    // Use the LOCAL dev database, not the production Atlas MONGODB_URI.
     await mongoose.connect(
-      process.env.MONGODB_URI ||
-        "mongodb://127.0.0.1:27017/leave-management-dev"
+      process.env.LOCAL_MONGODB_URI ||
+        "mongodb://127.0.0.1:27018/leave-management-dev"
     );
     console.log("✅ Connected to MongoDB");
 
@@ -40,18 +41,21 @@ async function createTestAdmin() {
       console.log("✅ Company already exists");
     }
 
-    // Create admin user
-    const hashedPassword = await bcrypt.hash("admin123", 12);
-
+    // Create admin user.
+    // Pass the PLAIN password: the User model's pre("save") hook hashes it.
+    // Hashing here too would double-hash it and make login always fail.
     const admin = new User({
       name: "Admin User",
       firstName: "Admin",
       lastName: "User",
       email: "admin@company.com",
-      password: hashedPassword,
+      password: "admin123",
       role: "admin",
       company: company._id,
-      isVerified: true,
+      // Login requires status === "active"; the schema defaults it to "pending",
+      // so it must be set explicitly or this seeded admin can never sign in.
+      status: "active",
+      isActive: true,
       phoneNumber: "+92123456789",
       department: "Administration",
       position: "System Administrator",

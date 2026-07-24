@@ -71,14 +71,14 @@ const sendEmail = async ({ email, subject, html, text, fromName }) => {
 
     const mailOptions = {
       from: `${
-        fromName || process.env.FROM_NAME || "Leave Management System"
+        fromName || process.env.FROM_NAME || "LeaveFlow"
       } <${process.env.FROM_EMAIL || process.env.SMTP_EMAIL}>`,
       to: email,
       subject: subject,
       text: textContent,
       html: html,
       headers: {
-        "X-Mailer": "Leave Management System",
+        "X-Mailer": "LeaveFlow",
         "X-Priority": "3",
         "X-MSMail-Priority": "Normal",
         Importance: "Normal",
@@ -127,9 +127,23 @@ const sendInvitationEmail = async (
   role = "employee"
 ) => {
   try {
-    const inviteUrl = `${
-      process.env.FRONTEND_URL || "http://localhost:3000"
-    }/invite/${token}`;
+    // Smart URL detection:
+    // - In production use FRONTEND_URL (required)
+    // - In development prefer FRONTEND_URL_DEV if provided, otherwise localhost
+    let frontendUrl;
+    if (process.env.NODE_ENV === "production") {
+      frontendUrl = process.env.FRONTEND_URL || "https://your-app.vercel.app";
+    } else {
+      frontendUrl =
+        process.env.FRONTEND_URL_DEV ||
+        process.env.FRONTEND_URL ||
+        "http://localhost:3000";
+    }
+
+    console.log("🌐 Using frontend URL for invites:", frontendUrl);
+    console.log("🌐 NODE_ENV:", process.env.NODE_ENV);
+
+    const inviteUrl = `${frontendUrl.replace(/\/+$/, "")}/invite/${token}`;
 
     const subject = `${employee.company} - Team Access Invitation`;
 
@@ -143,14 +157,20 @@ const sendInvitationEmail = async (
 </head>
 <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
     <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
-        <h1 style="margin: 0; font-size: 28px; font-weight: 300;">Welcome to ${employee.company}!</h1>
+        <h1 style="margin: 0; font-size: 28px; font-weight: 300;">Welcome to ${
+          employee.company
+        }!</h1>
         <p style="margin: 10px 0 0 0; opacity: 0.9;">You've been invited to join our team</p>
     </div>
 
     <div style="background: #ffffff; padding: 40px; border: 1px solid #e1e5e9; border-top: none; border-radius: 0 0 10px 10px;">
         <h2 style="color: #2c3e50; margin-top: 0;">Hello ${employee.name}!</h2>
 
-        <p>Great news! <strong>${inviterName}</strong> has invited you to join <strong>${employee.company}</strong> as a <strong>${employee.position}</strong> in the <strong>${employee.department}</strong> department.</p>
+        <p>Great news! <strong>${inviterName}</strong> has invited you to join <strong>${
+      employee.company
+    }</strong> as a <strong>${employee.position}</strong> in the <strong>${
+      employee.department
+    }</strong> department.</p>
 
         <div style="background: #f8f9fa; border-left: 4px solid #007bff; padding: 20px; margin: 25px 0;">
             <h3 style="margin-top: 0; color: #007bff;">Your Role Details:</h3>
@@ -177,8 +197,13 @@ const sendInvitationEmail = async (
     </div>
 
     <div style="text-align: center; margin-top: 20px; font-size: 12px; color: #6c757d;">
-        <p>This email was sent by ${employee.company} Leave Management System</p>
+        <p>This email was sent by ${
+          employee.company
+        } LeaveFlow</p>
         <p>If you didn't expect this invitation, please ignore this email.</p>
+        <p style="margin-top: 10px; color: #999;">Environment: ${
+          process.env.NODE_ENV || "development"
+        }</p>
     </div>
 </body>
 </html>`;
@@ -195,12 +220,28 @@ const sendInvitationEmail = async (
   }
 };
 
-// Password reset email
+// Password reset email - apply same URL logic
 const sendPasswordResetEmail = async (user, token) => {
   try {
-    const resetUrl = `${
-      process.env.FRONTEND_URL || "http://localhost:3000"
-    }/reset-password?token=${token}`;
+    let frontendUrl;
+    if (process.env.NODE_ENV === "production") {
+      frontendUrl = process.env.FRONTEND_URL || "https://your-app.vercel.app";
+    } else {
+      frontendUrl =
+        process.env.FRONTEND_URL_DEV ||
+        process.env.FRONTEND_URL ||
+        "http://localhost:3000";
+    }
+
+    console.log("🌐 Using frontend URL for password reset:", frontendUrl);
+
+    // Must be a PATH param (/reset-password/:token) to match the frontend
+    // route in App.tsx. A ?token= query string leaves the page with an
+    // undefined token and the reset silently fails.
+    const resetUrl = `${frontendUrl.replace(
+      /\/+$/,
+      ""
+    )}/reset-password/${token}`;
 
     const subject = `${user.company} - Password Reset Request`;
 
@@ -248,7 +289,7 @@ const sendPasswordResetEmail = async (user, token) => {
     </div>
 
     <div style="text-align: center; margin-top: 20px; font-size: 12px; color: #6c757d;">
-        <p>This email was sent by ${user.company} Leave Management System</p>
+        <p>This email was sent by ${user.company} LeaveFlow</p>
         <p>For security reasons, never share this reset link with anyone.</p>
     </div>
 </body>
@@ -270,7 +311,7 @@ const sendPasswordResetEmail = async (user, token) => {
 const sendLeaveRequestNotification = async (admin, employee, leave) => {
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-      <h1 style="color: #2563eb;">Leave Management System</h1>
+      <h1 style="color: #2563eb;">LeaveFlow</h1>
       <h2 style="color: #333;">New Leave Request</h2>
       <p>Hello ${admin.name},</p>
       <p><strong>${
@@ -319,7 +360,7 @@ const sendLeaveStatusNotification = async (employee, leave, reviewedBy) => {
 
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-      <h1 style="color: #2563eb;">Leave Management System</h1>
+      <h1 style="color: #2563eb;">LeaveFlow</h1>
       <h2 style="color: ${statusColor};">Leave Request ${statusText}</h2>
       <p>Hello ${employee.name},</p>
       <p>Your leave request has been <strong style="color: ${statusColor};">${
