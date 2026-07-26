@@ -7,7 +7,8 @@ const createNotification = async ({
   type,
   title,
   message,
-  leaveId = null
+  leaveId = null,
+  voiceId = null
 }) => {
   try {
     const notification = new Notification({
@@ -17,7 +18,8 @@ const createNotification = async ({
       type,
       title,
       message,
-      leaveId
+      leaveId,
+      voiceId
     });
 
     await notification.save();
@@ -26,6 +28,66 @@ const createNotification = async ({
     console.error('Error creating notification:', error);
     throw error;
   }
+};
+
+// ── Employee Voice notifications ──────────────────────────────────────────
+const CATEGORY_LABELS = {
+  workplace_issue: 'Workplace Issue',
+  complaint: 'Complaint',
+  suggestion: 'Suggestion',
+  hr_support: 'HR Support Request',
+  appreciation: 'Appreciation',
+  feedback: 'Feedback'
+};
+
+// Admin is told an employee raised a new Voice.
+const notifyVoiceSubmission = async (voice, admin) => {
+  const label = CATEGORY_LABELS[voice.category] || 'Employee Voice';
+  const who = voice.isAnonymous
+    ? 'An anonymous employee'
+    : (voice.employee && voice.employee.name) || 'An employee';
+
+  return await createNotification({
+    recipient: admin._id,
+    // Preserve anonymity: never attach the sender for anonymous submissions.
+    sender: voice.isAnonymous
+      ? undefined
+      : voice.employee && (voice.employee._id || voice.employee),
+    company: voice.company,
+    type: 'voice_submitted',
+    title: `New ${label}`,
+    message: `${who} submitted a ${label.toLowerCase()}: "${voice.title}".`,
+    voiceId: voice._id
+  });
+};
+
+// A reply was posted — notify the other party (employee ⇄ admin).
+const notifyVoiceReply = async (voice, recipientId, sender) => {
+  const senderName = (sender && sender.name) || 'Someone';
+  const isFromAdmin = sender && sender.role === 'admin';
+
+  return await createNotification({
+    recipient: recipientId,
+    sender: sender && sender._id,
+    company: voice.company,
+    type: 'voice_reply',
+    title: isFromAdmin ? 'HR replied to your submission' : 'New reply on a submission',
+    message: `${isFromAdmin ? 'HR' : senderName} replied to "${voice.title}".`,
+    voiceId: voice._id
+  });
+};
+
+// The status of a Voice changed — notify the submitting employee.
+const notifyVoiceStatus = async (voice, statusLabel, sender) => {
+  return await createNotification({
+    recipient: voice.employee._id || voice.employee,
+    sender: sender && sender._id,
+    company: voice.company,
+    type: 'voice_status',
+    title: 'Submission status updated',
+    message: `Your submission "${voice.title}" is now ${statusLabel}.`,
+    voiceId: voice._id
+  });
 };
 
 const notifyLeaveRequest = async (leave, admin) => {
@@ -72,5 +134,8 @@ module.exports = {
   createNotification,
   notifyLeaveRequest,
   notifyLeaveApproval,
-  notifyLeaveRejection
+  notifyLeaveRejection,
+  notifyVoiceSubmission,
+  notifyVoiceReply,
+  notifyVoiceStatus
 };
