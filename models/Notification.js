@@ -17,7 +17,14 @@ const notificationSchema = new mongoose.Schema({
   },
   type: {
     type: String,
-    enum: ['leave_request', 'leave_approved', 'leave_rejected'],
+    enum: [
+      'leave_request',
+      'leave_approved',
+      'leave_rejected',
+      'voice_submitted',
+      'voice_reply',
+      'voice_status'
+    ],
     required: [true, 'Notification type is required']
   },
   title: {
@@ -33,6 +40,11 @@ const notificationSchema = new mongoose.Schema({
   leaveId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Leave'
+  },
+  // Polymorphic reference for the Employee Voice module.
+  voiceId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'EmployeeVoice'
   },
   read: {
     type: Boolean,

@@ -47,7 +47,8 @@ const biometricRoutes = require("./routes/biometric");
 const employeesFixRoutes = require("./routes/employees-fix");
 const employeePerformanceRoutes = require("./routes/employeePerformance");
 const machinePerformanceRoutes = require("./routes/machinePerformance");
-// const notificationRoutes = require("./routes/notifications"); // Removed for Socket.IO implementation
+const notificationRoutes = require("./routes/notifications");
+const employeeVoiceRoutes = require("./routes/employeeVoice");
 
 const app = express();
 
@@ -377,7 +378,8 @@ app.use(
   "/api/real-machine-performance",
   require("./routes/realMachinePerformance")
 );
-// app.use("/api/notifications", notificationRoutes); // Removed for Socket.IO implementation
+app.use("/api/notifications", notificationRoutes);
+app.use("/api/employee-voice", employeeVoiceRoutes);
 
 // Health check route with database status
 app.get("/api/health", async (req, res) => {
