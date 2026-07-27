@@ -554,20 +554,13 @@ router.get("/balance/:employeeId", authenticateToken, async (req, res) => {
       usedLeaves[leave.leaveType] += leave.totalDays;
     });
 
-    // Get company leave policy with correct fallback values
-    const policy = employee.company.leavePolicy || {
-      annualLeave: 10,
-      sickLeave: 8,
-      casualLeave: 10,
-      maternityLeave: 90,
-      paternityLeave: 15,
-    };
-
-    // Ensure policy has correct values (in case company has old values)
+    // Company leave policy. Defaults follow the current allocation:
+    // Annual 10, Casual 10, Sick 8 (Total 28).
+    const policy = employee.company.leavePolicy || {};
     const correctedPolicy = {
-      annualLeave: policy.annualLeave === 20 ? 10 : policy.annualLeave || 10,
-      sickLeave: policy.sickLeave === 10 ? 8 : policy.sickLeave || 8,
-      casualLeave: policy.casualLeave === 8 ? 10 : policy.casualLeave || 10,
+      annualLeave: policy.annualLeave || 10,
+      sickLeave: policy.sickLeave || 8,
+      casualLeave: policy.casualLeave || 10,
       maternityLeave: policy.maternityLeave || 90,
       paternityLeave: policy.paternityLeave || 15,
     };
@@ -738,25 +731,21 @@ router.get(
         return res.status(404).json({ message: "Company not found" });
       }
 
-      const policy = user.company.leavePolicy || {
-        annualLeave: 10,
-        sickLeave: 8,
-        casualLeave: 10,
-        maternityLeave: 90,
-        paternityLeave: 15,
-      };
+      const policy = user.company.leavePolicy || {};
 
-      // Ensure policy has correct values (in case company has old values)
-      const correctedPolicy = {
-        annual: policy.annualLeave === 20 ? 10 : policy.annualLeave || 10,
-        sick: policy.sickLeave === 10 ? 8 : policy.sickLeave || 8,
-        casual: policy.casualLeave === 8 ? 10 : policy.casualLeave || 10,
+      // Company-wide leave policy. Defaults follow the current allocation:
+      // Annual 10, Casual 10, Sick 8 (Total 28). Maternity/Paternity are
+      // separate statutory leaves, not part of the 28-day allocation.
+      const resolvedPolicy = {
+        annual: policy.annualLeave || 10,
+        sick: policy.sickLeave || 8,
+        casual: policy.casualLeave || 10,
         maternityLeave: policy.maternityLeave || 90,
         paternityLeave: policy.paternityLeave || 15,
       };
 
       res.status(200).json({
-        policy: correctedPolicy,
+        policy: resolvedPolicy,
       });
     } catch (error) {
       console.error("Leave policy error:", error);
@@ -777,6 +766,10 @@ router.put(
     try {
       const { policy } = req.body;
 
+      if (!policy || typeof policy !== "object") {
+        return res.status(400).json({ message: "Policy payload is required" });
+      }
+
       const Company = require("../models/Company");
       const user = await User.findById(req.user._id);
 
@@ -792,11 +785,33 @@ router.put(
         }
       }
 
-      const company = await Company.findByIdAndUpdate(
-        user.company._id,
-        { leavePolicy: policy },
-        { new: true, runValidators: true }
-      );
+      // Merge into the existing policy so flags (preventOverlappingLeaves,
+      // maxConcurrentLeaves) are preserved. Accept both the short frontend keys
+      // (annual/sick/casual) and the schema keys (annualLeave/…).
+      const company = await Company.findById(user.company._id);
+      if (!company) {
+        return res.status(404).json({ message: "Company not found" });
+      }
+      const existing = company.leavePolicy?.toObject
+        ? company.leavePolicy.toObject()
+        : company.leavePolicy || {};
+
+      const num = (...vals) =>
+        vals.find((v) => v !== undefined && v !== null && v !== "");
+
+      company.leavePolicy = {
+        ...existing,
+        annualLeave: num(policy.annual, policy.annualLeave, existing.annualLeave, 10),
+        sickLeave: num(policy.sick, policy.sickLeave, existing.sickLeave, 8),
+        casualLeave: num(policy.casual, policy.casualLeave, existing.casualLeave, 10),
+        maternityLeave: num(policy.maternity, policy.maternityLeave, existing.maternityLeave, 90),
+        paternityLeave: num(policy.paternity, policy.paternityLeave, existing.paternityLeave, 15),
+        preventOverlappingLeaves:
+          policy.preventOverlappingLeaves ?? existing.preventOverlappingLeaves ?? false,
+        maxConcurrentLeaves:
+          policy.maxConcurrentLeaves ?? existing.maxConcurrentLeaves ?? null,
+      };
+      await company.save();
 
       res.status(200).json({
         message: "Leave policy updated successfully",
