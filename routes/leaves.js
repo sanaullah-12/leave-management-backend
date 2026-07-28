@@ -11,6 +11,7 @@ const {
   notifyLeaveApproval,
   notifyLeaveRejection,
 } = require("../utils/notifications");
+const SocketService = require("../socket/socketService");
 const {
   sendLeaveRequestNotification,
   sendLeaveStatusNotification,
@@ -148,6 +149,20 @@ router.post("/", authenticateToken, async (req, res) => {
       "employee",
       "name employeeId department profilePicture"
     );
+
+    // Real-time: notify all admins so their dashboard pending-count, sidebar
+    // badge and leave list update instantly (in addition to the per-admin
+    // notification pushed by notifyLeaveRequest below).
+    SocketService.toCompanyAdmins(leave.company, SocketService.events.LEAVE_NEW, {
+      _id: leave._id,
+      employeeName: leave.employee && leave.employee.name,
+      leaveType: leave.leaveType,
+      totalDays: leave.totalDays,
+      startDate: leave.startDate,
+      endDate: leave.endDate,
+      status: leave.status,
+    });
+    SocketService.statsUpdate(leave.company, "dashboard");
 
     // Send notifications to admins (non-blocking - don't fail request if email fails)
     const admins = await User.find({
@@ -362,6 +377,20 @@ router.put(
         );
         emailNotificationFailed = true;
       }
+
+      // Real-time: the employee's own dashboard/leave list + the admin dashboard
+      // both react instantly to the decision.
+      SocketService.toUser(
+        leave.employee._id || leave.employee,
+        SocketService.events.LEAVE_REVIEWED,
+        {
+          _id: leave._id,
+          status,
+          leaveType: leave.leaveType,
+          totalDays: leave.totalDays,
+        }
+      );
+      SocketService.statsUpdate(leave.company, "dashboard");
 
       try {
         // Try to send in-app notification
