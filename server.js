@@ -1,4 +1,5 @@
 const express = require("express");
+const http = require("http");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const helmet = require("helmet");
@@ -922,6 +923,13 @@ app.use("*", (req, res) => {
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+
+// Real-time layer: wrap Express in an HTTP server so Socket.IO can share the
+// same port, then initialise the socket server (JWT-authenticated, room-based).
+const server = http.createServer(app);
+require("./socket/socketServer").init(server);
+
+server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
+  console.log(`⚡ Real-time (Socket.IO) ready on the same port`);
 });
