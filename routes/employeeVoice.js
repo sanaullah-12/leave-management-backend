@@ -14,6 +14,7 @@ const {
   notifyVoiceReply,
   notifyVoiceStatus,
 } = require("../utils/notifications");
+const SocketService = require("../socket/socketService");
 
 const router = express.Router();
 
@@ -103,6 +104,16 @@ router.post("/", authenticateToken, uploadVoiceAttachments, async (req, res) => 
       "employee",
       "name employeeId department position profilePicture"
     );
+
+    // Real-time: admins' Employee Voice widget, dashboard count and sidebar
+    // badge update instantly (per-admin notification is pushed below too).
+    SocketService.toCompanyAdmins(voice.company, SocketService.events.VOICE_NEW, {
+      _id: voice._id,
+      category: voice.category,
+      title: voice.title,
+      isAnonymous: voice.isAnonymous,
+    });
+    SocketService.statsUpdate(voice.company, "voice");
 
     // Respond immediately, then notify admins in the background (non-blocking).
     res.status(201).json({
@@ -394,6 +405,15 @@ router.put(
       if (!voice) {
         return res.status(404).json({ message: "Voice not found" });
       }
+
+      // Real-time: the submitting employee sees the status change instantly,
+      // and admins' widgets/counters refresh.
+      SocketService.toUser(
+        voice.employee._id || voice.employee,
+        SocketService.events.VOICE_UPDATED,
+        { _id: voice._id, status: voice.status }
+      );
+      SocketService.statsUpdate(voice.company, "voice");
 
       setImmediate(async () => {
         try {
