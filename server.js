@@ -381,6 +381,7 @@ app.use(
 );
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/employee-voice", employeeVoiceRoutes);
+app.use("/api/announcements", require("./routes/announcements"));
 
 // Health check route with database status
 app.get("/api/health", async (req, res) => {
