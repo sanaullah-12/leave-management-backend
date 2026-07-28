@@ -71,14 +71,14 @@ const sendEmail = async ({ email, subject, html, text, fromName }) => {
 
     const mailOptions = {
       from: `${
-        fromName || process.env.FROM_NAME || "LeaveFlow"
+        fromName || process.env.FROM_NAME || "Nexora"
       } <${process.env.FROM_EMAIL || process.env.SMTP_EMAIL}>`,
       to: email,
       subject: subject,
       text: textContent,
       html: html,
       headers: {
-        "X-Mailer": "LeaveFlow",
+        "X-Mailer": "Nexora",
         "X-Priority": "3",
         "X-MSMail-Priority": "Normal",
         Importance: "Normal",
@@ -199,7 +199,7 @@ const sendInvitationEmail = async (
     <div style="text-align: center; margin-top: 20px; font-size: 12px; color: #6c757d;">
         <p>This email was sent by ${
           employee.company
-        } LeaveFlow</p>
+        } Nexora</p>
         <p>If you didn't expect this invitation, please ignore this email.</p>
         <p style="margin-top: 10px; color: #999;">Environment: ${
           process.env.NODE_ENV || "development"
@@ -289,7 +289,7 @@ const sendPasswordResetEmail = async (user, token) => {
     </div>
 
     <div style="text-align: center; margin-top: 20px; font-size: 12px; color: #6c757d;">
-        <p>This email was sent by ${user.company} LeaveFlow</p>
+        <p>This email was sent by ${user.company} Nexora</p>
         <p>For security reasons, never share this reset link with anyone.</p>
     </div>
 </body>
@@ -311,7 +311,7 @@ const sendPasswordResetEmail = async (user, token) => {
 const sendLeaveRequestNotification = async (admin, employee, leave) => {
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-      <h1 style="color: #2563eb;">LeaveFlow</h1>
+      <h1 style="color: #2563eb;">Nexora</h1>
       <h2 style="color: #333;">New Leave Request</h2>
       <p>Hello ${admin.name},</p>
       <p><strong>${
@@ -360,7 +360,7 @@ const sendLeaveStatusNotification = async (employee, leave, reviewedBy) => {
 
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-      <h1 style="color: #2563eb;">LeaveFlow</h1>
+      <h1 style="color: #2563eb;">Nexora</h1>
       <h2 style="color: ${statusColor};">Leave Request ${statusText}</h2>
       <p>Hello ${employee.name},</p>
       <p>Your leave request has been <strong style="color: ${statusColor};">${
