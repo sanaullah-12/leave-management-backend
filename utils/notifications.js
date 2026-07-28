@@ -9,7 +9,8 @@ const createNotification = async ({
   title,
   message,
   leaveId = null,
-  voiceId = null
+  voiceId = null,
+  announcementId = null
 }) => {
   try {
     const notification = new Notification({
@@ -20,7 +21,8 @@ const createNotification = async ({
       title,
       message,
       leaveId,
-      voiceId
+      voiceId,
+      announcementId
     });
 
     await notification.save();
@@ -34,6 +36,7 @@ const createNotification = async ({
       message: notification.message,
       leaveId: notification.leaveId,
       voiceId: notification.voiceId,
+      announcementId: notification.announcementId,
       read: false,
       createdAt: notification.createdAt,
     });
@@ -43,6 +46,24 @@ const createNotification = async ({
     console.error('Error creating notification:', error);
     throw error;
   }
+};
+
+// ── Announcements ─────────────────────────────────────────────────────────
+// One recipient is told a new company announcement was posted.
+const notifyAnnouncement = async (announcement, recipientId, sender) => {
+  const preview =
+    announcement.body && announcement.body.length > 120
+      ? `${announcement.body.slice(0, 120)}…`
+      : announcement.body || '';
+  return await createNotification({
+    recipient: recipientId,
+    sender: sender && (sender._id || sender),
+    company: announcement.company,
+    type: 'announcement',
+    title: `📣 ${announcement.title}`,
+    message: preview || `${announcement.authorName} posted a new announcement.`,
+    announcementId: announcement._id,
+  });
 };
 
 // ── Employee Voice notifications ──────────────────────────────────────────
@@ -152,5 +173,6 @@ module.exports = {
   notifyLeaveRejection,
   notifyVoiceSubmission,
   notifyVoiceReply,
-  notifyVoiceStatus
+  notifyVoiceStatus,
+  notifyAnnouncement
 };

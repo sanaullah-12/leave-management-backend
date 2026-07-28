@@ -23,7 +23,8 @@ const notificationSchema = new mongoose.Schema({
       'leave_rejected',
       'voice_submitted',
       'voice_reply',
-      'voice_status'
+      'voice_status',
+      'announcement'
     ],
     required: [true, 'Notification type is required']
   },
@@ -45,6 +46,11 @@ const notificationSchema = new mongoose.Schema({
   voiceId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'EmployeeVoice'
+  },
+  // Polymorphic reference for the Announcements module.
+  announcementId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Announcement'
   },
   read: {
     type: Boolean,
