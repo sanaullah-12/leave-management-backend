@@ -1,4 +1,5 @@
 const Notification = require('../models/Notification');
+const SocketService = require('../socket/socketService');
 
 const createNotification = async ({
   recipient,
@@ -23,6 +24,20 @@ const createNotification = async ({
     });
 
     await notification.save();
+
+    // Real-time: push the notification to the recipient's room instantly.
+    // Fail-safe — a socket hiccup must never break notification creation.
+    SocketService.toUser(recipient, SocketService.events.NOTIFICATION_NEW, {
+      _id: notification._id,
+      type: notification.type,
+      title: notification.title,
+      message: notification.message,
+      leaveId: notification.leaveId,
+      voiceId: notification.voiceId,
+      read: false,
+      createdAt: notification.createdAt,
+    });
+
     return notification;
   } catch (error) {
     console.error('Error creating notification:', error);
