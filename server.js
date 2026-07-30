@@ -53,6 +53,18 @@ const employeeVoiceRoutes = require("./routes/employeeVoice");
 
 const app = express();
 
+// Railway (and most PaaS hosts) sit behind a reverse proxy that terminates
+// TLS and forwards the real client IP via X-Forwarded-For. Without this,
+// Express ignores that header, so req.ip resolves to the proxy's own IP for
+// every request — which trips express-rate-limit's X-Forwarded-For sanity
+// check (ERR_ERL_UNEXPECTED_X_FORWARDED_FOR) and would rate-limit/log all
+// traffic as a single client. `1` trusts exactly one hop (Railway's edge
+// proxy), which is the correct, spoofing-safe value here (vs `true`, which
+// trusts the whole chain and would let a client forge its own IP). Must be
+// set before any middleware that reads the client IP — rate limiting,
+// request logging (morgan), and auth all sit below this line.
+app.set("trust proxy", 1);
+
 // CORS configuration (before other middlewares)
 const allowedOrigins = ["http://localhost:3000"]; // Always allow localhost for development
 
