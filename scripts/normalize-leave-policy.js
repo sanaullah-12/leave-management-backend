@@ -9,7 +9,7 @@
  *   node scripts/normalize-leave-policy.js --apply         # write company policy
  *   node scripts/normalize-leave-policy.js --with-quotas   # dry run  (company + employee quotas)
  *   node scripts/normalize-leave-policy.js --apply --with-quotas
- *
+ *   checking the main
  * It only touches annual/casual/sick. Maternity, paternity, emergency and all
  * policy flags are left untouched.
  */
@@ -26,7 +26,9 @@ function resolveConnectionString() {
   const useProd = process.env.USE_PRODUCTION_DB === "true";
   if (isProd || useProd) {
     if (!process.env.MONGODB_URI) {
-      throw new Error("MONGODB_URI is not set but production DB was requested.");
+      throw new Error(
+        "MONGODB_URI is not set but production DB was requested.",
+      );
     }
     return process.env.MONGODB_URI;
   }
@@ -39,7 +41,9 @@ function resolveConnectionString() {
 (async () => {
   const conn = resolveConnectionString();
   const masked = conn.replace(/\/\/[^:]*:[^@]*@/, "//***:***@");
-  console.log(`\n${APPLY ? "🟢 APPLY" : "🔍 DRY RUN"} — leave policy normalize`);
+  console.log(
+    `\n${APPLY ? "🟢 APPLY" : "🔍 DRY RUN"} — leave policy normalize`,
+  );
   console.log("📍 DB:", masked);
   console.log("🎯 Target:", TARGET, WITH_QUOTAS ? "(+ employee quotas)" : "");
 
@@ -55,7 +59,7 @@ function resolveConnectionString() {
   companies.forEach((c) => {
     const p = c.leavePolicy || {};
     console.log(
-      `   • ${c.name || c._id}: annual=${p.annualLeave} casual=${p.casualLeave} sick=${p.sickLeave}`
+      `   • ${c.name || c._id}: annual=${p.annualLeave} casual=${p.casualLeave} sick=${p.sickLeave}`,
     );
   });
 
@@ -68,9 +72,11 @@ function resolveConnectionString() {
           "leavePolicy.casualLeave": TARGET.casual,
           "leavePolicy.sickLeave": TARGET.sick,
         },
-      }
+      },
     );
-    console.log(`   ↳ ✅ Updated ${res.modifiedCount} company policy record(s).`);
+    console.log(
+      `   ↳ ✅ Updated ${res.modifiedCount} company policy record(s).`,
+    );
   }
 
   // ---- Employee quotas (optional) ----
@@ -83,7 +89,9 @@ function resolveConnectionString() {
         { "leaveQuota.sick": { $ne: TARGET.sick } },
       ],
     });
-    console.log(`\n👤 Users: ${users} (with non-matching core quotas: ${stale})`);
+    console.log(
+      `\n👤 Users: ${users} (with non-matching core quotas: ${stale})`,
+    );
 
     if (APPLY) {
       const res = await User.updateMany(
@@ -94,7 +102,7 @@ function resolveConnectionString() {
             "leaveQuota.casual": TARGET.casual,
             "leaveQuota.sick": TARGET.sick,
           },
-        }
+        },
       );
       console.log(`   ↳ ✅ Updated ${res.modifiedCount} user quota record(s).`);
     }
@@ -102,7 +110,7 @@ function resolveConnectionString() {
 
   if (!APPLY) {
     console.log(
-      "\nℹ️  Dry run only — nothing was written. Re-run with --apply to save."
+      "\nℹ️  Dry run only — nothing was written. Re-run with --apply to save.",
     );
   } else {
     console.log("\n🎉 Done.");
