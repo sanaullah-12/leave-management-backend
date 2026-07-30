@@ -153,13 +153,10 @@ const connectDB = async (retryCount = 0) => {
     // FORCE LOCAL DATABASE CONNECTION - ALWAYS USE LOCAL IN DEVELOPMENT
     let connectionString;
 
-    // Check if this is actually production deployment (Railway/Vercel/etc)
-    const isActualProduction =
-      process.env.RAILWAY_ENVIRONMENT === "production" ||
-      process.env.VERCEL_ENV === "production" ||
-      (process.env.NODE_ENV === "production" &&
-        process.env.PORT &&
-        parseInt(process.env.PORT) !== 5000);
+    // Check if this is actually a production deployment. NODE_ENV is the one
+    // signal we control explicitly (set it in the platform's dashboard), so
+    // trust it directly instead of guessing from platform-specific env vars.
+    const isActualProduction = process.env.NODE_ENV === "production";
 
     // Explicit opt-in to the real Atlas data while running locally.
     // Required because the real users/employees live in Atlas, not locally.
