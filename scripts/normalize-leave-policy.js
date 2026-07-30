@@ -10,6 +10,7 @@
  *   node scripts/normalize-leave-policy.js --with-quotas   # dry run  (company + employee quotas)
  *   node scripts/normalize-leave-policy.js --apply --with-quotas
  *   checking the main
+ *   Heloo policies
  * It only touches annual/casual/sick. Maternity, paternity, emergency and all
  * policy flags are left untouched.
  */
