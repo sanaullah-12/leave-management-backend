@@ -607,78 +607,11 @@ app.post("/api/debug/test-write", async (req, res) => {
   }
 });
 
-// Force SendGrid test endpoint
+// SendGrid test endpoint — disabled. SMTP is the only email path in production now.
 app.post("/api/debug/test-sendgrid", async (req, res) => {
-  console.log("\n🧪 FORCE SENDGRID TEST ENDPOINT CALLED");
-
-  try {
-    const targetEmail =
-      req.body.email || process.env.SMTP_EMAIL || "qazisanaullah612@gmail.com";
-    console.log("🎯 Target email:", targetEmail);
-
-    // Force use SendGrid directly
-    const sendGridKey =
-      process.env.SendGrid_Key || process.env.SENDGRID_API_KEY;
-
-    if (!sendGridKey) {
-      return res.status(400).json({
-        message: "❌ No SendGrid API key found",
-        variables_checked: ["SendGrid_Key", "SENDGRID_API_KEY"],
-        sendgrid_key_railway: !!process.env.SendGrid_Key,
-        sendgrid_key_standard: !!process.env.SENDGRID_API_KEY,
-      });
-    }
-
-    const sgMail = require("@sendgrid/mail");
-    sgMail.setApiKey(sendGridKey);
-
-    const mailOptions = {
-      from: {
-        email: process.env.FROM_EMAIL,
-        name: process.env.FROM_NAME || "Leave Management System",
-      },
-      to: targetEmail,
-      subject: "🧪 DIRECT SENDGRID TEST - Railway",
-      html:
-        "<h1>🎉 SUCCESS!</h1><p>This email was sent directly via SendGrid API!</p><p>Time: " +
-        new Date().toISOString() +
-        "</p>",
-      text:
-        "SUCCESS! This email was sent directly via SendGrid API! Time: " +
-        new Date().toISOString(),
-    };
-
-    console.log("📤 Sending directly via SendGrid...");
-    console.log("📤 Using API Key:", sendGridKey.substring(0, 10) + "...");
-    console.log("📤 From:", mailOptions.from);
-    console.log("📤 To:", targetEmail);
-
-    const response = await sgMail.send(mailOptions);
-
-    console.log("✅ Direct SendGrid test successful!");
-    console.log("📧 Response:", response[0]?.statusCode);
-
-    res.status(200).json({
-      message: "✅ Direct SendGrid test successful!",
-      target_email: targetEmail,
-      sendgrid_response: {
-        statusCode: response[0]?.statusCode,
-        messageId: response[0]?.headers?.["x-message-id"],
-      },
-      api_key_used: sendGridKey.substring(0, 10) + "...",
-      timestamp: new Date().toISOString(),
-    });
-  } catch (error) {
-    console.error("❌ Direct SendGrid test failed:", error);
-
-    res.status(500).json({
-      message: "❌ Direct SendGrid test failed",
-      error: error.message,
-      error_code: error.code,
-      error_response: error.response?.body,
-      timestamp: new Date().toISOString(),
-    });
-  }
+  res.status(410).json({
+    message: "SendGrid is disabled. This deployment sends email via SMTP only.",
+  });
 });
 
 // Test email sending endpoint - ENHANCED VERSION
@@ -715,20 +648,7 @@ app.post("/api/debug/test-email", async (req, res) => {
       result: result,
       environment_check: {
         node_env: process.env.NODE_ENV,
-        sendgrid_key_railway: process.env.SendGrid_Key
-          ? `${process.env.SendGrid_Key.substring(0, 10)}...`
-          : "NOT SET",
-        sendgrid_key_standard: process.env.SENDGRID_API_KEY
-          ? `${process.env.SENDGRID_API_KEY.substring(0, 10)}...`
-          : "NOT SET",
-        sendgrid_configured: !!(
-          process.env.SendGrid_Key || process.env.SENDGRID_API_KEY
-        ),
-        sendgrid_key_length: (
-          process.env.SendGrid_Key ||
-          process.env.SENDGRID_API_KEY ||
-          ""
-        ).length,
+        provider: "SMTP",
         smtp_configured: !!(
           process.env.SMTP_EMAIL && process.env.SMTP_PASSWORD
         ),
@@ -746,20 +666,7 @@ app.post("/api/debug/test-email", async (req, res) => {
       error_stack: error.stack,
       environment_check: {
         node_env: process.env.NODE_ENV,
-        sendgrid_key_railway: process.env.SendGrid_Key
-          ? `${process.env.SendGrid_Key.substring(0, 10)}...`
-          : "NOT SET",
-        sendgrid_key_standard: process.env.SENDGRID_API_KEY
-          ? `${process.env.SENDGRID_API_KEY.substring(0, 10)}...`
-          : "NOT SET",
-        sendgrid_configured: !!(
-          process.env.SendGrid_Key || process.env.SENDGRID_API_KEY
-        ),
-        sendgrid_key_length: (
-          process.env.SendGrid_Key ||
-          process.env.SENDGRID_API_KEY ||
-          ""
-        ).length,
+        provider: "SMTP",
         smtp_configured: !!(
           process.env.SMTP_EMAIL && process.env.SMTP_PASSWORD
         ),
@@ -823,43 +730,24 @@ app.get("/test", (req, res) => {
 // Debug endpoint for email configuration
 app.get("/api/debug/email-config", (req, res) => {
   try {
-    // Check SendGrid configuration like the email utility does
-    const sendGridKey =
-      process.env.SendGrid_Key || process.env.SENDGRID_API_KEY;
-    const isSendGridConfigured =
-      sendGridKey &&
-      sendGridKey !== "your_sendgrid_api_key_here" &&
-      sendGridKey.length > 10;
+    // SendGrid is disabled — SMTP is the only email path, in every environment.
     const isProduction = process.env.NODE_ENV === "production";
-    const willUseSendGrid = isProduction && isSendGridConfigured;
 
     const emailConfig = {
       environment: process.env.NODE_ENV,
       is_production: isProduction,
-      sendgrid_key_railway_exists: !!process.env.SendGrid_Key,
-      sendgrid_key_railway_length: (process.env.SendGrid_Key || "").length,
-      sendgrid_key_railway_preview: process.env.SendGrid_Key
-        ? `${process.env.SendGrid_Key.substring(0, 15)}...`
-        : "NOT SET",
-      sendgrid_key_standard_exists: !!process.env.SENDGRID_API_KEY,
-      sendgrid_key_standard_length: (process.env.SENDGRID_API_KEY || "").length,
-      final_sendgrid_key_exists: !!sendGridKey,
-      final_sendgrid_key_length: (sendGridKey || "").length,
-      sendgrid_configured: isSendGridConfigured,
-      will_use_sendgrid: willUseSendGrid,
-      will_use_provider: willUseSendGrid ? "SendGrid" : "SMTP",
+      will_use_provider: "SMTP",
+      smtp_host: process.env.SMTP_HOST,
+      smtp_port: process.env.SMTP_PORT,
       from_email: process.env.FROM_EMAIL,
       smtp_email: process.env.SMTP_EMAIL,
       smtp_password_exists: !!process.env.SMTP_PASSWORD,
+      smtp_configured: !!(
+        process.env.SMTP_HOST &&
+        process.env.SMTP_EMAIL &&
+        process.env.SMTP_PASSWORD
+      ),
       timestamp: new Date().toISOString(),
-      decision_logic: {
-        is_production: isProduction,
-        sendgrid_key_exists: !!sendGridKey,
-        sendgrid_key_valid:
-          sendGridKey && sendGridKey !== "your_sendgrid_api_key_here",
-        sendgrid_key_long_enough: sendGridKey && sendGridKey.length > 10,
-        final_decision: willUseSendGrid,
-      },
     };
 
     res.status(200).json({

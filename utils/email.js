@@ -1,8 +1,9 @@
 const nodemailer = require("nodemailer");
-const {
-  sendEmailWithSendGrid,
-  isConfigured: isSendGridConfigured,
-} = require("./sendgridEmail");
+// SendGrid disabled — SMTP is used exclusively in production now.
+// const {
+//   sendEmailWithSendGrid,
+//   isConfigured: isSendGridConfigured,
+// } = require("./sendgridEmail");
 
 // Create fresh transporter for each request to prevent hanging
 const createTransporter = () => {
@@ -19,9 +20,9 @@ const createTransporter = () => {
       minVersion: "TLSv1.2",
     },
     // Connection timeouts and limits
-    connectionTimeout: 10000, // 10 seconds to connect
-    greetingTimeout: 5000, // 5 seconds for greeting
-    socketTimeout: 15000, // 15 seconds for socket inactivity
+    connectionTimeout: 20000, // 20 seconds to connect
+    greetingTimeout: 10000, // 10 seconds for greeting
+    socketTimeout: 20000, // 20 seconds for socket inactivity
     // Pool settings for better performance
     pool: false, // Don't use connection pooling to prevent hanging
     maxConnections: 1,
@@ -29,26 +30,27 @@ const createTransporter = () => {
   });
 };
 
-// Smart email function - tries SendGrid first, falls back to SMTP
+// Email function - SMTP only (SendGrid disabled in production per team decision)
 const sendEmail = async ({ email, subject, html, text, fromName }) => {
-  // Try SendGrid first if configured (recommended for Railway)
-  if (isSendGridConfigured()) {
-    try {
-      console.log("🚀 Using SendGrid API for email delivery");
-      return await sendEmailWithSendGrid({
-        email,
-        subject,
-        html,
-        text,
-        fromName,
-      });
-    } catch (error) {
-      console.error("⚠️ SendGrid failed, falling back to SMTP:", error.message);
-      // Continue to SMTP fallback below
-    }
-  }
+  // SendGrid path disabled. To re-enable, uncomment the import above and this
+  // block.
+  // if (isSendGridConfigured()) {
+  //   try {
+  //     console.log("🚀 Using SendGrid API for email delivery");
+  //     return await sendEmailWithSendGrid({
+  //       email,
+  //       subject,
+  //       html,
+  //       text,
+  //       fromName,
+  //     });
+  //   } catch (error) {
+  //     console.error("⚠️ SendGrid failed, falling back to SMTP:", error.message);
+  //     // Continue to SMTP fallback below
+  //   }
+  // }
 
-  // Fallback to SMTP (requires proper Gmail App Password on Railway)
+  // SMTP (Gmail App Password)
   try {
     console.log("📧 Using SMTP for email delivery");
     console.log("📧 Recipient:", email);
@@ -107,7 +109,20 @@ const sendEmail = async ({ email, subject, html, text, fromName }) => {
     };
   } catch (error) {
     console.error("❌ SMTP email failed:", error.message);
+    console.error(
+      "❌ SMTP error code:",
+      error.code,
+      "| command:",
+      error.command
+    );
     console.error("Full error:", error);
+    if (error.code === "ETIMEDOUT" || error.message === "Connection timeout") {
+      console.error(
+        "💡 Could not open a TCP connection to the SMTP host at all (not an auth failure). " +
+          "This usually means the host's network is blocking outbound SMTP (port " +
+          `${process.env.SMTP_PORT || 587}) rather than a bad SMTP_EMAIL/SMTP_PASSWORD.`
+      );
+    }
 
     // Close transporter on error
     if (typeof transporter !== "undefined" && transporter) {
