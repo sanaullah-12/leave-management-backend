@@ -4,7 +4,7 @@
  * Single responsibility: probe each layer of the delivery path independently,
  * so a failure points at one cause instead of "email didn't arrive".
  *
- * Resend runs over plain HTTPS (443), so the SMTP-era port-blocking checks are
+ * Brevo runs over plain HTTPS (443), so the SMTP-era port-blocking checks are
  * gone — 443 is open essentially everywhere, which is precisely why this
  * provider sidesteps the outbound-SMTP problem entirely.
  */
@@ -14,7 +14,7 @@ const net = require("net");
 
 const { loadEmailConfig } = require("./config");
 
-const API_HOST = "api.resend.com";
+const API_HOST = "api.brevo.com";
 
 /** Plain TCP connect to the API host — proves outbound HTTPS is possible. */
 const probeTcp = (host, port, timeoutMs = 10000) =>
@@ -40,7 +40,7 @@ const probeTcp = (host, port, timeoutMs = 10000) =>
 /** Run the full sweep. Never throws — failures are returned as data. */
 const runDiagnostics = async ({ timeoutMs = 8000, includeAuth = true } = {}) => {
   const out = {
-    provider: "Resend",
+    provider: "Brevo",
     environment: {
       nodeEnv: process.env.NODE_ENV || null,
       railwayEnvironment: process.env.RAILWAY_ENVIRONMENT || null,
@@ -63,10 +63,9 @@ const runDiagnostics = async ({ timeoutMs = 8000, includeAuth = true } = {}) => 
     config = loadEmailConfig();
     out.config = {
       ok: true,
-      from: config.from,
-      usingTestSender: config.isTestSender,
+      from: `${config.fromName} <${config.fromEmail}>`,
       apiKeyLength: String(config.apiKey).length, // length only — never the value
-      apiKeyPrefixValid: String(config.apiKey).startsWith("re_"),
+      apiKeyPrefixValid: String(config.apiKey).startsWith("xkeysib-"),
       replyTo: config.replyTo || null,
     };
   } catch (error) {
@@ -95,7 +94,7 @@ const runDiagnostics = async ({ timeoutMs = 8000, includeAuth = true } = {}) => 
     out.auth = {
       ok: false,
       skipped: true,
-      reason: "Cannot reach api.resend.com — an API call would just hang.",
+      reason: "Cannot reach api.brevo.com — an API call would just hang.",
     };
   }
 
@@ -103,25 +102,28 @@ const runDiagnostics = async ({ timeoutMs = 8000, includeAuth = true } = {}) => 
   if (!probe.ok) {
     out.blocker = "NETWORK_HTTPS_BLOCKED";
     out.verdict =
-      "Cannot open an outbound HTTPS connection to api.resend.com. This is unusual — " +
+      "Cannot open an outbound HTTPS connection to api.brevo.com. This is unusual — " +
       "port 443 is open on virtually every host — and points to a severe network egress " +
       "restriction or a DNS failure.";
   } else if (out.auth && out.auth.ok === false && !out.auth.skipped) {
     out.blocker = "AUTH";
-    out.verdict = `Network is fine — Resend rejected the request. ${out.auth.solution || ""}`.trim();
+    out.verdict = `Network is fine — Brevo rejected the request. ${out.auth.solution || ""}`.trim();
   } else if (out.auth && out.auth.ok) {
-    if (config.isTestSender) {
-      out.blocker = null;
+    if (out.auth.senderVerified === false) {
+      // The key works but the sender isn't verified — sends will be rejected,
+      // so this is a genuine blocker even though authentication succeeded.
+      out.blocker = "SENDER_NOT_VERIFIED";
       out.verdict =
-        "Config, network and API key all pass. IMPORTANT: you are using Resend's shared " +
-        "test sender (onboarding@resend.dev), which can ONLY deliver to the email address " +
-        "that owns the Resend account. Sends to anyone else return success but never " +
-        "arrive. Verify a domain and set EMAIL_FROM to send to real recipients.";
+        `Config, network and API key all pass, but EMAIL_FROM (${config.fromEmail}) is NOT ` +
+        `a verified sender in Brevo — every send will be rejected. Add and confirm it at ` +
+        `https://app.brevo.com/senders, or verify the domain at ` +
+        `https://app.brevo.com/senders/domain.`;
     } else {
       out.blocker = null;
       out.verdict =
-        "Config, network, API key and sender domain all pass. If mail is still not " +
-        "received, the issue is deliverability (spam filtering), not sending.";
+        "Config, network, API key and sender all pass. If mail is still not received, " +
+        "the issue is deliverability (spam filtering), not sending — check the Brevo " +
+        "logs at https://app.brevo.com/statistics/email.";
     }
   } else {
     out.verdict = "Config and network pass. The API key was not tested.";
