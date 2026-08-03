@@ -8,8 +8,19 @@ const rateLimit = require("express-rate-limit");
 // Load environment variables
 const path = require("path");
 const fs = require("fs");
-if (process.env.NODE_ENV === "production") {
+// Don't trust NODE_ENV alone to pick the env file: it must be set explicitly
+// on the host, and if it's ever missing (e.g. not configured in the Railway
+// dashboard), this would silently fall back to loading the local dev .env —
+// which has a localhost FRONTEND_URL — while still deployed for real users.
+// RAILWAY_ENVIRONMENT is injected automatically by Railway on every deploy,
+// so it's a reliable second signal that we're actually running in production.
+const isDeployedProduction =
+  process.env.NODE_ENV === "production" ||
+  !!process.env.RAILWAY_ENVIRONMENT_NAME ||
+  !!process.env.RAILWAY_ENVIRONMENT;
+if (isDeployedProduction) {
   require("dotenv").config({ path: path.join(__dirname, ".env.production") });
+  process.env.NODE_ENV = "production";
 } else {
   require("dotenv").config();
 }
@@ -165,10 +176,20 @@ const connectDB = async (retryCount = 0) => {
     // FORCE LOCAL DATABASE CONNECTION - ALWAYS USE LOCAL IN DEVELOPMENT
     let connectionString;
 
-    // Check if this is actually a production deployment. NODE_ENV is the one
-    // signal we control explicitly (set it in the platform's dashboard), so
-    // trust it directly instead of guessing from platform-specific env vars.
-    const isActualProduction = process.env.NODE_ENV === "production";
+    // Check if this is actually a production deployment. Don't rely on
+    // NODE_ENV alone — it's easy to forget to add it as a Railway dashboard
+    // variable, and if it's missing this used to silently fall through to
+    // "FORCE LOCAL DATABASE" below, ignoring a correctly-set MONGODB_URI
+    // entirely. RAILWAY_ENVIRONMENT/RAILWAY_ENVIRONMENT_NAME/RAILWAY_PROJECT_ID
+    // are injected automatically by Railway on every deploy — no dashboard
+    // configuration required — so treat any of them as proof we're actually
+    // running on Railway (there is no local Mongo container there to fall
+    // back to anyway).
+    const isActualProduction =
+      process.env.NODE_ENV === "production" ||
+      !!process.env.RAILWAY_ENVIRONMENT_NAME ||
+      !!process.env.RAILWAY_ENVIRONMENT ||
+      !!process.env.RAILWAY_PROJECT_ID;
 
     // Explicit opt-in to the real Atlas data while running locally.
     // Required because the real users/employees live in Atlas, not locally.
