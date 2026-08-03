@@ -309,6 +309,13 @@ const sendPasswordResetEmail = async (user, token) => {
 
 // Send leave request notification to admins
 const sendLeaveRequestNotification = async (admin, employee, leave) => {
+  const frontendUrl =
+    process.env.NODE_ENV === "production"
+      ? process.env.FRONTEND_URL || "https://your-app.vercel.app"
+      : process.env.FRONTEND_URL_DEV ||
+        process.env.FRONTEND_URL ||
+        "http://localhost:3000";
+
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
       <h1 style="color: #2563eb;">Nexora</h1>
@@ -335,9 +342,10 @@ const sendLeaveRequestNotification = async (admin, employee, leave) => {
       </div>
 
       <div style="text-align: center;">
-        <a href="${
-          process.env.FRONTEND_URL || "http://localhost:3000"
-        }/leaves" style="background: #2563eb; color: white; padding: 14px 30px; text-decoration: none; border-radius: 6px; font-weight: bold;">
+        <a href="${frontendUrl.replace(
+          /\/+$/,
+          ""
+        )}/leaves" style="background: #2563eb; color: white; padding: 14px 30px; text-decoration: none; border-radius: 6px; font-weight: bold;">
           Review Leave Request
         </a>
       </div>
