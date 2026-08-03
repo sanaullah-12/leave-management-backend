@@ -238,36 +238,41 @@ const connectDB = async (retryCount = 0) => {
     console.log("Platform:", process.platform);
     console.log("Current time:", new Date().toISOString());
 
-    console.log("📡 Attempting to connect to LOCAL MongoDB...");
+    const targetLabel = isActualProduction || useProductionDB ? "ATLAS" : "LOCAL";
+    console.log(`📡 Attempting to connect to ${targetLabel} MongoDB...`);
     const startTime = Date.now();
 
-    // Local MongoDB connection options (simplified)
     await mongoose.connect(connectionString, {
-      serverSelectionTimeoutMS: 5000, // 5 seconds for local
-      socketTimeoutMS: 10000, // 10 seconds for local
-      connectTimeoutMS: 5000, // 5 seconds for local
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 10000,
+      connectTimeoutMS: 5000,
       bufferCommands: false,
-      maxPoolSize: 10, // More connections for local
+      maxPoolSize: 10,
     });
 
     const connectionTime = Date.now() - startTime;
-    console.log("✅ LOCAL MongoDB connected successfully!");
+    console.log(`✅ ${targetLabel} MongoDB connected successfully!`);
     console.log(`Connection time: ${connectionTime}ms`);
     console.log("Database name:", mongoose.connection.db.databaseName);
     console.log("Connection host:", mongoose.connection.host);
     console.log("Connection ready state:", mongoose.connection.readyState);
 
-    // Verify it's actually local
-    if (
+    // Sanity-check the connection matches what we intended, in either direction.
+    const isLocalHost =
       mongoose.connection.host === "127.0.0.1" ||
-      mongoose.connection.host === "localhost"
-    ) {
-      console.log("✅ CONFIRMED: Connected to LOCAL database");
-    } else {
+      mongoose.connection.host === "localhost";
+    if (targetLabel === "ATLAS" && isLocalHost) {
       console.log(
-        "⚠️  WARNING: Connected to REMOTE database:",
+        "⚠️  WARNING: Expected Atlas but connected to a local host:",
         mongoose.connection.host
       );
+    } else if (targetLabel === "LOCAL" && !isLocalHost) {
+      console.log(
+        "⚠️  WARNING: Expected local but connected to a remote host:",
+        mongoose.connection.host
+      );
+    } else {
+      console.log(`✅ CONFIRMED: Connected to ${targetLabel} database as intended`);
     }
   } catch (error) {
     console.error("❌ LOCAL MongoDB connection failed:");
