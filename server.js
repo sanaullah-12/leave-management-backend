@@ -38,16 +38,15 @@ console.log(
   "FRONTEND_URL:",
   process.env.FRONTEND_URL ? "✅ Set" : "❌ Missing"
 );
-console.log("📧 EMAIL CONFIGURATION:");
-console.log("SMTP_HOST:", process.env.SMTP_HOST ? "✅ Set" : "❌ Missing");
-console.log("SMTP_PORT:", process.env.SMTP_PORT ? "✅ Set" : "❌ Missing");
-console.log("SMTP_EMAIL:", process.env.SMTP_EMAIL ? "✅ Set" : "❌ Missing");
+console.log("📧 EMAIL CONFIGURATION (provider: Resend):");
 console.log(
-  "SMTP_PASSWORD:",
-  process.env.SMTP_PASSWORD ? "✅ Set" : "❌ Missing"
+  "RESEND_API_KEY:",
+  process.env.RESEND_API_KEY ? "✅ Set" : "❌ Missing"
 );
-console.log("FROM_EMAIL:", process.env.FROM_EMAIL ? "✅ Set" : "❌ Missing");
-console.log("FROM_NAME:", process.env.FROM_NAME ? "✅ Set" : "❌ Missing");
+console.log(
+  "EMAIL_FROM:",
+  process.env.EMAIL_FROM || "(default) Nexora <onboarding@resend.dev>"
+);
 console.log("===============================");
 
 const authRoutes = require("./routes/auth");
@@ -531,22 +530,13 @@ app.get("/api/debug", (req, res) => {
       FRONTEND_URL_value: process.env.FRONTEND_URL || "Not set",
     },
     email: {
-      SMTP_HOST: process.env.SMTP_HOST || "Not set",
-      SMTP_PORT: process.env.SMTP_PORT || "Not set",
-      SMTP_EMAIL_exists: !!process.env.SMTP_EMAIL,
-      SMTP_EMAIL_preview: process.env.SMTP_EMAIL
-        ? process.env.SMTP_EMAIL.replace(/(.{2}).*(@.*)/, "$1***$2")
-        : "Not set",
-      SMTP_PASSWORD_exists: !!process.env.SMTP_PASSWORD,
-      FROM_EMAIL_exists: !!process.env.FROM_EMAIL,
-      FROM_NAME_exists: !!process.env.FROM_NAME,
-      config_valid: !!(
-        process.env.SMTP_HOST &&
-        process.env.SMTP_PORT &&
-        process.env.SMTP_EMAIL &&
-        process.env.SMTP_PASSWORD &&
-        process.env.FROM_EMAIL
+      provider: "Resend",
+      RESEND_API_KEY_exists: !!process.env.RESEND_API_KEY,
+      RESEND_API_KEY_prefix_valid: (process.env.RESEND_API_KEY || "").startsWith(
+        "re_"
       ),
+      EMAIL_FROM: process.env.EMAIL_FROM || "(default) Nexora <onboarding@resend.dev>",
+      config_valid: !!process.env.RESEND_API_KEY,
     },
     database: {
       connection_state: mongoose.connection.readyState,
@@ -612,26 +602,48 @@ app.post("/api/debug/test-write", async (req, res) => {
   }
 });
 
-// SendGrid test endpoint — disabled. SMTP is the only email path in production now.
+// SendGrid test endpoint — removed. This deployment sends via Resend.
 app.post("/api/debug/test-sendgrid", async (req, res) => {
   res.status(410).json({
-    message: "SendGrid is disabled. This deployment sends email via SMTP only.",
+    message:
+      "SendGrid has been removed. This deployment sends email via Resend — use /api/debug/email-health.",
   });
 });
 
-// SMTP health check — validates config and proves the server is reachable and
-// the credentials are accepted, WITHOUT sending a message. This is the fastest
-// way to tell a network block apart from a bad password.
-app.get("/api/debug/smtp-health", async (req, res) => {
-  const { checkSmtpHealth } = require("./utils/smtp");
-  const result = await checkSmtpHealth();
+// Email health check — validates config and confirms the Resend API key is
+// accepted, WITHOUT sending a message.
+app.get("/api/debug/email-health", async (req, res) => {
+  const { checkEmailHealth } = require("./services/email");
+  const result = await checkEmailHealth();
   res.status(result.ok ? 200 : 503).json({
     message: result.ok
-      ? "✅ SMTP is reachable and authenticated"
-      : "❌ SMTP check failed",
+      ? "✅ Email provider (Resend) is reachable and authenticated"
+      : "❌ Email provider check failed",
     ...result,
     timestamp: new Date().toISOString(),
   });
+});
+
+// Full email diagnostic, executed FROM INSIDE this container — the only way to
+// observe the deployment's real network egress. Checks config, DNS, outbound
+// HTTPS to api.resend.com, and the API key, then reports a verdict.
+app.get("/api/debug/email-diagnose", async (req, res) => {
+  try {
+    const { runDiagnostics } = require("./services/email/diagnose");
+    const report = await runDiagnostics({ timeoutMs: 8000 });
+    res.status(report.blocker ? 503 : 200).json({
+      message: report.blocker
+        ? `❌ Email blocked: ${report.blocker}`
+        : "✅ Email path is healthy",
+      ...report,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: "❌ Diagnostic failed to run",
+      error: error.message,
+    });
+  }
 });
 
 // Test email sending endpoint - ENHANCED VERSION
@@ -639,8 +651,12 @@ app.post("/api/debug/test-email", async (req, res) => {
   console.log("\n🧪 EMAIL TEST ENDPOINT CALLED");
 
   try {
-    const targetEmail =
-      req.body.email || process.env.SMTP_EMAIL || "qazisanaullah612@gmail.com";
+    const targetEmail = req.body.email;
+    if (!targetEmail) {
+      return res.status(400).json({
+        message: "Provide a recipient: POST { \"email\": \"you@example.com\" }",
+      });
+    }
     console.log("🎯 Target email:", targetEmail);
 
     // Import fresh every time to avoid caching issues
@@ -668,31 +684,24 @@ app.post("/api/debug/test-email", async (req, res) => {
       result: result,
       environment_check: {
         node_env: process.env.NODE_ENV,
-        provider: "SMTP",
-        smtp_configured: !!(
-          process.env.SMTP_EMAIL && process.env.SMTP_PASSWORD
-        ),
-        from_email: process.env.FROM_EMAIL || "NOT SET",
+        provider: "Resend",
+        api_key_configured: !!process.env.RESEND_API_KEY,
+        from: process.env.EMAIL_FROM || "(default) Nexora <onboarding@resend.dev>",
       },
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
     console.error("❌ Test email failed:", error.message);
-    console.error("❌ Full error:", error);
 
     res.status(500).json({
       message: "❌ Test email failed",
       error: error.message,
-      error_stack: error.stack,
+      diagnosis: error.emailDiagnosis || null,
       environment_check: {
         node_env: process.env.NODE_ENV,
-        provider: "SMTP",
-        smtp_configured: !!(
-          process.env.SMTP_EMAIL && process.env.SMTP_PASSWORD
-        ),
-        from_email: process.env.FROM_EMAIL || "NOT SET",
-        smtp_email: process.env.SMTP_EMAIL || "NOT SET",
-        smtp_password_exists: !!process.env.SMTP_PASSWORD,
+        provider: "Resend",
+        api_key_configured: !!process.env.RESEND_API_KEY,
+        from: process.env.EMAIL_FROM || "(default) Nexora <onboarding@resend.dev>",
       },
       timestamp: new Date().toISOString(),
     });

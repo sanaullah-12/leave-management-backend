@@ -112,11 +112,11 @@ class EmailQueue {
       // attempts with backoff) and refuses to retry permanent ones. Repeating
       // a permanent failure here would just multiply attempts (3 x 3) and bury
       // the real cause under duplicate noise.
-      if (error.smtpDiagnosis && error.smtpDiagnosis.retryable === false) {
+      if (error.emailDiagnosis && error.emailDiagnosis.retryable === false) {
         console.error(
-          `🚫 Not re-queueing: ${error.smtpDiagnosis.title} — retrying cannot fix this.`
+          `🚫 Not re-queueing: ${error.emailDiagnosis.title} — retrying cannot fix this.`
         );
-        console.error(`   Fix: ${error.smtpDiagnosis.solution}`);
+        console.error(`   Fix: ${error.emailDiagnosis.solution}`);
         return;
       }
 
