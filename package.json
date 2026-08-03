@@ -22,6 +22,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@getbrevo/brevo": "^6.0.2",
     "@sendgrid/mail": "^8.1.6",
     "axios": "^1.12.2",
     "bcryptjs": "^3.0.2",
@@ -35,8 +36,6 @@
     "morgan": "^1.10.1",
     "multer": "^2.0.2",
     "node-zklib": "^1.3.0",
-    "nodemailer": "^7.0.6",
-    "resend": "^6.18.1",
     "sharp": "^0.34.3",
     "socket.io": "^4.8.3",
     "zklib": "^0.2.11",

@@ -228,22 +228,44 @@ router.post("/invite-employee", authenticateToken, async (req, res) => {
     console.log("📝 Processing invite for:", email);
     console.log("🆔 Custom Employee ID provided:", employeeId);
 
-    // Check if email already exists
+    // An existing record does NOT always mean "already registered".
+    //
+    // The employee row is created BEFORE the invitation email is sent, so any
+    // send failure (bad provider config, network, quota) leaves behind a
+    // `pending` user who never received anything. Rejecting those outright
+    // made the address permanently un-invitable and produced a confusing
+    // "Email already registered" for someone who was never actually
+    // registered. Only an ACCEPTED invite (status !== "pending") is a genuine
+    // conflict; a still-pending one is re-invited below.
     console.log("🔍 Checking for existing user:", email);
     const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      console.log("❌ Email already exists:", email);
-      return res.status(400).json({ message: "Email already registered" });
-    }
-    console.log("✅ Email available:", email);
 
-    // Check if custom employeeId already exists (if provided)
+    if (existingUser && existingUser.status !== "pending") {
+      console.log("❌ Email belongs to an active account:", email);
+      return res.status(400).json({
+        message: "Email already registered",
+        hint: "This person has already accepted an invitation and has an active account.",
+      });
+    }
+
+    const isResend = !!existingUser;
+    if (isResend) {
+      console.log("🔁 Existing PENDING invite found — resending instead of failing.");
+    } else {
+      console.log("✅ Email available:", email);
+    }
+
+    // Check if custom employeeId already exists (if provided).
+    // Exclude the pending record we're about to re-invite, or it would
+    // collide with itself.
     if (employeeId) {
       console.log("🔍 Checking for existing employeeId:", employeeId);
-      const existingEmployee = await User.findOne({
+      const employeeIdQuery = {
         employeeId,
         company: req.user.company,
-      });
+        ...(existingUser && { _id: { $ne: existingUser._id } }),
+      };
+      const existingEmployee = await User.findOne(employeeIdQuery);
       if (existingEmployee) {
         console.log("❌ Employee ID already exists:", employeeId);
         return res.status(400).json({ message: "Employee ID already exists" });
@@ -251,28 +273,43 @@ router.post("/invite-employee", authenticateToken, async (req, res) => {
       console.log("✅ Employee ID available:", employeeId);
     }
 
-    // Create employee with pending status (no password yet)
-    console.log("👤 Creating employee record...");
-    const employee = new User({
-      name,
-      email,
-      role: "employee",
-      department,
-      position,
-      joinDate: new Date(joinDate),
-      company: req.user.company,
-      invitedBy: req.user._id,
-      status: "pending",
-      ...(employeeId && { employeeId }), // Use custom employeeId if provided
-    });
+    // Reuse the pending record on a resend so we don't create duplicates;
+    // otherwise create a fresh one.
+    let employee;
+    if (isResend) {
+      employee = existingUser;
+      employee.name = name;
+      employee.department = department;
+      employee.position = position;
+      employee.joinDate = new Date(joinDate);
+      employee.company = req.user.company;
+      employee.invitedBy = req.user._id;
+      employee.status = "pending";
+      if (employeeId) employee.employeeId = employeeId;
+      console.log("👤 Updating existing pending employee record...");
+    } else {
+      console.log("👤 Creating employee record...");
+      employee = new User({
+        name,
+        email,
+        role: "employee",
+        department,
+        position,
+        joinDate: new Date(joinDate),
+        company: req.user.company,
+        invitedBy: req.user._id,
+        status: "pending",
+        ...(employeeId && { employeeId }), // Use custom employeeId if provided
+      });
+    }
 
-    // Generate invitation token
+    // Generate a fresh invitation token (invalidates any previous link)
     console.log("🔑 Generating invitation token...");
     const invitationToken = employee.generateInvitationToken();
 
     console.log("💾 Saving employee to database...");
     await employee.save();
-    console.log("✅ Employee saved to database");
+    console.log(`✅ Employee ${isResend ? "updated" : "saved"} in database`);
 
     // Queue email for background processing instead of sending synchronously
     const emailQueue = require("../utils/emailQueue");
@@ -291,13 +328,17 @@ router.post("/invite-employee", authenticateToken, async (req, res) => {
     ); // High priority for invitations
 
     const totalTime = Date.now() - startTime;
-    console.log(`✅ Employee created and email queued in ${totalTime}ms`);
+    console.log(
+      `✅ Employee ${isResend ? "re-invited" : "created"} and email queued in ${totalTime}ms`
+    );
     console.log(`📬 Email job ID: ${emailJobId}`);
 
     // Respond immediately with success
-    res.status(201).json({
-      message:
-        "Employee invitation created successfully - email will be sent shortly",
+    res.status(isResend ? 200 : 201).json({
+      message: isResend
+        ? "Invitation resent - a new invitation email will be sent shortly"
+        : "Employee invitation created successfully - email will be sent shortly",
+      resent: isResend,
       employee: {
         id: employee._id,
         name: employee.name,
@@ -345,26 +386,44 @@ router.post("/invite-admin", authenticateToken, async (req, res) => {
       position = "Administrator",
     } = req.body;
 
-    // Check if email already exists
+    // A still-pending record means the invite was created but never accepted
+    // (commonly because an earlier email send failed). Re-invite rather than
+    // permanently blocking the address — see the employee invite route above.
     const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(400).json({ message: "Email already registered" });
+    if (existingUser && existingUser.status !== "pending") {
+      return res.status(400).json({
+        message: "Email already registered",
+        hint: "This person has already accepted an invitation and has an active account.",
+      });
     }
 
-    // Create admin with pending status
-    const admin = new User({
-      name,
-      email,
-      role: "admin",
-      department,
-      position,
-      joinDate: new Date(),
-      company: req.user.company,
-      invitedBy: req.user._id,
-      status: "pending",
-    });
+    const isResend = !!existingUser;
+    let admin;
+    if (isResend) {
+      admin = existingUser;
+      admin.name = name;
+      admin.role = "admin";
+      admin.department = department;
+      admin.position = position;
+      admin.company = req.user.company;
+      admin.invitedBy = req.user._id;
+      admin.status = "pending";
+      console.log("🔁 Existing PENDING admin invite found — resending.");
+    } else {
+      admin = new User({
+        name,
+        email,
+        role: "admin",
+        department,
+        position,
+        joinDate: new Date(),
+        company: req.user.company,
+        invitedBy: req.user._id,
+        status: "pending",
+      });
+    }
 
-    // Generate invitation token
+    // Generate a fresh invitation token (invalidates any previous link)
     const invitationToken = admin.generateInvitationToken();
 
     await admin.save();

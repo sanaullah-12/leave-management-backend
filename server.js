@@ -38,14 +38,15 @@ console.log(
   "FRONTEND_URL:",
   process.env.FRONTEND_URL ? "✅ Set" : "❌ Missing"
 );
-console.log("📧 EMAIL CONFIGURATION (provider: Resend):");
+console.log("📧 EMAIL CONFIGURATION (provider: Brevo):");
 console.log(
-  "RESEND_API_KEY:",
-  process.env.RESEND_API_KEY ? "✅ Set" : "❌ Missing"
+  "BREVO_API_KEY:",
+  process.env.BREVO_API_KEY ? "✅ Set" : "❌ Missing"
 );
+console.log("EMAIL_FROM:", process.env.EMAIL_FROM || "❌ Missing");
 console.log(
-  "EMAIL_FROM:",
-  process.env.EMAIL_FROM || "(default) Nexora <onboarding@resend.dev>"
+  "EMAIL_FROM_NAME:",
+  process.env.EMAIL_FROM_NAME || "(default) Nexora"
 );
 console.log("===============================");
 
@@ -530,13 +531,14 @@ app.get("/api/debug", (req, res) => {
       FRONTEND_URL_value: process.env.FRONTEND_URL || "Not set",
     },
     email: {
-      provider: "Resend",
-      RESEND_API_KEY_exists: !!process.env.RESEND_API_KEY,
-      RESEND_API_KEY_prefix_valid: (process.env.RESEND_API_KEY || "").startsWith(
-        "re_"
+      provider: "Brevo",
+      BREVO_API_KEY_exists: !!process.env.BREVO_API_KEY,
+      BREVO_API_KEY_prefix_valid: (process.env.BREVO_API_KEY || "").startsWith(
+        "xkeysib-"
       ),
-      EMAIL_FROM: process.env.EMAIL_FROM || "(default) Nexora <onboarding@resend.dev>",
-      config_valid: !!process.env.RESEND_API_KEY,
+      EMAIL_FROM: process.env.EMAIL_FROM || "Not set",
+      EMAIL_FROM_NAME: process.env.EMAIL_FROM_NAME || "(default) Nexora",
+      config_valid: !!(process.env.BREVO_API_KEY && process.env.EMAIL_FROM),
     },
     database: {
       connection_state: mongoose.connection.readyState,
@@ -602,31 +604,62 @@ app.post("/api/debug/test-write", async (req, res) => {
   }
 });
 
-// SendGrid test endpoint — removed. This deployment sends via Resend.
+// SendGrid test endpoint — removed. This deployment sends via Brevo.
 app.post("/api/debug/test-sendgrid", async (req, res) => {
   res.status(410).json({
     message:
-      "SendGrid has been removed. This deployment sends email via Resend — use /api/debug/email-health.",
+      "SendGrid has been removed. This deployment sends email via Brevo — use /api/debug/email-health.",
   });
 });
 
-// Email health check — validates config and confirms the Resend API key is
+// Email health check — validates config and confirms the Brevo API key is
 // accepted, WITHOUT sending a message.
 app.get("/api/debug/email-health", async (req, res) => {
   const { checkEmailHealth } = require("./services/email");
   const result = await checkEmailHealth();
   res.status(result.ok ? 200 : 503).json({
     message: result.ok
-      ? "✅ Email provider (Resend) is reachable and authenticated"
+      ? "✅ Email provider (Brevo) is reachable and authenticated"
       : "❌ Email provider check failed",
     ...result,
     timestamp: new Date().toISOString(),
   });
 });
 
+// Pending invitations — users created by an invite whose email never got
+// through, so they never accepted. These are re-invitable (the invite routes
+// resend rather than reject); this endpoint just makes them visible.
+// Addresses are masked: this endpoint is unauthenticated like the other debug
+// routes, so it must not expose a list of real user emails.
+app.get("/api/debug/pending-invites", async (req, res) => {
+  try {
+    const User = require("./models/User");
+    const pending = await User.find({ status: "pending" })
+      .select("name email createdAt department position")
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .lean();
+
+    res.status(200).json({
+      message: `${pending.length} pending invitation(s)`,
+      hint: "Re-inviting any of these addresses now resends the invitation instead of failing.",
+      pending: pending.map((u) => ({
+        name: u.name,
+        email: String(u.email).replace(/(.{2}).*(@.*)/, "$1***$2"),
+        department: u.department,
+        position: u.position,
+        invitedAt: u.createdAt,
+      })),
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to list pending invites", error: error.message });
+  }
+});
+
 // Full email diagnostic, executed FROM INSIDE this container — the only way to
 // observe the deployment's real network egress. Checks config, DNS, outbound
-// HTTPS to api.resend.com, and the API key, then reports a verdict.
+// HTTPS to api.brevo.com, and the API key, then reports a verdict.
 app.get("/api/debug/email-diagnose", async (req, res) => {
   try {
     const { runDiagnostics } = require("./services/email/diagnose");
@@ -684,9 +717,9 @@ app.post("/api/debug/test-email", async (req, res) => {
       result: result,
       environment_check: {
         node_env: process.env.NODE_ENV,
-        provider: "Resend",
-        api_key_configured: !!process.env.RESEND_API_KEY,
-        from: process.env.EMAIL_FROM || "(default) Nexora <onboarding@resend.dev>",
+        provider: "Brevo",
+        api_key_configured: !!process.env.BREVO_API_KEY,
+        from: `${process.env.EMAIL_FROM_NAME || "Nexora"} <${process.env.EMAIL_FROM || "not set"}>`,
       },
       timestamp: new Date().toISOString(),
     });
@@ -699,9 +732,9 @@ app.post("/api/debug/test-email", async (req, res) => {
       diagnosis: error.emailDiagnosis || null,
       environment_check: {
         node_env: process.env.NODE_ENV,
-        provider: "Resend",
-        api_key_configured: !!process.env.RESEND_API_KEY,
-        from: process.env.EMAIL_FROM || "(default) Nexora <onboarding@resend.dev>",
+        provider: "Brevo",
+        api_key_configured: !!process.env.BREVO_API_KEY,
+        from: `${process.env.EMAIL_FROM_NAME || "Nexora"} <${process.env.EMAIL_FROM || "not set"}>`,
       },
       timestamp: new Date().toISOString(),
     });
@@ -759,23 +792,21 @@ app.get("/test", (req, res) => {
 // Debug endpoint for email configuration
 app.get("/api/debug/email-config", (req, res) => {
   try {
-    // SendGrid is disabled — SMTP is the only email path, in every environment.
+    // Brevo is the only email path, in every environment.
     const isProduction = process.env.NODE_ENV === "production";
 
     const emailConfig = {
       environment: process.env.NODE_ENV,
       is_production: isProduction,
-      will_use_provider: "SMTP",
-      smtp_host: process.env.SMTP_HOST,
-      smtp_port: process.env.SMTP_PORT,
-      from_email: process.env.FROM_EMAIL,
-      smtp_email: process.env.SMTP_EMAIL,
-      smtp_password_exists: !!process.env.SMTP_PASSWORD,
-      smtp_configured: !!(
-        process.env.SMTP_HOST &&
-        process.env.SMTP_EMAIL &&
-        process.env.SMTP_PASSWORD
+      provider: "Brevo",
+      api_key_exists: !!process.env.BREVO_API_KEY,
+      api_key_prefix_valid: (process.env.BREVO_API_KEY || "").startsWith(
+        "xkeysib-"
       ),
+      from_email: process.env.EMAIL_FROM || "Not set",
+      from_name: process.env.EMAIL_FROM_NAME || "(default) Nexora",
+      reply_to: process.env.EMAIL_REPLY_TO || null,
+      configured: !!(process.env.BREVO_API_KEY && process.env.EMAIL_FROM),
       timestamp: new Date().toISOString(),
     };
 

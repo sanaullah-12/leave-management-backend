@@ -1,7 +1,7 @@
 /**
  * Backward-compatibility facade.
  *
- * The email implementation lives in ../services/email (Gmail SMTP + Nodemailer,
+ * The email implementation lives in ../services/email (Brevo HTTPS API,
  * split by responsibility, with templates in services/email/templates).
  *
  * This file exists so existing callers — routes/auth.js, routes/users.js,

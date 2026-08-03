@@ -1,12 +1,12 @@
 /**
  * Email service — public API.
  *
- * Provider: Resend (official SDK, HTTPS API).
+ * Provider: Brevo (official @getbrevo/brevo SDK, HTTPS API).
  *
- * Architecture (one responsibility per module) — unchanged from the previous
- * provider; only provider.js and errors.js are provider-specific:
- *   config.js     env validation + the single sender value
- *   provider.js   Resend client singleton          <-- swap point for providers
+ * Architecture (one responsibility per module) — unchanged across provider
+ * swaps; only provider.js and errors.js are provider-specific:
+ *   config.js     env validation + sender configuration
+ *   provider.js   Brevo client singleton           <-- swap point for providers
  *   errors.js     error classification (cause / fix / retryable)
  *   retry.js      exponential backoff, permanent-vs-transient
  *   logger.js     formatting + credential masking
@@ -52,8 +52,8 @@ const isRetryable = (error) => {
  * @param {string}  params.html
  * @param {string} [params.text]     derived from html when omitted
  * @param {string} [params.fromName] per-message sender NAME override (the
- *                                   address always comes from config.from)
- * @returns {Promise<{success:true, messageId:string, provider:'Resend', attempts:number}>}
+ *                                   address always comes from config)
+ * @returns {Promise<{success:true, messageId:string, provider:'Brevo', attempts:number}>}
  * @throws  {Error} with `.emailDiagnosis` describing cause + fix
  */
 const sendEmail = async ({ email, subject, html, text, fromName }) => {
@@ -77,46 +77,46 @@ const sendEmail = async ({ email, subject, html, text, fromName }) => {
         const entry = getClient();
         config = entry.config;
 
-        // The sender ADDRESS always comes from config (the single swap point).
-        // A caller-supplied fromName only relabels it, so an individual send can
-        // never accidentally use an unverified address.
-        const from = fromName
-          ? `${fromName} <${extractAddress(config.from)}>`
-          : config.from;
+        const recipients = (Array.isArray(email) ? email : [email]).map((addr) => ({
+          email: addr,
+        }));
 
+        // The sender ADDRESS always comes from config. A caller-supplied
+        // fromName only relabels it, so an individual send can never
+        // accidentally use an address that isn't verified in Brevo.
         const payload = {
-          from,
-          to: Array.isArray(email) ? email : [email],
+          sender: {
+            email: config.fromEmail,
+            name: fromName || config.fromName,
+          },
+          to: recipients,
           subject,
-          html,
-          text: text || htmlToText(html),
-          ...(config.replyTo ? { replyTo: config.replyTo } : {}),
+          htmlContent: html,
+          textContent: text || htmlToText(html),
+          ...(config.replyTo ? { replyTo: { email: config.replyTo } } : {}),
         };
 
-        // The Resend SDK resolves (rather than throws) on API errors, returning
-        // { data, error }. Both shapes are normalised into a thrown, classified
-        // error so retry/logging behave identically to the previous provider.
-        const { data, error } = await entry.client.emails.send(payload);
-
-        if (error) {
-          const err = new Error(error.message || "Resend returned an error");
-          err.name = error.name || "resend_error";
-          err.statusCode = error.statusCode;
-          err.emailDiagnosis = classifyEmailError({ ...error, message: error.message }, config);
-          throw err;
+        try {
+          const data = await entry.client.transactionalEmails.sendTransacEmail(payload);
+          log(`✅ Sent — messageId ${data?.messageId}`);
+          return data;
+        } catch (error) {
+          // The Brevo SDK throws on API errors. Classify here so retry and
+          // logging behave identically to previous providers.
+          if (!error.emailDiagnosis) {
+            error.emailDiagnosis = classifyEmailError(error, config);
+          }
+          throw error;
         }
-
-        log(`✅ Sent — id ${data?.id}`);
-        return data;
       },
       isRetryable,
-      `deliver to ${maskEmail(email)} via Resend`
+      `deliver to ${maskEmail(email)} via Brevo`
     );
 
     return {
       success: true,
-      messageId: result?.id,
-      provider: "Resend",
+      messageId: result?.messageId,
+      provider: "Brevo",
       attempts: attemptsUsed,
     };
   } catch (error) {
@@ -124,7 +124,7 @@ const sendEmail = async ({ email, subject, html, text, fromName }) => {
 
     logFailure({
       ...diagnosis,
-      host: "api.resend.com",
+      host: "api.brevo.com",
       port: 443,
       secure: true,
     });
@@ -136,12 +136,6 @@ const sendEmail = async ({ email, subject, html, text, fromName }) => {
     wrapped.cause = error;
     throw wrapped;
   }
-};
-
-/** Pull the bare address out of "Name <addr@domain>". */
-const extractAddress = (from) => {
-  const match = String(from).match(/<([^>]+)>/);
-  return match ? match[1] : from;
 };
 
 /** Render a registered template and send it. */
@@ -236,37 +230,51 @@ const sendAnnouncementNotification = async (recipient, announcement) => {
 
 /**
  * Health check — validates config and confirms the API key is accepted,
- * without sending an email. Uses a lightweight authenticated read (domains
- * list) so a 401 surfaces immediately.
+ * without sending an email. Uses a lightweight authenticated read (account
+ * details) so a 401 surfaces immediately.
+ *
+ * Also reports whether EMAIL_FROM is actually a verified sender, since an
+ * unverified sender is the most common reason sends fail once the key is fine.
  */
 const checkEmailHealth = async () => {
+  let config;
   try {
-    const { client, config } = getClient();
-    const { error } = await client.domains.list();
+    const entry = getClient();
+    config = entry.config;
 
-    if (error) {
-      const d = classifyEmailError({ ...error, message: error.message }, config);
-      return {
-        ok: false,
-        code: d.code,
-        reason: d.title,
-        cause: d.cause,
-        solution: d.solution,
-        retryable: d.retryable,
-      };
+    const account = await entry.client.account.getAccount();
+
+    // Best-effort sender verification check — informational only, so a
+    // permissions error here must not fail the whole health check.
+    let senderVerified = null;
+    try {
+      const senders = await entry.client.senders.getSenders();
+      const list = senders?.senders || [];
+      if (list.length > 0) {
+        senderVerified = list.some(
+          (s) =>
+            String(s.email).toLowerCase() === String(config.fromEmail).toLowerCase() &&
+            s.active !== false
+        );
+      }
+    } catch {
+      /* sender listing is optional — ignore and report null */
     }
 
     return {
       ok: true,
-      provider: "Resend",
-      from: config.from,
-      usingTestSender: config.isTestSender,
-      message: config.isTestSender
-        ? "Resend API key is valid. NOTE: the test sender only delivers to the Resend account owner's address."
-        : "Resend API key is valid and the sender domain is configured.",
+      provider: "Brevo",
+      from: `${config.fromName} <${config.fromEmail}>`,
+      account: account?.companyName || account?.email || undefined,
+      plan: Array.isArray(account?.plan) ? account.plan[0]?.type : undefined,
+      senderVerified,
+      message:
+        senderVerified === false
+          ? "Brevo API key is valid, but EMAIL_FROM is NOT a verified sender — sends will be rejected."
+          : "Brevo API key is valid and the account is reachable.",
     };
   } catch (error) {
-    const d = error.emailDiagnosis || classifyEmailError(error, {});
+    const d = error.emailDiagnosis || classifyEmailError(error, config || {});
     return {
       ok: false,
       code: d.code,

@@ -1,31 +1,31 @@
 /**
- * Resend client lifecycle.
+ * Brevo client lifecycle.
  *
- * Single responsibility: own exactly one Resend client and hand it out for
- * reuse. Replaces the previous SMTP transporter module — this is the only
- * file that knows which provider SDK is in use.
+ * Single responsibility: own exactly one Brevo client and hand it out for
+ * reuse. This is the only file that knows which provider SDK is in use —
+ * swapping providers means rewriting this file and errors.js, nothing else.
  *
- * Unlike SMTP there is no connection to pool or verify: Resend is a stateless
- * HTTPS API, so "connecting" is just an HTTPS request. That also means none of
- * the SMTP failure modes (port blocking, TLS handshake mismatch, greeting
- * timeouts) can occur — outbound 443 is all that is required.
+ * Like any HTTPS API there is no connection to pool or verify: "connecting"
+ * is just an HTTPS request. None of the SMTP failure modes (port blocking,
+ * TLS handshake mismatch, greeting timeouts) can occur — outbound 443 is all
+ * that is required.
  */
 
-const { Resend } = require("resend");
+const { BrevoClient } = require("@getbrevo/brevo");
 
 const { loadEmailConfig, logEmailConfig } = require("./config");
 const { log } = require("./logger");
 
 let cached = null; // { client, config }
 
-/** Get (or lazily create) the shared Resend client. */
+/** Get (or lazily create) the shared Brevo client. */
 const getClient = () => {
   if (cached) return cached;
 
   const config = loadEmailConfig();
   logEmailConfig(config);
 
-  cached = { client: new Resend(config.apiKey), config };
+  cached = { client: new BrevoClient({ apiKey: config.apiKey }), config };
   return cached;
 };
 
@@ -35,10 +35,10 @@ const getClient = () => {
  */
 const resetClient = () => {
   cached = null;
-  log("Resend client reset — the next send will rebuild it.");
+  log("Brevo client reset — the next send will rebuild it.");
 };
 
-/** Symmetry with the previous SMTP module so shutdown hooks keep working. */
+/** Symmetry with previous providers so shutdown hooks keep working. */
 const closeProvider = () => {
   cached = null;
 };

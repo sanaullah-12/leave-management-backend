@@ -431,13 +431,18 @@ router.post(
       console.log("📝 Request user:", req.user.email);
       console.log("📝 Company from req.user:", req.user.company);
 
-      // Check if user already exists
+      // A still-pending record means the invite was created but never
+      // accepted — commonly because an earlier email send failed, which left
+      // the address permanently un-invitable. Only an accepted account is a
+      // real conflict; pending ones are re-invited below.
       const existingUser = await User.findOne({ email: email.toLowerCase() });
-      if (existingUser) {
+      if (existingUser && existingUser.status !== "pending") {
         return res.status(400).json({
           message: "User with this email already exists",
+          hint: "This person has already accepted an invitation and has an active account.",
         });
       }
+      const isResend = !!existingUser;
 
       // Get company ID properly - CRITICAL FIX
       const companyId = req.user.company?._id || req.user.company;
@@ -452,22 +457,40 @@ router.post(
 
       console.log("✅ Using company ID:", companyId);
 
-      // Create user with pending status
-      const user = await User.create({
-        name,
-        email: email.toLowerCase(),
-        role: role || "employee",
-        status: "pending",
-        department,
-        position,
-        joinDate,
-        employeeId: employeeId || undefined,
-        company: companyId, // Use extracted company ObjectId
-        invitedBy: req.user._id,
-        tags: tags || [],
-      });
-
-      console.log("✅ User created successfully:", user.employeeId);
+      // Reuse the pending record on a resend so we don't create duplicates.
+      let user;
+      if (isResend) {
+        user = existingUser;
+        Object.assign(user, {
+          name,
+          role: role || "employee",
+          status: "pending",
+          department,
+          position,
+          joinDate,
+          company: companyId,
+          invitedBy: req.user._id,
+          tags: tags || [],
+          ...(employeeId && { employeeId }),
+        });
+        await user.save({ validateBeforeSave: false });
+        console.log("🔁 Existing PENDING invite updated:", user.employeeId);
+      } else {
+        user = await User.create({
+          name,
+          email: email.toLowerCase(),
+          role: role || "employee",
+          status: "pending",
+          department,
+          position,
+          joinDate,
+          employeeId: employeeId || undefined,
+          company: companyId, // Use extracted company ObjectId
+          invitedBy: req.user._id,
+          tags: tags || [],
+        });
+        console.log("✅ User created successfully:", user.employeeId);
+      }
       console.log("✅ User company:", user.company);
 
       // Generate invitation token

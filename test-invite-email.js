@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * Email diagnostic harness (provider: Resend).
+ * Email diagnostic harness (provider: Brevo).
  *
  * Runs the delivery path one layer at a time so a failure points at a single
  * cause instead of "email didn't arrive". Each stage is independent: if stage 3
  * fails, stages 1-2 still tell you what *did* work.
  *
  *   Stage 1  Environment + config validation
- *   Stage 2  DNS resolution of api.resend.com
+ *   Stage 2  DNS resolution of api.brevo.com
  *   Stage 3  Outbound HTTPS reachability (443)
  *   Stage 4  API key validation (no email sent)
  *   Stage 5  Send a real invitation email        <-- only with --to=
@@ -67,13 +67,13 @@ const maskEmail = (e) => {
 
 const { probeTcp } = require("./services/email/diagnose");
 
-const API_HOST = "api.resend.com";
+const API_HOST = "api.brevo.com";
 
 // ---------------------------------------------------------------------------
 (async () => {
   line("");
   line("╔════════════════════════════════════════════════════════════╗");
-  line("║   EMAIL DIAGNOSTIC — provider: Resend                      ║");
+  line("║   EMAIL DIAGNOSTIC — provider: Brevo                      ║");
   line("╚════════════════════════════════════════════════════════════╝");
   line(`  Time:        ${new Date().toISOString()}`);
   line(`  NODE_ENV:    ${process.env.NODE_ENV || "(unset)"}`);
@@ -91,19 +91,12 @@ const API_HOST = "api.resend.com";
   try {
     const { loadEmailConfig } = require("./services/email/config");
     config = loadEmailConfig();
-    pass("RESEND_API_KEY present and well-formed");
-    info(`API key:  ${String(config.apiKey).length} chars, prefix "re_" (value never printed)`);
-    info(`From:     ${config.from}`);
+    pass("BREVO_API_KEY present and well-formed");
+    info(`API key:  ${String(config.apiKey).length} chars (value never printed)`);
+    info(`From:     ${config.fromName} <${maskEmail(config.fromEmail)}>`);
     if (config.replyTo) info(`Reply-To: ${maskEmail(config.replyTo)}`);
     record("Config validation", true);
 
-    if (config.isTestSender) {
-      line("");
-      info("⚠️  Using Resend's shared test sender (onboarding@resend.dev).");
-      info("   It ONLY delivers to the address that owns the Resend account.");
-      info("   Sends to anyone else return success but never arrive.");
-      info("   Verify a domain, then set EMAIL_FROM to send to real recipients.");
-    }
   } catch (err) {
     fail(err.message);
     record("Config validation", false, err.message);
@@ -126,7 +119,7 @@ const API_HOST = "api.resend.com";
 
   // ---- STAGE 3 ------------------------------------------------------------
   stage(3, "Outbound HTTPS reachability");
-  info("Resend is an HTTPS API — only port 443 is required.");
+  info("Brevo is an HTTPS API — only port 443 is required.");
   info("(This is why it is unaffected by SMTP port blocking.)");
   line("");
   const probe = await probeTcp(API_HOST, 443, 10000);
@@ -138,14 +131,14 @@ const API_HOST = "api.resend.com";
   stage(4, "API key validation");
   let authOk = false;
   if (!probe.ok) {
-    info("Skipped — cannot reach api.resend.com (see stage 3).");
+    info("Skipped — cannot reach api.brevo.com (see stage 3).");
     record("API key", false, "skipped, network blocked");
   } else {
     try {
       const { checkEmailHealth } = require("./services/email");
       const health = await checkEmailHealth();
       if (health.ok) {
-        pass("Resend accepted the API key");
+        pass("Brevo accepted the API key");
         info(health.message);
         authOk = true;
         record("API key", true);
@@ -188,17 +181,14 @@ const API_HOST = "api.resend.com";
         "employee"
       );
 
-      pass("Invitation accepted by Resend");
+      pass("Invitation accepted by Brevo");
       info(`Message ID: ${result.messageId}`);
       info(`Attempts:   ${result.attempts}`);
       record("Invite send", true);
 
       line("");
-      info("NOTE: 'accepted' means Resend queued it, not that it landed in the");
-      info("inbox. Check https://resend.com/emails for per-message delivery status.");
-      if (config.isTestSender) {
-        info("With the test sender, only the Resend account owner's address receives mail.");
-      }
+      info("NOTE: 'accepted' means Brevo queued it, not that it landed in the");
+      info("inbox. Check https://app.brevo.com/statistics/email for per-message delivery status.");
     } catch (err) {
       fail(err.message);
       if (err.emailDiagnosis) {
@@ -221,17 +211,13 @@ const API_HOST = "api.resend.com";
   line("");
   line("━━━ VERDICT ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
   if (!probe.ok) {
-    line("  Outbound HTTPS to api.resend.com is blocked. This is unusual —");
+    line("  Outbound HTTPS to api.brevo.com is blocked. This is unusual —");
     line("  port 443 is open on virtually every host — check network egress.");
   } else if (!authOk) {
     line("  Network is fine; the API key was rejected. Set a valid");
-    line("  RESEND_API_KEY (from https://resend.com/api-keys) in Railway.");
+    line("  BREVO_API_KEY (from https://app.brevo.com/settings/keys/api) in Railway.");
   } else if (recipient && results.find((r) => r.name === "Invite send")?.ok) {
     line("  Full path works end to end.");
-    if (config.isTestSender) {
-      line("  Reminder: the test sender only delivers to the Resend account owner.");
-      line("  Verify a domain and set EMAIL_FROM to reach real recipients.");
-    }
   } else {
     line("  Config, network and API key all pass. Re-run with --to= to send.");
   }
