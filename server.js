@@ -619,6 +619,21 @@ app.post("/api/debug/test-sendgrid", async (req, res) => {
   });
 });
 
+// SMTP health check — validates config and proves the server is reachable and
+// the credentials are accepted, WITHOUT sending a message. This is the fastest
+// way to tell a network block apart from a bad password.
+app.get("/api/debug/smtp-health", async (req, res) => {
+  const { checkSmtpHealth } = require("./utils/smtp");
+  const result = await checkSmtpHealth();
+  res.status(result.ok ? 200 : 503).json({
+    message: result.ok
+      ? "✅ SMTP is reachable and authenticated"
+      : "❌ SMTP check failed",
+    ...result,
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // Test email sending endpoint - ENHANCED VERSION
 app.post("/api/debug/test-email", async (req, res) => {
   console.log("\n🧪 EMAIL TEST ENDPOINT CALLED");
