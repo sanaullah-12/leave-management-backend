@@ -108,6 +108,18 @@ class EmailQueue {
       job.error = error.message;
       job.failedAt = new Date();
 
+      // The SMTP layer already retried transient failures internally (3
+      // attempts with backoff) and refuses to retry permanent ones. Repeating
+      // a permanent failure here would just multiply attempts (3 x 3) and bury
+      // the real cause under duplicate noise.
+      if (error.smtpDiagnosis && error.smtpDiagnosis.retryable === false) {
+        console.error(
+          `🚫 Not re-queueing: ${error.smtpDiagnosis.title} — retrying cannot fix this.`
+        );
+        console.error(`   Fix: ${error.smtpDiagnosis.solution}`);
+        return;
+      }
+
       // Retry if attempts remaining
       if (job.attempts < job.maxAttempts) {
         job.status = 'retrying';

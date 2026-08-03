@@ -1,138 +1,15 @@
-const nodemailer = require("nodemailer");
-// SendGrid disabled — SMTP is used exclusively in production now.
-// const {
-//   sendEmailWithSendGrid,
-//   isConfigured: isSendGridConfigured,
-// } = require("./sendgridEmail");
+// Email delivery is SMTP-only. The transport itself — config validation, TLS
+// mode selection, connection verification, retry/backoff, error diagnosis and
+// logging — lives in ./smtp, split by responsibility. This file owns only the
+// message templates and the app-level send API.
+const { sendMail } = require("./smtp");
 
-// Create fresh transporter for each request to prevent hanging
-const createTransporter = () => {
-  return nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: parseInt(process.env.SMTP_PORT) || 587,
-    secure: false, // Use STARTTLS
-    auth: {
-      user: process.env.SMTP_EMAIL,
-      pass: process.env.SMTP_PASSWORD,
-    },
-    tls: {
-      rejectUnauthorized: true,
-      minVersion: "TLSv1.2",
-    },
-    // Connection timeouts and limits
-    connectionTimeout: 20000, // 20 seconds to connect
-    greetingTimeout: 10000, // 10 seconds for greeting
-    socketTimeout: 20000, // 20 seconds for socket inactivity
-    // Pool settings for better performance
-    pool: false, // Don't use connection pooling to prevent hanging
-    maxConnections: 1,
-    maxMessages: 1,
-  });
-};
-
-// Email function - SMTP only (SendGrid disabled in production per team decision)
-const sendEmail = async ({ email, subject, html, text, fromName }) => {
-  // SendGrid path disabled. To re-enable, uncomment the import above and this
-  // block.
-  // if (isSendGridConfigured()) {
-  //   try {
-  //     console.log("🚀 Using SendGrid API for email delivery");
-  //     return await sendEmailWithSendGrid({
-  //       email,
-  //       subject,
-  //       html,
-  //       text,
-  //       fromName,
-  //     });
-  //   } catch (error) {
-  //     console.error("⚠️ SendGrid failed, falling back to SMTP:", error.message);
-  //     // Continue to SMTP fallback below
-  //   }
-  // }
-
-  // SMTP (Gmail App Password)
-  try {
-    console.log("📧 Using SMTP for email delivery");
-    console.log("📧 Recipient:", email);
-    console.log("📧 Subject:", subject);
-
-    const transporter = createTransporter();
-
-    // Verify connection
-    console.log("🔍 Verifying SMTP connection...");
-    await transporter.verify();
-    console.log("✅ SMTP connection verified");
-
-    // Generate text from HTML if not provided
-    const textContent =
-      text ||
-      html
-        .replace(/<[^>]*>/g, "")
-        .replace(/\s+/g, " ")
-        .trim();
-
-    const mailOptions = {
-      from: `${
-        fromName || process.env.FROM_NAME || "Nexora"
-      } <${process.env.FROM_EMAIL || process.env.SMTP_EMAIL}>`,
-      to: email,
-      subject: subject,
-      text: textContent,
-      html: html,
-      headers: {
-        "X-Mailer": "Nexora",
-        "X-Priority": "3",
-        "X-MSMail-Priority": "Normal",
-        Importance: "Normal",
-      },
-    };
-
-    console.log("📤 Sending email via SMTP...");
-    const result = await transporter.sendMail(mailOptions);
-
-    console.log("✅ Email sent successfully via SMTP!");
-    console.log("📧 Message ID:", result.messageId);
-    console.log("📧 Response:", result.response);
-    console.log("📧 Accepted recipients:", result.accepted);
-
-    // Close transporter to prevent hanging connections
-    transporter.close();
-    console.log("🔐 SMTP connection closed");
-
-    return {
-      success: true,
-      messageId: result.messageId,
-      response: result.response,
-      accepted: result.accepted,
-      rejected: result.rejected,
-      provider: "SMTP-Fallback",
-    };
-  } catch (error) {
-    console.error("❌ SMTP email failed:", error.message);
-    console.error(
-      "❌ SMTP error code:",
-      error.code,
-      "| command:",
-      error.command
-    );
-    console.error("Full error:", error);
-    if (error.code === "ETIMEDOUT" || error.message === "Connection timeout") {
-      console.error(
-        "💡 Could not open a TCP connection to the SMTP host at all (not an auth failure). " +
-          "This usually means the host's network is blocking outbound SMTP (port " +
-          `${process.env.SMTP_PORT || 587}) rather than a bad SMTP_EMAIL/SMTP_PASSWORD.`
-      );
-    }
-
-    // Close transporter on error
-    if (typeof transporter !== "undefined" && transporter) {
-      transporter.close();
-      console.log("🔐 SMTP connection closed (error)");
-    }
-
-    throw new Error(`Email delivery failed: ${error.message}`);
-  }
-};
+/**
+ * Send an email over SMTP.
+ * Throws on failure with `.smtpDiagnosis` describing cause and suggested fix.
+ */
+const sendEmail = async ({ email, subject, html, text, fromName }) =>
+  sendMail({ email, subject, html, text, fromName });
 
 // Employee invitation email
 const sendInvitationEmail = async (
