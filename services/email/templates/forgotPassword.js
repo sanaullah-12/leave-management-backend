@@ -1,5 +1,5 @@
 /**
- * Forgot-password email — carries the reset link.
+ * Forgot-password email - carries the reset link.
  *
  * Distinct from passwordReset.js, which confirms a password was changed.
  */
@@ -22,11 +22,11 @@ module.exports = ({ user, resetUrl, expiryMinutes = 15 }) => {
     <p style="margin: 22px 0 0 0; padding-top: 16px; border-top: 1px solid ${COLORS.border};
               font-family: Arial, sans-serif; font-size: 13px; color: ${COLORS.muted};">
       <strong>This link expires in ${expiryMinutes} minutes.</strong> If you didn't request a
-      reset, ignore this email — your password will stay unchanged. Never share this link.
+      reset, ignore this email - your password will stay unchanged. Never share this link.
     </p>`;
 
   return {
-    subject: `${user.company} — Password reset request`,
+    subject: `${user.company} - Password reset request`,
     html: baseLayout({
       title: "Password Reset",
       heading: "Reset your password",

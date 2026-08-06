@@ -1,9 +1,9 @@
 /**
- * Email service — public API.
+ * Email service - public API.
  *
  * Provider: Brevo (official @getbrevo/brevo SDK, HTTPS API).
  *
- * Architecture (one responsibility per module) — unchanged across provider
+ * Architecture (one responsibility per module) - unchanged across provider
  * swaps; only provider.js and errors.js are provider-specific:
  *   config.js     env validation + sender configuration
  *   provider.js   Brevo client singleton           <-- swap point for providers
@@ -35,7 +35,7 @@ const htmlToText = (html) =>
 
 /**
  * Config errors are permanent by definition. Everything else defers to the
- * classifier, defaulting to "don't retry" when unknown — surfacing an
+ * classifier, defaulting to "don't retry" when unknown - surfacing an
  * unclassified failure quickly beats burning three attempts on it.
  */
 const isRetryable = (error) => {
@@ -63,7 +63,7 @@ const sendEmail = async ({ email, subject, html, text, fromName }) => {
   }
 
   log("");
-  log(`──── Sending to ${maskEmail(email)} ────`);
+  log(`---- Sending to ${maskEmail(email)} ----`);
   log(`Subject: ${subject}`);
 
   let attemptsUsed = 0;
@@ -98,7 +98,7 @@ const sendEmail = async ({ email, subject, html, text, fromName }) => {
 
         try {
           const data = await entry.client.transactionalEmails.sendTransacEmail(payload);
-          log(`✅ Sent — messageId ${data?.messageId}`);
+          log(`Sent - messageId ${data?.messageId}`);
           return data;
         } catch (error) {
           // The Brevo SDK throws on API errors. Classify here so retry and
@@ -151,7 +151,7 @@ const sendTemplate = async (templateName, data, { fromName } = {}) => {
 };
 
 // ---------------------------------------------------------------------------
-// Typed helpers — one per email type. Each resolves its own URL so no caller
+// Typed helpers - one per email type. Each resolves its own URL so no caller
 // has to remember which env var to use. Signatures are unchanged.
 // ---------------------------------------------------------------------------
 
@@ -171,7 +171,7 @@ const sendWelcomeEmail = async (user) => {
 };
 
 const sendPasswordResetEmail = async (user, token) => {
-  // Path param, not a query string — must match the frontend route
+  // Path param, not a query string - must match the frontend route
   // /reset-password/:token, or the page loads with an undefined token.
   const resetUrl = `${getFrontendUrl()}/reset-password/${token}`;
   const { subject, html, text } = templates.forgotPassword({ user, resetUrl });
@@ -229,7 +229,7 @@ const sendAnnouncementNotification = async (recipient, announcement) => {
 };
 
 /**
- * Health check — validates config and confirms the API key is accepted,
+ * Health check - validates config and confirms the API key is accepted,
  * without sending an email. Uses a lightweight authenticated read (account
  * details) so a 401 surfaces immediately.
  *
@@ -244,7 +244,7 @@ const checkEmailHealth = async () => {
 
     const account = await entry.client.account.getAccount();
 
-    // Best-effort sender verification check — informational only, so a
+    // Best-effort sender verification check - informational only, so a
     // permissions error here must not fail the whole health check.
     let senderVerified = null;
     try {
@@ -258,7 +258,7 @@ const checkEmailHealth = async () => {
         );
       }
     } catch {
-      /* sender listing is optional — ignore and report null */
+      /* sender listing is optional - ignore and report null */
     }
 
     return {
@@ -270,7 +270,7 @@ const checkEmailHealth = async () => {
       senderVerified,
       message:
         senderVerified === false
-          ? "Brevo API key is valid, but EMAIL_FROM is NOT a verified sender — sends will be rejected."
+          ? "Brevo API key is valid, but EMAIL_FROM is NOT a verified sender - sends will be rejected."
           : "Brevo API key is valid and the account is reachable.",
     };
   } catch (error) {

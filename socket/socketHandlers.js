@@ -3,7 +3,7 @@
  * -----------------
  * Per-connection lifecycle: joins the authenticated user into their scoped
  * rooms (user / company / role), maintains presence, and cleans everything up
- * on disconnect. Contains NO business logic — only connection wiring.
+ * on disconnect. Contains NO business logic - only connection wiring.
  */
 const { EVENTS, CLIENT_EVENTS, ROOMS } = require("./socketEvents");
 const presence = require("./socketPresence");
@@ -15,7 +15,7 @@ const presence = require("./socketPresence");
 const registerHandlers = (io, socket) => {
   const { id, role, company } = socket.user;
 
-  // Scoped rooms — the basis for targeted, tenant-safe emits.
+  // Scoped rooms - the basis for targeted, tenant-safe emits.
   socket.join(ROOMS.user(id));
   socket.join(ROOMS.company(company));
   socket.join(ROOMS.companyRole(company, role));
@@ -47,7 +47,7 @@ const registerHandlers = (io, socket) => {
 
   socket.on("error", (err) => {
     // Never crash the process on a socket-level error.
-    console.error("⚡ Socket error:", err?.message || err);
+    console.error("Socket error:", err?.message || err);
   });
 };
 

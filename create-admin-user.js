@@ -14,12 +14,12 @@ async function createTestAdmin() {
       process.env.LOCAL_MONGODB_URI ||
         "mongodb://127.0.0.1:27018/leave-management-dev"
     );
-    console.log("✅ Connected to MongoDB");
+    console.log("Connected to MongoDB");
 
     // Check if admin already exists
     const existingAdmin = await User.findOne({ email: "admin@company.com" });
     if (existingAdmin) {
-      console.log("✅ Admin user already exists");
+      console.log("Admin user already exists");
       return existingAdmin;
     }
 
@@ -36,9 +36,9 @@ async function createTestAdmin() {
         timezone: "Asia/Karachi",
       });
       await company.save();
-      console.log("✅ Company created");
+      console.log("Company created");
     } else {
-      console.log("✅ Company already exists");
+      console.log("Company already exists");
     }
 
     // Create admin user.
@@ -64,16 +64,16 @@ async function createTestAdmin() {
     });
 
     await admin.save();
-    console.log("✅ Admin user created successfully");
-    console.log("📧 Email: admin@company.com");
-    console.log("🔑 Password: admin123");
+    console.log("Admin user created successfully");
+    console.log("Email: admin@company.com");
+    console.log("Password: admin123");
 
     return admin;
   } catch (error) {
-    console.error("❌ Error creating admin:", error.message);
+    console.error("Error creating admin:", error.message);
   } finally {
     await mongoose.disconnect();
-    console.log("📴 Disconnected from MongoDB");
+    console.log("Disconnected from MongoDB");
   }
 }
 

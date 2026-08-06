@@ -20,9 +20,9 @@ router.get("/logs/:ip/:employeeId", authenticateToken, async (req, res) => {
     }
 
     console.log(
-      `📊 Fetching attendance from DATABASE for employee ${employeeId} at machine ${ip}`
+      `Fetching attendance from DATABASE for employee ${employeeId} at machine ${ip}`
     );
-    console.log(`📅 Date range: ${startDate} to ${endDate}`);
+    console.log(`Date range: ${startDate} to ${endDate}`);
 
     // Fetch data from DATABASE (not device) - INSTANT response
     const result =
@@ -49,7 +49,7 @@ router.get("/logs/:ip/:employeeId", authenticateToken, async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("❌ Failed to fetch attendance from database:", error);
+    console.error("Failed to fetch attendance from database:", error);
     res.status(500).json({
       success: false,
       message: "Failed to fetch attendance records from database",
@@ -73,8 +73,8 @@ router.get("/logs/:ip/all", authenticateToken, async (req, res) => {
       });
     }
 
-    console.log(`📊 Fetching ALL attendance from DATABASE for machine ${ip}`);
-    console.log(`📅 Date range: ${startDate} to ${endDate}`);
+    console.log(`Fetching ALL attendance from DATABASE for machine ${ip}`);
+    console.log(`Date range: ${startDate} to ${endDate}`);
 
     // Fetch ALL attendance data from DATABASE
     const result =
@@ -115,7 +115,7 @@ router.get("/logs/:ip/all", authenticateToken, async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("❌ Failed to fetch all attendance from database:", error);
+    console.error("Failed to fetch all attendance from database:", error);
     res.status(500).json({
       success: false,
       message: "Failed to fetch all attendance records from database",
@@ -135,17 +135,17 @@ router.post(
       const { days = 7 } = req.body; // Default: sync last 7 days
 
       console.log(
-        `🔄 Triggering incremental sync for machine ${ip} (last ${days} days)`
+        `Triggering incremental sync for machine ${ip} (last ${days} days)`
       );
 
       // Trigger sync in background (don't wait for completion)
       incrementalAttendanceSyncService
         .triggerManualSync(ip, req.user.company, days)
         .then((result) => {
-          console.log(`✅ Background sync completed for ${ip}:`, result);
+          console.log(`Background sync completed for ${ip}:`, result);
         })
         .catch((error) => {
-          console.error(`❌ Background sync failed for ${ip}:`, error.message);
+          console.error(`Background sync failed for ${ip}:`, error.message);
         });
 
       // Return immediate response
@@ -158,7 +158,7 @@ router.post(
         note: "Sync is running in background. Check sync status endpoint for progress.",
       });
     } catch (error) {
-      console.error("❌ Failed to trigger incremental sync:", error);
+      console.error("Failed to trigger incremental sync:", error);
       res.status(500).json({
         success: false,
         message: "Failed to trigger incremental sync",
@@ -188,7 +188,7 @@ router.post(
       }
 
       console.log(
-        `🔄 Force syncing date range ${startDate} to ${endDate} for machine ${ip}`
+        `Force syncing date range ${startDate} to ${endDate} for machine ${ip}`
       );
 
       // Start sync and wait for completion (for specific date ranges)
@@ -205,7 +205,7 @@ router.post(
         result,
       });
     } catch (error) {
-      console.error("❌ Failed to force sync date range:", error);
+      console.error("Failed to force sync date range:", error);
       res.status(500).json({
         success: false,
         message: "Failed to force sync date range",
@@ -263,7 +263,7 @@ router.get("/sync/status", authenticateToken, async (req, res) => {
       note: "Sync status shows when data was last synchronized from devices to database",
     });
   } catch (error) {
-    console.error("❌ Failed to get sync status:", error);
+    console.error("Failed to get sync status:", error);
     res.status(500).json({
       success: false,
       message: "Failed to get sync status",
@@ -288,7 +288,7 @@ router.post(
         note: "Attendance data will be automatically synchronized from devices to database",
       });
     } catch (error) {
-      console.error("❌ Failed to start scheduled sync:", error);
+      console.error("Failed to start scheduled sync:", error);
       res.status(500).json({
         success: false,
         message: "Failed to start scheduled sync",
@@ -313,7 +313,7 @@ router.post(
         note: "Manual sync can still be triggered via API endpoints",
       });
     } catch (error) {
-      console.error("❌ Failed to stop scheduled sync:", error);
+      console.error("Failed to stop scheduled sync:", error);
       res.status(500).json({
         success: false,
         message: "Failed to stop scheduled sync",
@@ -339,7 +339,7 @@ router.get("/summary/:ip", authenticateToken, async (req, res) => {
     }
 
     console.log(
-      `📈 Generating attendance summary for machine ${ip} (${startDate} to ${endDate})`
+      `Generating attendance summary for machine ${ip} (${startDate} to ${endDate})`
     );
 
     // Get attendance statistics from database
@@ -399,7 +399,7 @@ router.get("/summary/:ip", authenticateToken, async (req, res) => {
       dataSource: "database",
     });
   } catch (error) {
-    console.error("❌ Failed to generate attendance summary:", error);
+    console.error("Failed to generate attendance summary:", error);
     res.status(500).json({
       success: false,
       message: "Failed to generate attendance summary",

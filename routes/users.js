@@ -5,6 +5,8 @@ const {
   checkCompanyAccess,
 } = require("../middleware/auth");
 const { uploadSingle, processProfilePicture } = require("../middleware/upload");
+const { validatePhoneField } = require("../middleware/phoneValidation");
+const { serializeAuthUser } = require("../utils/serializeUser");
 const User = require("../models/User");
 const { sendInvitationEmail } = require("../utils/email");
 
@@ -17,19 +19,19 @@ router.get(
   authorizeRoles("admin"),
   async (req, res) => {
     try {
-      console.log("👥 === EMPLOYEES DEBUG ===");
-      console.log("👥 req.user exists:", !!req.user);
-      console.log("👥 req.user:", req.user);
+      console.log("=== EMPLOYEES DEBUG ===");
+      console.log("req.user exists:", !!req.user);
+      console.log("req.user:", req.user);
 
       if (!req.user) {
-        console.log("👥 ERROR: req.user is undefined!");
+        console.log("ERROR: req.user is undefined!");
         return res
           .status(401)
           .json({ message: "Authentication failed - user not found" });
       }
-      console.log("👥 Employees request from user:", req.user.email);
-      console.log("👥 User company:", req.user.company);
-      console.log("👥 Company ID:", req.user.company?._id);
+      console.log("Employees request from user:", req.user.email);
+      console.log("User company:", req.user.company);
+      console.log("Company ID:", req.user.company?._id);
 
       const page = parseInt(req.query.page) || 1;
       const limit = parseInt(req.query.limit) || 50; // Increased default limit for employees
@@ -37,7 +39,7 @@ router.get(
 
       // Include ALL employees (active + inactive) for comprehensive view
       const companyId = req.user.company._id || req.user.company;
-      console.log("👥 Using company ID for queries:", companyId);
+      console.log("Using company ID for queries:", companyId);
 
       const users = await User.find({
         company: companyId,
@@ -49,9 +51,9 @@ router.get(
         .limit(limit)
         .sort({ createdAt: -1 });
 
-      console.log("📋 Retrieved employees:", users.length);
+      console.log("Retrieved employees:", users.length);
       console.log(
-        "📋 Employee statuses:",
+        "Employee statuses:",
         users.map((u) => ({
           name: u.name,
           status: u.status,
@@ -108,16 +110,16 @@ router.get(
   authenticateToken,
   authorizeRoles("admin"),
   async (req, res) => {
-    console.log("👥 Admins request from user:", req.user.email);
-    console.log("👥 User company:", req.user.company);
-    console.log("👥 Company ID:", req.user.company?._id);
+    console.log("Admins request from user:", req.user.email);
+    console.log("User company:", req.user.company);
+    console.log("Company ID:", req.user.company?._id);
     try {
       const page = parseInt(req.query.page) || 1;
       const limit = parseInt(req.query.limit) || 50;
       const skip = (page - 1) * limit;
 
       const companyId = req.user.company._id || req.user.company;
-      console.log("👥 Using company ID for admins queries:", companyId);
+      console.log("Using company ID for admins queries:", companyId);
       const users = await User.find({
         company: companyId,
         role: "admin",
@@ -181,53 +183,65 @@ router.get("/:id", authenticateToken, checkCompanyAccess, async (req, res) => {
 });
 
 // Update employee profile (Admin can update any, Employee can update only themselves)
-router.put("/:id", authenticateToken, checkCompanyAccess, async (req, res) => {
-  try {
-    const { name, phone, department, position } = req.body;
+router.put(
+  "/:id",
+  authenticateToken,
+  checkCompanyAccess,
+  validatePhoneField("phone"),
+  async (req, res) => {
+    try {
+      const { name, phone, department, position } = req.body;
 
-    let query = { _id: req.params.id };
+      let query = { _id: req.params.id };
 
-    // If user is not admin, they can only update their own profile
-    if (req.user.role !== "admin") {
-      query._id = req.user._id;
-      // Employees can only update limited fields
-      const allowedUpdates = { name, phone };
-      Object.keys(allowedUpdates).forEach(
-        (key) => allowedUpdates[key] === undefined && delete allowedUpdates[key]
-      );
-      req.body = allowedUpdates;
-    } else {
-      // Admin can update more fields
-      query.company = req.user.company._id;
-      const allowedUpdates = { name, phone, department, position };
-      Object.keys(allowedUpdates).forEach(
-        (key) => allowedUpdates[key] === undefined && delete allowedUpdates[key]
-      );
-      req.body = allowedUpdates;
+      // If user is not admin, they can only update their own profile
+      if (req.user.role !== "admin") {
+        query._id = req.user._id;
+        // Employees can only update limited fields
+        const allowedUpdates = { name, phone };
+        Object.keys(allowedUpdates).forEach(
+          (key) =>
+            allowedUpdates[key] === undefined && delete allowedUpdates[key]
+        );
+        req.body = allowedUpdates;
+      } else {
+        // Admin can update more fields
+        query.company = req.user.company._id;
+        const allowedUpdates = { name, phone, department, position };
+        Object.keys(allowedUpdates).forEach(
+          (key) =>
+            allowedUpdates[key] === undefined && delete allowedUpdates[key]
+        );
+        req.body = allowedUpdates;
+      }
+
+      const user = await User.findOneAndUpdate(query, req.body, {
+        new: true,
+        runValidators: true,
+      })
+        .select("-password")
+        .populate("company", "name");
+
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      // Serialised, not the raw document: the client writes this straight into
+      // its auth context. The document form has `_id` but no `id`, and
+      // `company` as an object rather than its name, which silently corrupted
+      // the stored session.
+      res.status(200).json({
+        message: "Profile updated successfully",
+        user: serializeAuthUser(user),
+      });
+    } catch (error) {
+      res.status(500).json({
+        message: "Failed to update profile",
+        error: error.message,
+      });
     }
-
-    const user = await User.findOneAndUpdate(query, req.body, {
-      new: true,
-      runValidators: true,
-    })
-      .select("-password")
-      .populate("company", "name");
-
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-
-    res.status(200).json({
-      message: "Profile updated successfully",
-      user,
-    });
-  } catch (error) {
-    res.status(500).json({
-      message: "Failed to update profile",
-      error: error.message,
-    });
   }
-});
+);
 
 // Deactivate employee (Admin only)
 router.put(
@@ -369,27 +383,16 @@ router.post(
           profilePictureUploadedAt: new Date(), // Track when file was uploaded
         },
         { new: true }
-      ).select("-password");
+      )
+        .select("-password")
+        .populate("company", "name");
 
       res.status(200).json({
         message: "Profile picture updated successfully",
         profilePicture: req.profilePicturePath,
         warning:
           "Note: On Railway, uploaded files may be lost on app restart. Consider using a cloud storage service for persistent file storage.",
-        user: {
-          id: user._id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-          employeeId: user.employeeId,
-          department: user.department,
-          position: user.position,
-          company: user.company,
-          joinDate: user.joinDate,
-          phone: user.phone,
-          profilePicture: user.profilePicture,
-          isActive: user.isActive,
-        },
+        user: serializeAuthUser(user),
       });
     } catch (error) {
       console.error("Profile picture upload error:", error);
@@ -406,18 +409,20 @@ router.post(
   "/",
   authenticateToken,
   authorizeRoles("admin"),
+  validatePhoneField("phone"),
   async (req, res) => {
     try {
-      console.log("🔴 === DEBUG START ===");
-      console.log("🔴 req.body:", JSON.stringify(req.body, null, 2));
-      console.log("🔴 req.user:", JSON.stringify(req.user, null, 2));
-      console.log("🔴 req.user.company:", req.user.company);
-      console.log("🔴 req.user.company._id:", req.user.company?._id);
-      console.log("🔴 === DEBUG END ===");
+      console.log("=== DEBUG START ===");
+      console.log("req.body:", JSON.stringify(req.body, null, 2));
+      console.log("req.user:", JSON.stringify(req.user, null, 2));
+      console.log("req.user.company:", req.user.company);
+      console.log("req.user.company._id:", req.user.company?._id);
+      console.log("=== DEBUG END ===");
 
       const {
         name,
         email,
+        phone,
         role,
         department,
         position,
@@ -427,12 +432,12 @@ router.post(
         sendInviteEmail,
       } = req.body;
 
-      console.log("📝 Creating new user:", { name, email, role, department });
-      console.log("📝 Request user:", req.user.email);
-      console.log("📝 Company from req.user:", req.user.company);
+      console.log("Creating new user:", { name, email, role, department });
+      console.log("Request user:", req.user.email);
+      console.log("Company from req.user:", req.user.company);
 
       // A still-pending record means the invite was created but never
-      // accepted — commonly because an earlier email send failed, which left
+      // accepted - commonly because an earlier email send failed, which left
       // the address permanently un-invitable. Only an accepted account is a
       // real conflict; pending ones are re-invited below.
       const existingUser = await User.findOne({ email: email.toLowerCase() });
@@ -449,13 +454,13 @@ router.post(
 
       // Verify companyId is valid
       if (!companyId) {
-        console.error("❌ No company ID found for admin:", req.user.email);
+        console.error("No company ID found for admin:", req.user.email);
         return res.status(400).json({
           message: "Admin user has no company association",
         });
       }
 
-      console.log("✅ Using company ID:", companyId);
+      console.log("Using company ID:", companyId);
 
       // Reuse the pending record on a resend so we don't create duplicates.
       let user;
@@ -472,13 +477,17 @@ router.post(
           invitedBy: req.user._id,
           tags: tags || [],
           ...(employeeId && { employeeId }),
+          // Only overwrite a stored number when a new one was supplied, so a
+          // resend does not wipe a number the employee set themselves.
+          ...(phone && { phone }),
         });
         await user.save({ validateBeforeSave: false });
-        console.log("🔁 Existing PENDING invite updated:", user.employeeId);
+        console.log("Existing PENDING invite updated:", user.employeeId);
       } else {
         user = await User.create({
           name,
           email: email.toLowerCase(),
+          phone: phone || undefined,
           role: role || "employee",
           status: "pending",
           department,
@@ -489,21 +498,21 @@ router.post(
           invitedBy: req.user._id,
           tags: tags || [],
         });
-        console.log("✅ User created successfully:", user.employeeId);
+        console.log("User created successfully:", user.employeeId);
       }
-      console.log("✅ User company:", user.company);
+      console.log("User company:", user.company);
 
       // Generate invitation token
       const invitationToken = user.generateInvitationToken();
       await user.save({ validateBeforeSave: false });
 
-      console.log("🔑 Invitation token generated");
+      console.log("Invitation token generated");
 
       // Populate company name for email
       await user.populate("company", "name");
       const companyName = user.company?.name || "Your Company";
 
-      console.log("🏢 Company name for email:", companyName);
+      console.log("Company name for email:", companyName);
 
       // Send invitation email if requested
       let emailSent = false;
@@ -512,7 +521,7 @@ router.post(
 
       if (sendInviteEmail !== false) {
         try {
-          console.log("📧 Sending invitation email to:", email);
+          console.log("Sending invitation email to:", email);
 
           // Create email-friendly user object
           const emailUser = {
@@ -528,9 +537,9 @@ router.post(
           );
           emailSent = true;
           emailMessageId = emailResult?.messageId;
-          console.log("✅ Invitation email sent successfully");
+          console.log("Invitation email sent successfully");
         } catch (error) {
-          console.error("❌ Failed to send invitation email:", error.message);
+          console.error("Failed to send invitation email:", error.message);
           emailError = error.message;
           // Don't fail the request if email fails
         }
@@ -555,8 +564,8 @@ router.post(
         warning: emailError ? "User created but invitation email failed" : null,
       });
     } catch (error) {
-      console.error("❌ Error creating user:", error);
-      console.error("❌ Error stack:", error.stack);
+      console.error("Error creating user:", error);
+      console.error("Error stack:", error.stack);
       res.status(500).json({
         message: "Failed to create user",
         error: error.message,

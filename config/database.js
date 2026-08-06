@@ -50,7 +50,7 @@ if (config.development.dialect === 'sqlite') {
   const dbDir = path.dirname(config.development.storage);
   if (!fs.existsSync(dbDir)) {
     fs.mkdirSync(dbDir, { recursive: true });
-    console.log('📁 Created database directory:', dbDir);
+    console.log('Created database directory:', dbDir);
   }
 }
 
@@ -58,12 +58,12 @@ if (config.development.dialect === 'sqlite') {
 const dbType = process.env.DB_TYPE || 'development';
 const dbConfig = config[dbType] || config.development;
 
-console.log(`🗄️ Database configured: ${dbConfig.dialect.toUpperCase()}`);
+console.log(`Database configured: ${dbConfig.dialect.toUpperCase()}`);
 if (dbConfig.dialect === 'sqlite') {
-  console.log(`📍 Database file: ${dbConfig.storage}`);
+  console.log(`Database file: ${dbConfig.storage}`);
 } else {
-  console.log(`📍 Database host: ${dbConfig.host}:${dbConfig.port}`);
-  console.log(`📍 Database name: ${dbConfig.database}`);
+  console.log(`Database host: ${dbConfig.host}:${dbConfig.port}`);
+  console.log(`Database name: ${dbConfig.database}`);
 }
 
 module.exports = {

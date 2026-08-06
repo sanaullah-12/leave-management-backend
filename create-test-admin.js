@@ -12,7 +12,7 @@ async function createTestAdmin() {
     // Check if admin already exists
     const existingAdmin = await User.findOne({ email: 'test.admin@example.com' });
     if (existingAdmin) {
-      console.log('✅ Test admin already exists');
+      console.log('Test admin already exists');
       console.log('Email: test.admin@example.com');
       console.log('Password: testpassword123');
       process.exit(0);
@@ -45,13 +45,13 @@ async function createTestAdmin() {
     });
 
     await admin.save();
-    console.log('✅ Test admin created successfully');
+    console.log('Test admin created successfully');
     console.log('Email: test.admin@example.com');
     console.log('Password: testpassword123');
     console.log('Company:', company.name);
 
   } catch (error) {
-    console.error('❌ Error creating admin:', error.message);
+    console.error('Error creating admin:', error.message);
   }
   process.exit(0);
 }

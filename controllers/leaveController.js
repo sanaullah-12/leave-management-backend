@@ -120,7 +120,7 @@ const updateLeaveStatus = async (req, res) => {
 // Get leave policy - Simple fix with correct values
 const getLeavePolicy = (req, res) => {
   try {
-    console.log("🟢 getLeavePolicy called");
+    console.log("getLeavePolicy called");
 
     const policy = [
       { leave_type: "casual", total_days: 10, name: "Casual Leave" },
@@ -128,10 +128,10 @@ const getLeavePolicy = (req, res) => {
       { leave_type: "annual", total_days: 10, name: "Annual Leave" },
     ];
 
-    console.log("🟢 Returning policy:", policy);
+    console.log("Returning policy:", policy);
     return res.status(200).json(policy);
   } catch (error) {
-    console.error("🔴 getLeavePolicy error:", error);
+    console.error("getLeavePolicy error:", error);
     return res
       .status(500)
       .json({ message: "Failed to fetch leave policy", error: error.message });

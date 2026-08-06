@@ -42,21 +42,19 @@ function resolveConnectionString() {
 (async () => {
   const conn = resolveConnectionString();
   const masked = conn.replace(/\/\/[^:]*:[^@]*@/, "//***:***@");
-  console.log(
-    `\n${APPLY ? "🟢 APPLY" : "🔍 DRY RUN"} — leave policy normalize`,
-  );
-  console.log("📍 DB:", masked);
-  console.log("🎯 Target:", TARGET, WITH_QUOTAS ? "(+ employee quotas)" : "");
+  console.log(`\n${APPLY ? "APPLY" : "DRY RUN"} - leave policy normalize`);
+  console.log("DB:", masked);
+  console.log("Target:", TARGET, WITH_QUOTAS ? "(+ employee quotas)" : "");
 
   await mongoose.connect(conn, { serverSelectionTimeoutMS: 8000 });
-  console.log("✅ Connected to:", mongoose.connection.db.databaseName, "\n");
+  console.log("Connected to:", mongoose.connection.db.databaseName, "\n");
 
   const Company = require("../models/Company");
   const User = require("../models/User");
 
   // ---- Companies ----
   const companies = await Company.find({}).select("name leavePolicy").lean();
-  console.log(`🏢 Companies: ${companies.length}`);
+  console.log(`Companies: ${companies.length}`);
   companies.forEach((c) => {
     const p = c.leavePolicy || {};
     console.log(
@@ -75,9 +73,7 @@ function resolveConnectionString() {
         },
       },
     );
-    console.log(
-      `   ↳ ✅ Updated ${res.modifiedCount} company policy record(s).`,
-    );
+    console.log(`Updated ${res.modifiedCount} company policy record(s).`);
   }
 
   // ---- Employee quotas (optional) ----
@@ -90,9 +86,7 @@ function resolveConnectionString() {
         { "leaveQuota.sick": { $ne: TARGET.sick } },
       ],
     });
-    console.log(
-      `\n👤 Users: ${users} (with non-matching core quotas: ${stale})`,
-    );
+    console.log(`\nUsers: ${users} (with non-matching core quotas: ${stale})`);
 
     if (APPLY) {
       const res = await User.updateMany(
@@ -105,22 +99,22 @@ function resolveConnectionString() {
           },
         },
       );
-      console.log(`   ↳ ✅ Updated ${res.modifiedCount} user quota record(s).`);
+      console.log(`Updated ${res.modifiedCount} user quota record(s).`);
     }
   }
 
   if (!APPLY) {
     console.log(
-      "\nℹ️  Dry run only — nothing was written. Re-run with --apply to save.",
+      "\nDry run only - nothing was written. Re-run with --apply to save.",
     );
   } else {
-    console.log("\n🎉 Done.");
+    console.log("\nDone.");
   }
 
   await mongoose.connection.close();
   process.exit(0);
 })().catch(async (err) => {
-  console.error("❌ Migration failed:", err.message);
+  console.error("Migration failed:", err.message);
   try {
     await mongoose.connection.close();
   } catch {}

@@ -13,7 +13,7 @@ class PortManager {
       const randomInport = this.generateRandomPort();
       
       try {
-        console.log(`🔌 Attempt ${attempt}/${maxRetries}: Connecting to ${ip}:${devicePort} using local port ${randomInport}`);
+        console.log(`Attempt ${attempt}/${maxRetries}: Connecting to ${ip}:${devicePort} using local port ${randomInport}`);
         
         // Import the ZK library
         let ZKLib;
@@ -37,7 +37,7 @@ class PortManager {
           
           testSocket.on('error', (err) => {
             if (err.code === 'EADDRINUSE') {
-              console.log(`⚠️ Port ${randomInport} is in use, will try another port`);
+              console.log(`Port ${randomInport} is in use, will try another port`);
               reject(err);
             } else {
               reject(err);
@@ -46,7 +46,7 @@ class PortManager {
           
           testSocket.bind(randomInport, () => {
             testSocket.close();
-            console.log(`✅ Port ${randomInport} is available`);
+            console.log(`Port ${randomInport} is available`);
             resolve();
           });
         });
@@ -55,10 +55,10 @@ class PortManager {
         
       } catch (error) {
         lastError = error;
-        console.log(`❌ Attempt ${attempt} failed: ${error.message}`);
+        console.log(`Attempt ${attempt} failed: ${error.message}`);
         
         if (error.code === 'EADDRINUSE') {
-          console.log(`🔄 Port ${randomInport} in use, retrying with different port...`);
+          console.log(`Port ${randomInport} in use, retrying with different port...`);
           // Add small delay to prevent rapid retries
           await new Promise(resolve => setTimeout(resolve, 100 * attempt));
           continue;
@@ -79,23 +79,23 @@ class PortManager {
       const randomInport = this.generateRandomPort();
       
       try {
-        console.log(`🔌 Attempt ${attempt}/${maxRetries}: Creating NodeZKLib for ${ip}:${devicePort} using local port ${randomInport}`);
+        console.log(`Attempt ${attempt}/${maxRetries}: Creating NodeZKLib for ${ip}:${devicePort} using local port ${randomInport}`);
         
         const NodeZKLib = require('node-zklib');
         const zkInstance = new NodeZKLib(ip, devicePort, timeout, randomInport);
         
         // Test the connection by creating socket
         await zkInstance.createSocket();
-        console.log(`✅ NodeZKLib created successfully with port ${randomInport}`);
+        console.log(`NodeZKLib created successfully with port ${randomInport}`);
         
         return zkInstance;
         
       } catch (error) {
         lastError = error;
-        console.log(`❌ Attempt ${attempt} failed: ${error.message}`);
+        console.log(`Attempt ${attempt} failed: ${error.message}`);
         
         if (error.message.includes('EADDRINUSE') || error.code === 'EADDRINUSE') {
-          console.log(`🔄 Port ${randomInport} in use, retrying with different port...`);
+          console.log(`Port ${randomInport} in use, retrying with different port...`);
           // Add small delay to prevent rapid retries
           await new Promise(resolve => setTimeout(resolve, 100 * attempt));
           continue;

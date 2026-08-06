@@ -13,13 +13,13 @@ const { log, warn, describeSecret, maskEmail } = require("./logger");
 const REQUIRED_VARS = ["BREVO_API_KEY", "EMAIL_FROM"];
 
 /**
- * THE SENDER — the values to change when moving to a new domain.
+ * THE SENDER - the values to change when moving to a new domain.
  * Brevo requires the sender to be either a verified sender address or an
  * address on a verified domain; anything else is rejected at send time.
  */
 const DEFAULT_FROM_NAME = "Nexora";
 
-/** Configuration problems are permanent — never retried. */
+/** Configuration problems are permanent - never retried. */
 class EmailConfigError extends Error {
   constructor(message) {
     super(message);
@@ -32,7 +32,7 @@ const loadEmailConfig = () => {
   const missing = REQUIRED_VARS.filter((name) => !process.env[name]);
   if (missing.length > 0) {
     throw new EmailConfigError(
-      `Email is not configured — missing environment variable(s): ${missing.join(", ")}. ` +
+      `Email is not configured - missing environment variable(s): ${missing.join(", ")}. ` +
         `Set BREVO_API_KEY (https://app.brevo.com/settings/keys/api) and EMAIL_FROM ` +
         `in Railway → service → Variables, or in the local .env.`
     );
@@ -45,7 +45,7 @@ const loadEmailConfig = () => {
   // 401 from the API into an obvious local misconfiguration message.
   if (!apiKey.startsWith("xkeysib-")) {
     warn(
-      `BREVO_API_KEY does not start with "xkeysib-" — Brevo v3 API keys normally do. ` +
+      `BREVO_API_KEY does not start with "xkeysib-" - Brevo v3 API keys normally do. ` +
         `If sending fails with 401, regenerate the key at ` +
         `https://app.brevo.com/settings/keys/api (an SMTP key will not work here).`
     );
@@ -54,7 +54,7 @@ const loadEmailConfig = () => {
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(fromEmail)) {
     throw new EmailConfigError(
       `EMAIL_FROM is not a valid email address: "${fromEmail}". ` +
-        `It must be a bare address (e.g. no-reply@nexora.com) — the display name ` +
+        `It must be a bare address (e.g. no-reply@nexora.com) - the display name ` +
         `goes in EMAIL_FROM_NAME.`
     );
   }
@@ -87,7 +87,7 @@ const getFrontendUrl = () => {
       : process.env.FRONTEND_URL_DEV || process.env.FRONTEND_URL || "http://localhost:3000";
 
   if (!url) {
-    warn("FRONTEND_URL is not set — links in emails will be broken.");
+    warn("FRONTEND_URL is not set - links in emails will be broken.");
     return "";
   }
   return url.replace(/\/+$/, "");

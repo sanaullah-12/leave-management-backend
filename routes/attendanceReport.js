@@ -18,7 +18,7 @@ router.get('/report/:ip', authenticateToken, authorizeRoles('admin'), async (req
       });
     }
 
-    console.log(`📊 Generating attendance report for ${ip} from ${startDate} to ${endDate}`);
+    console.log(`Generating attendance report for ${ip} from ${startDate} to ${endDate}`);
 
     // Create fresh connection
     biometricService = new BiometricService(ip, 4370);
@@ -161,7 +161,7 @@ router.get('/report/:ip', authenticateToken, authorizeRoles('admin'), async (req
     });
 
   } catch (error) {
-    console.error('❌ Failed to generate attendance report:', error.message);
+    console.error('Failed to generate attendance report:', error.message);
 
     if (biometricService) {
       try {

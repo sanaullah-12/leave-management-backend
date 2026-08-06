@@ -6,7 +6,7 @@
  * so the rest of the socket layer can trust `socket.user`.
  *
  * The token is read from the handshake `auth.token` (preferred) or the
- * Authorization header — matching how the REST API authenticates.
+ * Authorization header - matching how the REST API authenticates.
  */
 const { verifyToken } = require("../utils/jwt");
 const User = require("../models/User");

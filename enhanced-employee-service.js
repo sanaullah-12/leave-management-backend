@@ -25,11 +25,11 @@ class EnhancedEmployeeService {
 
     for (const method of methods) {
       try {
-        console.log(`🔄 Trying ${method.name}...`);
+        console.log(`Trying ${method.name}...`);
         const employees = await method.fn();
 
         if (employees && employees.length > 0) {
-          console.log(`✅ ${method.name} found ${employees.length} employees`);
+          console.log(` ${method.name} found ${employees.length} employees`);
           return {
             success: true,
             employees: employees,
@@ -38,7 +38,7 @@ class EnhancedEmployeeService {
           };
         }
       } catch (error) {
-        console.log(`⚠️ ${method.name} failed: ${error.message}`);
+        console.log(` ${method.name} failed: ${error.message}`);
       }
     }
 
@@ -227,7 +227,7 @@ class EnhancedEmployeeService {
   async getAllEmployees(options = {}) {
     const { includeMockData = false, useCache = true } = options;
 
-    console.log('🔍 Starting enhanced employee retrieval...');
+    console.log('Starting enhanced employee retrieval...');
 
     // Try 1: Device data
     const deviceResult = await this.getEmployeesFromDevice();
@@ -244,7 +244,7 @@ class EnhancedEmployeeService {
     if (useCache) {
       const cacheResult = await this.getEmployeesFromCache();
       if (cacheResult.success) {
-        console.log('✅ Using cached employee data');
+        console.log('Using cached employee data');
         return cacheResult;
       }
     }
@@ -252,13 +252,13 @@ class EnhancedEmployeeService {
     // Try 3: Manual data
     const manualResult = this.getManualEmployeeData();
     if (manualResult.success) {
-      console.log('✅ Using manual employee data');
+      console.log('Using manual employee data');
       return manualResult;
     }
 
     // Try 4: Mock data for testing (if enabled)
     if (includeMockData) {
-      console.log('✅ Using mock employee data for testing');
+      console.log('Using mock employee data for testing');
       return this.getMockEmployeesForTesting();
     }
 

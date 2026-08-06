@@ -16,9 +16,9 @@ const safeEmit = (room, event, payload) => {
   try {
     getIO().to(room).emit(event, payload);
   } catch (err) {
-    // io not initialised or emit failed — never propagate to the caller.
+    // io not initialised or emit failed - never propagate to the caller.
     if (process.env.NODE_ENV !== "production") {
-      console.warn(`⚡ emit skipped (${event}):`, err?.message || err);
+      console.warn(`emit skipped (${event}):`, err?.message || err);
     }
   }
 };

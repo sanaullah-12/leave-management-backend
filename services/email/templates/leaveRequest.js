@@ -1,15 +1,15 @@
-/** New leave request notification — sent to admins/approvers for review. */
+/** New leave request notification - sent to admins/approvers for review. */
 
 const { baseLayout, button, detailsBox, greeting, p, esc, COLORS } = require("./layout");
 
-const fmt = (d) => (d ? new Date(d).toLocaleDateString() : "—");
+const fmt = (d) => (d ? new Date(d).toLocaleDateString() : "-");
 
 module.exports = ({ admin, employee, leave, reviewUrl }) => {
   const body = `
     ${greeting(admin.name)}
     ${p(`<strong>${esc(employee.name)}</strong> has submitted a leave request that needs your review.`)}
     ${detailsBox([
-      ["Employee", `${employee.name} (${employee.employeeId || "—"})`],
+      ["Employee", `${employee.name} (${employee.employeeId || "-"})`],
       ["Department", employee.department],
       ["Leave type", leave.leaveType],
       ["From", fmt(leave.startDate)],
@@ -20,7 +20,7 @@ module.exports = ({ admin, employee, leave, reviewUrl }) => {
     ${reviewUrl ? button(reviewUrl, "Review Request") : ""}`;
 
   return {
-    subject: `Leave request from ${employee.name} — needs review`,
+    subject: `Leave request from ${employee.name} - needs review`,
     html: baseLayout({
       title: "New Leave Request",
       heading: "New leave request",

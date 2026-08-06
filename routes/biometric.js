@@ -18,7 +18,7 @@ router.post('/test-connection', authenticateToken, authorizeRoles('admin'), asyn
       });
     }
 
-    console.log(`🧪 Testing connection to biometric device at ${ip}:${port}`);
+    console.log(`Testing connection to biometric device at ${ip}:${port}`);
 
     const biometricService = new BiometricService(ip, port);
     const result = await biometricService.testConnection();
@@ -26,7 +26,7 @@ router.post('/test-connection', authenticateToken, authorizeRoles('admin'), asyn
     res.json(result);
 
   } catch (error) {
-    console.error('❌ Connection test failed:', error.message);
+    console.error('Connection test failed:', error.message);
     res.status(500).json({
       success: false,
       message: error.message,
@@ -47,7 +47,7 @@ router.post('/connect', authenticateToken, authorizeRoles('admin'), async (req, 
       });
     }
 
-    console.log(`🔌 Connecting to biometric device at ${ip}:${port}`);
+    console.log(`Connecting to biometric device at ${ip}:${port}`);
 
     const biometricService = new BiometricService(ip, port);
     const result = await biometricService.connect();
@@ -66,7 +66,7 @@ router.post('/connect', authenticateToken, authorizeRoles('admin'), async (req, 
     });
 
   } catch (error) {
-    console.error('❌ Connection failed:', error.message);
+    console.error('Connection failed:', error.message);
     res.status(500).json({
       success: false,
       message: error.message,
@@ -88,7 +88,7 @@ router.post('/disconnect/:ip', authenticateToken, authorizeRoles('admin'), async
       });
     }
 
-    console.log(`🔌 Disconnecting from biometric device at ${ip}`);
+    console.log(`Disconnecting from biometric device at ${ip}`);
 
     await connection.service.disconnect();
     activeConnections.delete(ip);
@@ -99,7 +99,7 @@ router.post('/disconnect/:ip', authenticateToken, authorizeRoles('admin'), async
     });
 
   } catch (error) {
-    console.error('❌ Disconnect failed:', error.message);
+    console.error('Disconnect failed:', error.message);
     res.status(500).json({
       success: false,
       message: error.message,
@@ -113,7 +113,7 @@ router.get('/employees/:ip', authenticateToken, authorizeRoles('admin'), async (
   try {
     const { ip } = req.params;
 
-    console.log(`👥 Fetching employees from biometric device at ${ip}`);
+    console.log(`Fetching employees from biometric device at ${ip}`);
 
     // Check for existing connection
     let connection = activeConnections.get(ip);
@@ -122,9 +122,9 @@ router.get('/employees/:ip', authenticateToken, authorizeRoles('admin'), async (
     if (connection) {
       biometricService = connection.service;
       connection.lastUsed = new Date();
-      console.log(`✅ Using existing connection to ${ip}`);
+      console.log(`Using existing connection to ${ip}`);
     } else {
-      console.log(`🔌 Creating new connection to ${ip}`);
+      console.log(`Creating new connection to ${ip}`);
       biometricService = new BiometricService(ip, 4370);
       await biometricService.connect();
 
@@ -149,7 +149,7 @@ router.get('/employees/:ip', authenticateToken, authorizeRoles('admin'), async (
     });
 
   } catch (error) {
-    console.error('❌ Failed to get employees:', error.message);
+    console.error('Failed to get employees:', error.message);
     res.status(500).json({
       success: false,
       message: error.message,
@@ -164,7 +164,7 @@ router.get('/attendance/:ip', authenticateToken, authorizeRoles('admin'), async 
     const { ip } = req.params;
     const { startDate } = req.query;
 
-    console.log(`📊 Fetching attendance logs from biometric device at ${ip}`);
+    console.log(`Fetching attendance logs from biometric device at ${ip}`);
 
     // Check for existing connection
     let connection = activeConnections.get(ip);
@@ -173,9 +173,9 @@ router.get('/attendance/:ip', authenticateToken, authorizeRoles('admin'), async 
     if (connection) {
       biometricService = connection.service;
       connection.lastUsed = new Date();
-      console.log(`✅ Using existing connection to ${ip}`);
+      console.log(`Using existing connection to ${ip}`);
     } else {
-      console.log(`🔌 Creating new connection to ${ip}`);
+      console.log(`Creating new connection to ${ip}`);
       biometricService = new BiometricService(ip, 4370);
       await biometricService.connect();
 
@@ -201,7 +201,7 @@ router.get('/attendance/:ip', authenticateToken, authorizeRoles('admin'), async 
     });
 
   } catch (error) {
-    console.error('❌ Failed to get attendance logs:', error.message);
+    console.error('Failed to get attendance logs:', error.message);
     res.status(500).json({
       success: false,
       message: error.message,
@@ -227,7 +227,7 @@ router.get('/connections', authenticateToken, authorizeRoles('admin'), (req, res
     });
 
   } catch (error) {
-    console.error('❌ Failed to get connections status:', error.message);
+    console.error('Failed to get connections status:', error.message);
     res.status(500).json({
       success: false,
       message: error.message,
@@ -243,9 +243,9 @@ setInterval(() => {
 
   for (const [ip, connection] of activeConnections.entries()) {
     if (connection.lastUsed < thirtyMinutesAgo) {
-      console.log(`🧹 Cleaning up inactive connection to ${ip}`);
+      console.log(`Cleaning up inactive connection to ${ip}`);
       connection.service.disconnect().catch(err =>
-        console.warn(`⚠️ Error disconnecting from ${ip}:`, err.message)
+        console.warn(`Error disconnecting from ${ip}:`, err.message)
       );
       activeConnections.delete(ip);
     }

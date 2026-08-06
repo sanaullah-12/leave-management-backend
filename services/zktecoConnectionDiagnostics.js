@@ -3,7 +3,7 @@ const net = require('net');
 
 class ZKTecoConnectionDiagnostics {
   static async diagnoseConnection(ip, port = 4370) {
-    console.log(`🔍 Diagnosing ZKTeco connection to ${ip}:${port}`);
+    console.log(`Diagnosing ZKTeco connection to ${ip}:${port}`);
     console.log('='.repeat(50));
     
     const results = {
@@ -20,22 +20,22 @@ class ZKTecoConnectionDiagnostics {
       results.networkReachable = isReachable;
       
       if (isReachable) {
-        console.log('✅ Network: Device is reachable');
+        console.log('Network: Device is reachable');
       } else {
-        console.log('❌ Network: Device is not reachable');
+        console.log('Network: Device is not reachable');
         results.issues.push('Device network connectivity failed');
       }
     } catch (error) {
-      console.log('❌ Network test failed:', error.message);
+      console.log('Network test failed:', error.message);
       results.issues.push(`Network test error: ${error.message}`);
     }
     
     // Test 2: Check if IP is in correct subnet
     console.log('\n2. Checking IP address format...');
     if (this.isValidZKTecoIP(ip)) {
-      console.log('✅ IP format: Valid ZKTeco device IP');
+      console.log('IP format: Valid ZKTeco device IP');
     } else {
-      console.log('⚠️ IP format: Non-standard IP, may need network configuration');
+      console.log('IP format: Non-standard IP, may need network configuration');
       results.issues.push('IP address may not be correctly configured');
     }
     
@@ -44,14 +44,14 @@ class ZKTecoConnectionDiagnostics {
     try {
       const portOpen = await this.testPortConnectivity(ip, port);
       if (portOpen) {
-        console.log(`✅ Port: ${port} is accessible`);
+        console.log(`Port: ${port} is accessible`);
         results.deviceResponsive = true;
       } else {
-        console.log(`❌ Port: ${port} is not accessible or filtered`);
+        console.log(`Port: ${port} is not accessible or filtered`);
         results.issues.push(`Port ${port} is not accessible`);
       }
     } catch (error) {
-      console.log('❌ Port test failed:', error.message);
+      console.log('Port test failed:', error.message);
       results.issues.push(`Port test error: ${error.message}`);
     }
     
@@ -109,21 +109,21 @@ class ZKTecoConnectionDiagnostics {
   }
   
   static generateRecommendations(results) {
-    console.log('\n🎯 DIAGNOSIS RESULTS:');
+    console.log('\n DIAGNOSIS RESULTS:');
     console.log('====================');
     
     if (results.networkReachable && results.deviceResponsive) {
       results.recommendedAction = 'Device is reachable - ZKTeco configuration issue';
-      console.log('✅ Device appears to be online and accessible');
-      console.log('💡 Recommended action: Check ZKTeco device settings and authentication');
+      console.log('Device appears to be online and accessible');
+      console.log('Recommended action: Check ZKTeco device settings and authentication');
     } else if (results.networkReachable && !results.deviceResponsive) {
       results.recommendedAction = 'Device reachable but port blocked';
-      console.log('⚠️ Device is on network but port 4370 may be blocked');
-      console.log('💡 Recommended action: Check firewall settings or device port configuration');
+      console.log('Device is on network but port 4370 may be blocked');
+      console.log('Recommended action: Check firewall settings or device port configuration');
     } else {
       results.recommendedAction = 'Device not reachable on network';
-      console.log('❌ Device is not reachable on the network');
-      console.log('💡 Recommended actions:');
+      console.log('Device is not reachable on the network');
+      console.log('Recommended actions:');
       console.log('   1. Verify device IP address (current:', results.ip, ')');
       console.log('   2. Check device power and network connection');
       console.log('   3. Verify device is on same network segment');
@@ -131,7 +131,7 @@ class ZKTecoConnectionDiagnostics {
     }
     
     if (results.issues.length > 0) {
-      console.log('\n🚨 Issues detected:');
+      console.log('\n Issues detected:');
       results.issues.forEach((issue, index) => {
         console.log(`   ${index + 1}. ${issue}`);
       });
@@ -142,7 +142,7 @@ class ZKTecoConnectionDiagnostics {
 // Enhanced ZKTeco service with better timeout handling
 class EnhancedZKTecoService {
   static async getEmployeeAttendanceWithDiagnostics(ip, employeeId, startDate, endDate, companyId) {
-    console.log(`🔧 Enhanced ZKTeco connection for ${employeeId} from ${ip}`);
+    console.log(`Enhanced ZKTeco connection for ${employeeId} from ${ip}`);
     
     try {
       // First, diagnose the connection
@@ -177,7 +177,7 @@ class EnhancedZKTecoService {
       return result;
       
     } catch (error) {
-      console.error('❌ Enhanced ZKTeco service failed:', error.message);
+      console.error('Enhanced ZKTeco service failed:', error.message);
       
       return {
         success: false,
