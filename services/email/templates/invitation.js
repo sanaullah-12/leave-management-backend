@@ -1,4 +1,4 @@
-/** Invitation email — sent when an admin invites a new employee or admin. */
+/** Invitation email - sent when an admin invites a new employee or admin. */
 
 const { baseLayout, button, detailsBox, fallbackLink, greeting, p, esc, COLORS } = require("./layout");
 
@@ -27,7 +27,7 @@ module.exports = ({ employee, inviteUrl, inviterName, role = "employee" }) => {
     </p>`;
 
   return {
-    subject: `${employee.company} — You're invited to join the team`,
+    subject: `${employee.company} - You're invited to join the team`,
     html: baseLayout({
       title: "Team Invitation",
       heading: `Welcome to ${employee.company}`,

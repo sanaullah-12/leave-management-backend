@@ -16,7 +16,7 @@
  *   node test-invite-email.js                      # diagnose only, sends nothing
  *   node test-invite-email.js --to=you@gmail.com   # diagnose, then send a real invite
  *
- * IMPORTANT — where you run this changes what it proves:
+ * IMPORTANT - where you run this changes what it proves:
  *   `railway run ...` executes on YOUR machine with Railway's variables, so it
  *   tests your network, not Railway's. To test the deployment itself, hit the
  *   equivalent endpoint: GET /api/debug/email-diagnose
@@ -26,7 +26,7 @@ const path = require("path");
 const dns = require("dns").promises;
 
 // ---------------------------------------------------------------------------
-// Env loading — mirrors server.js so this tests the same config the app uses.
+// Env loading - mirrors server.js so this tests the same config the app uses.
 // ---------------------------------------------------------------------------
 const isDeployedProduction =
   process.env.NODE_ENV === "production" ||
@@ -52,10 +52,10 @@ const results = [];
 const line = (s = "") => console.log(s);
 const stage = (n, title) => {
   line("");
-  line(`━━━ STAGE ${n}: ${title} ${"━".repeat(Math.max(0, 44 - title.length))}`);
+  line(`--- STAGE ${n}: ${title} ${"-".repeat(Math.max(0, 44 - title.length))}`);
 };
-const pass = (msg) => line(`  ✅ ${msg}`);
-const fail = (msg) => line(`  ❌ ${msg}`);
+const pass = (msg) => line(`  [PASS] ${msg}`);
+const fail = (msg) => line(`  [FAIL] ${msg}`);
 const info = (msg) => line(`  •  ${msg}`);
 const record = (name, ok, detail) => results.push({ name, ok, detail });
 
@@ -72,9 +72,9 @@ const API_HOST = "api.brevo.com";
 // ---------------------------------------------------------------------------
 (async () => {
   line("");
-  line("╔════════════════════════════════════════════════════════════╗");
-  line("║   EMAIL DIAGNOSTIC — provider: Brevo                      ║");
-  line("╚════════════════════════════════════════════════════════════╝");
+  line("=".repeat(62));
+  line("  EMAIL DIAGNOSTIC - provider: Brevo");
+  line("=".repeat(62));
   line(`  Time:        ${new Date().toISOString()}`);
   line(`  NODE_ENV:    ${process.env.NODE_ENV || "(unset)"}`);
   line(`  Railway env: ${process.env.RAILWAY_ENVIRONMENT || "(not on Railway)"}`);
@@ -101,7 +101,7 @@ const API_HOST = "api.brevo.com";
     fail(err.message);
     record("Config validation", false, err.message);
     line("");
-    line("⛔ Cannot continue without valid configuration.");
+    line("Cannot continue without valid configuration.");
     process.exit(1);
   }
 
@@ -113,25 +113,25 @@ const API_HOST = "api.brevo.com";
     addrs.slice(0, 3).forEach((a) => info(`${a.address} (IPv${a.family})`));
     record("DNS resolution", true);
   } catch (err) {
-    fail(`DNS lookup failed: ${err.code} — ${err.message}`);
+    fail(`DNS lookup failed: ${err.code} - ${err.message}`);
     record("DNS resolution", false, err.code);
   }
 
   // ---- STAGE 3 ------------------------------------------------------------
   stage(3, "Outbound HTTPS reachability");
-  info("Brevo is an HTTPS API — only port 443 is required.");
+  info("Brevo is an HTTPS API - only port 443 is required.");
   info("(This is why it is unaffected by SMTP port blocking.)");
   line("");
   const probe = await probeTcp(API_HOST, 443, 10000);
-  if (probe.ok) pass(`port 443 OPEN (${probe.ms}ms) — ${probe.reason}`);
-  else fail(`port 443 BLOCKED (${probe.ms}ms) — ${probe.reason}`);
+  if (probe.ok) pass(`port 443 OPEN (${probe.ms}ms) - ${probe.reason}`);
+  else fail(`port 443 BLOCKED (${probe.ms}ms) - ${probe.reason}`);
   record("HTTPS reachability", probe.ok, `443:${probe.ok ? "open" : "blocked"}`);
 
   // ---- STAGE 4 ------------------------------------------------------------
   stage(4, "API key validation");
   let authOk = false;
   if (!probe.ok) {
-    info("Skipped — cannot reach api.brevo.com (see stage 3).");
+    info("Skipped - cannot reach api.brevo.com (see stage 3).");
     record("API key", false, "skipped, network blocked");
   } else {
     try {
@@ -157,10 +157,10 @@ const API_HOST = "api.brevo.com";
   // ---- STAGE 5 ------------------------------------------------------------
   stage(5, "Send real invitation email");
   if (!recipient) {
-    info("Skipped — no --to= given. Re-run with --to=you@gmail.com to send.");
+    info("Skipped - no --to= given. Re-run with --to=you@gmail.com to send.");
     record("Invite send", null, "not attempted");
   } else if (!authOk) {
-    info("Skipped — stages above failed; a send would repeat the same error.");
+    info("Skipped - stages above failed; a send would repeat the same error.");
     record("Invite send", false, "skipped, prerequisites failed");
   } else {
     try {
@@ -202,17 +202,17 @@ const API_HOST = "api.brevo.com";
 
   // ---- Summary ------------------------------------------------------------
   line("");
-  line("━━━ SUMMARY ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  line("--- SUMMARY -----------------------------------------------");
   for (const r of results) {
-    const icon = r.ok === null ? "⏭️ " : r.ok ? "✅" : "❌";
-    line(`  ${icon} ${r.name.padEnd(22)} ${r.detail || ""}`);
+    const status = r.ok === null ? "SKIP" : r.ok ? "PASS" : "FAIL";
+    line(`  [${status}] ${r.name.padEnd(22)} ${r.detail || ""}`);
   }
 
   line("");
-  line("━━━ VERDICT ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  line("--- VERDICT -----------------------------------------------");
   if (!probe.ok) {
-    line("  Outbound HTTPS to api.brevo.com is blocked. This is unusual —");
-    line("  port 443 is open on virtually every host — check network egress.");
+    line("  Outbound HTTPS to api.brevo.com is blocked. This is unusual -");
+    line("  port 443 is open on virtually every host - check network egress.");
   } else if (!authOk) {
     line("  Network is fine; the API key was rejected. Set a valid");
     line("  BREVO_API_KEY (from https://app.brevo.com/settings/keys/api) in Railway.");
@@ -226,7 +226,7 @@ const API_HOST = "api.brevo.com";
   process.exit(results.some((r) => r.ok === false) ? 1 : 0);
 })().catch((err) => {
   console.error("");
-  console.error("💥 Diagnostic harness crashed:");
+  console.error("Diagnostic harness crashed:");
   console.error(err);
   process.exit(1);
 });

@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
+const phoneUtil = require("../notifications/phone");
 
 const userSchema = new mongoose.Schema(
   {
@@ -55,9 +56,23 @@ const userSchema = new mongoose.Schema(
       type: Date,
       required: [true, "Please provide join date"],
     },
+    // Stored in canonical E.164 ("+923001234567") because it is the only form
+    // every messaging provider accepts. The setter normalises on the way in so
+    // a number typed as "0300 123 4567" or "+92 300-123-4567" is stored once,
+    // one way, and the WhatsApp channel never has to guess.
     phone: {
       type: String,
       trim: true,
+      set: (value) => {
+        if (value === null || value === undefined || value === "") return value;
+        // Unparseable input is stored verbatim so the validator below can
+        // reject it with a useful message instead of a silent null.
+        return phoneUtil.normalize(value) || value;
+      },
+      validate: {
+        validator: phoneUtil.isStorable,
+        message: `Invalid phone number. ${phoneUtil.HUMAN_READABLE_RULE}`,
+      },
     },
     profilePicture: {
       type: String,
@@ -111,6 +126,12 @@ const userSchema = new mongoose.Schema(
         return new Date().getFullYear();
       },
     },
+    // Per-channel opt-out. Absent or undefined means opted in: the field was
+    // added after these accounts existed, and treating "unset" as "off" would
+    // silently mute every current user. Only an explicit `false` disables.
+    notificationPreferences: {
+      whatsapp: { type: Boolean, default: true },
+    },
   },
   {
     timestamps: true,
@@ -150,9 +171,9 @@ userSchema.pre("save", async function (next) {
       }
 
       this.employeeId = `EMP${String(nextNumber).padStart(4, "0")}`;
-      console.log("✅ Generated employee ID:", this.employeeId);
+      console.log("Generated employee ID:", this.employeeId);
     } catch (error) {
-      console.error("❌ Error generating employee ID:", error);
+      console.error("Error generating employee ID:", error);
       // Don't fail the entire save operation, let validation handle it
     }
   }

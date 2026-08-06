@@ -10,7 +10,7 @@
  * admins or only employees.
  */
 
-// ── Server → Client events ────────────────────────────────────────────────
+// -- Server → Client events ------------------------------------------------
 const EVENTS = Object.freeze({
   // Notification centre / bell / toasts
   NOTIFICATION_NEW: "notification:new",
@@ -32,19 +32,19 @@ const EVENTS = Object.freeze({
   // Live dashboard statistics (lightweight signal → client refetches once)
   STATS_UPDATE: "stats:update",
 
-  // Presence (online users) — future-ready
+  // Presence (online users) - future-ready
   PRESENCE_UPDATE: "presence:update",
 
   // Connection lifecycle helpers
   CONNECTED: "server:connected",
 });
 
-// ── Client → Server events ────────────────────────────────────────────────
+// -- Client → Server events ------------------------------------------------
 const CLIENT_EVENTS = Object.freeze({
   PRESENCE_GET: "presence:get",
 });
 
-// ── Room key builders (company-scoped) ────────────────────────────────────
+// -- Room key builders (company-scoped) ------------------------------------
 const ROOMS = Object.freeze({
   /** A single user (all their devices/tabs). */
   user: (userId) => `user:${userId}`,

@@ -25,13 +25,13 @@ const describeSecret = (secret) => {
 };
 
 const log = (msg) => console.log(`[email] ${msg}`);
-const warn = (msg) => console.warn(`[email] ⚠️  ${msg}`);
-const error = (msg) => console.error(`[email] ❌ ${msg}`);
+const warn = (msg) => console.warn(`[email] ${msg}`);
+const error = (msg) => console.error(`[email] ${msg}`);
 
 /** Render a classified failure as a readable, self-explaining block. */
 const logFailure = ({ code, command, host, port, secure, title, cause, solution, rawMessage }) => {
   console.error("");
-  console.error("[email] ❌ ──────── EMAIL DELIVERY FAILED ────────");
+  console.error("[email] -------- EMAIL DELIVERY FAILED --------");
   console.error(`[email]   Reason:     ${title}`);
   console.error(`[email]   Error code: ${code || "n/a"}`);
   console.error(`[email]   Command:    ${command || "n/a"}`);
@@ -39,7 +39,7 @@ const logFailure = ({ code, command, host, port, secure, title, cause, solution,
   console.error(`[email]   Raw:        ${rawMessage || "n/a"}`);
   console.error(`[email]   Cause:      ${cause}`);
   console.error(`[email]   Fix:        ${solution}`);
-  console.error("[email] ───────────────────────────────────────────");
+  console.error("[email] -------------------------------------------");
   console.error("");
 };
 

@@ -12,17 +12,17 @@ class AttendanceSyncService {
   initialize(zkInstances, machineConnections) {
     this.zkInstances = zkInstances;
     this.machineConnections = machineConnections;
-    console.log('📡 Attendance sync service initialized');
+    console.log('Attendance sync service initialized');
   }
 
   // Start scheduled sync (every 15 minutes)
   startScheduledSync() {
     if (this.syncInterval) {
-      console.log('📡 Attendance sync already running');
+      console.log('Attendance sync already running');
       return;
     }
 
-    console.log('📡 Starting scheduled attendance sync (every 15 minutes)');
+    console.log('Starting scheduled attendance sync (every 15 minutes)');
 
     // Sync immediately on start
     this.syncAllConnectedMachines();
@@ -38,35 +38,35 @@ class AttendanceSyncService {
     if (this.syncInterval) {
       clearInterval(this.syncInterval);
       this.syncInterval = null;
-      console.log('📡 Stopped scheduled attendance sync');
+      console.log('Stopped scheduled attendance sync');
     }
   }
 
   // Sync attendance logs from all connected machines
   async syncAllConnectedMachines() {
     if (!this.zkInstances || !this.machineConnections) {
-      console.log('⚠️ Sync service not initialized properly');
+      console.log('Sync service not initialized properly');
       return;
     }
 
     if (this.isRunning) {
-      console.log('📡 Sync already in progress, skipping...');
+      console.log('Sync already in progress, skipping...');
       return;
     }
 
     this.isRunning = true;
-    console.log('📡 Starting attendance sync for all connected machines');
+    console.log('Starting attendance sync for all connected machines');
 
     const results = [];
 
     for (const [machineIp, connection] of this.machineConnections.entries()) {
       if (connection.status === 'connected') {
         try {
-          console.log(`📡 Syncing attendance from machine ${machineIp}`);
+          console.log(`Syncing attendance from machine ${machineIp}`);
           const result = await this.syncMachineAttendance(machineIp);
           results.push({ machineIp, ...result });
         } catch (error) {
-          console.error(`❌ Failed to sync machine ${machineIp}:`, error.message);
+          console.error(`Failed to sync machine ${machineIp}:`, error.message);
           results.push({
             machineIp,
             success: false,
@@ -78,7 +78,7 @@ class AttendanceSyncService {
     }
 
     this.isRunning = false;
-    console.log('📡 Attendance sync completed for all machines:', results);
+    console.log('Attendance sync completed for all machines:', results);
     return results;
   }
 
@@ -90,7 +90,7 @@ class AttendanceSyncService {
     }
 
     try {
-      console.log(`📊 Syncing attendance for machine ${machineIp}`);
+      console.log(`Syncing attendance for machine ${machineIp}`);
 
       // For now, return a basic success response
       return {
@@ -100,7 +100,7 @@ class AttendanceSyncService {
       };
 
     } catch (error) {
-      console.error(`❌ Failed to sync attendance for machine ${machineIp}:`, error);
+      console.error(`Failed to sync attendance for machine ${machineIp}:`, error);
       throw error;
     }
   }
@@ -130,7 +130,7 @@ class AttendanceSyncService {
 
   // Manual sync trigger for specific machine
   async triggerManualSync(machineIp, companyId = null) {
-    console.log(`📡 Manual sync triggered for machine ${machineIp}`);
+    console.log(`Manual sync triggered for machine ${machineIp}`);
     return await this.syncMachineAttendance(machineIp, companyId);
   }
 }

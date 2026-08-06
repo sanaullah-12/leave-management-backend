@@ -7,14 +7,14 @@ let ZKLib, JSZKLib;
 
 try {
   ZKLib = require("zklib");
-  console.log("✅ zklib imported successfully");
+  console.log("zklib imported successfully");
 } catch (importError) {
-  console.log("⚠️ zklib import failed:", importError.message);
+  console.log("zklib import failed:", importError.message);
   try {
     ZKLib = require("node-zklib");
-    console.log("✅ node-zklib imported as fallback");
+    console.log("node-zklib imported as fallback");
   } catch (nodeZklibError) {
-    console.log("⚠️ node-zklib import also failed:", nodeZklibError.message);
+    console.log("node-zklib import also failed:", nodeZklibError.message);
   }
 }
 
@@ -30,17 +30,17 @@ const AttendanceSettingsService = require("../services/AttendanceSettingsService
 process.on("unhandledRejection", (reason, promise) => {
   if (reason && reason.code === "ERR_OUT_OF_RANGE") {
     console.error(
-      "🚫 Caught js-zklib buffer overflow (unhandled rejection): ",
+      "Caught js-zklib buffer overflow (unhandled rejection): ",
       reason.message
     );
     console.error(
-      "💡 This is a known issue with js-zklib library when handling large data"
+      "This is a known issue with js-zklib library when handling large data"
     );
     // Don't crash the process, just log the error
     return;
   }
 
-  console.error("💥 Unhandled Rejection at:", promise, "reason:", reason);
+  console.error("Unhandled Rejection at:", promise, "reason:", reason);
   // Log but don't crash for other unhandled rejections in attendance module
 });
 
@@ -51,13 +51,13 @@ process.on("uncaughtException", (error) => {
     error.stack.includes("zklib.js")
   ) {
     console.error(
-      "🚫 Caught zklib callback error (uncaught exception):",
+      "Caught zklib callback error (uncaught exception):",
       error.message
     );
     console.error(
-      "💡 This is a known issue with zklib library callback handling"
+      "This is a known issue with zklib library callback handling"
     );
-    console.error("🔄 Connection may still work despite this error");
+    console.error("Connection may still work despite this error");
     // Don't crash the process for zklib callback errors
     return;
   }
@@ -65,21 +65,21 @@ process.on("uncaughtException", (error) => {
   // For other uncaught exceptions, check if it's a critical system error
   if (error.code === "EADDRINUSE" || error.syscall === "listen") {
     console.error(
-      "🚫 Server startup error (port already in use):",
+      "Server startup error (port already in use):",
       error.message
     );
     console.error(
-      "💡 This usually means another instance is running on the same port"
+      "This usually means another instance is running on the same port"
     );
     // Don't crash the process for port conflicts - let the main server handle it
     return;
   }
 
   // For truly critical errors, log but don't throw to prevent crashes
-  console.error("💥 Uncaught Exception:", error);
+  console.error("Uncaught Exception:", error);
   console.error("Stack trace:", error.stack);
   console.error(
-    "⚠️ Process will continue running, but this error should be investigated"
+    "Process will continue running, but this error should be investigated"
   );
   // Don't throw error - just log it to prevent server crashes
 });
@@ -97,18 +97,18 @@ const testBasicTCPConnection = (ip, port) => {
     socket.setTimeout(5000); // 5 second timeout
 
     socket.connect(port, ip, () => {
-      console.log(`✅ Basic TCP connection to ${ip}:${port} successful`);
+      console.log(`Basic TCP connection to ${ip}:${port} successful`);
       socket.destroy();
       resolve(true);
     });
 
     socket.on("error", (error) => {
-      console.log(`❌ Basic TCP connection failed: ${error.message}`);
+      console.log(`Basic TCP connection failed: ${error.message}`);
       reject(error);
     });
 
     socket.on("timeout", () => {
-      console.log(`❌ Basic TCP connection timeout`);
+      console.log(`Basic TCP connection timeout`);
       socket.destroy();
       reject(new Error("Basic TCP connection timeout"));
     });
@@ -131,9 +131,15 @@ router.post(
         });
       }
 
-      // Validate IP format
+      // Validate IP format. The octet range check matters: the old regex
+      // accepted values like 999.999.999.999, which then failed much later
+      // as an opaque "device unreachable" timeout instead of a clear 400.
       const ipRegex = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/;
-      if (!ipRegex.test(ip)) {
+      const octetsInRange =
+        ipRegex.test(ip) &&
+        ip.split(".").every((octet) => parseInt(octet, 10) <= 255);
+
+      if (!octetsInRange) {
         return res.status(400).json({
           success: false,
           message: "Invalid IP address format",
@@ -141,13 +147,13 @@ router.post(
       }
 
       console.log(
-        `🔗 Attempting to connect to ZKTeco biometric machine at ${ip}:${port}`
+        `Attempting to connect to ZKTeco biometric machine at ${ip}:${port}`
       );
 
       // ============================================================
       // REAL protocol handshake (not just a local UDP socket bind).
       // Uses ZKTecoService.connect(), which sends the ZKTeco
-      // CMD_CONNECT packet and waits for the device to reply — the
+      // CMD_CONNECT packet and waits for the device to reply - the
       // SAME path employee-sync and door-unlock use. This makes all
       // three agree: "Connected" now means the device actually
       // answered, not that a UDP socket bound locally (which always
@@ -157,7 +163,7 @@ router.post(
       const probeService = new ZKTecoService(ip, parseInt(port) || 4370);
 
       try {
-        // Real handshake — throws/times out if the device does not reply.
+        // Real handshake - throws/times out if the device does not reply.
         await probeService.connect();
 
         // Confirm the device answers a real data command, not just the
@@ -171,7 +177,7 @@ router.post(
             enrolledUsers: Array.isArray(users) ? users.length : 0,
           };
         } catch (probeErr) {
-          // Handshake worked but data read failed — still a real connection.
+          // Handshake worked but data read failed - still a real connection.
           deviceInfo = {
             connection: "verified",
             library: "ZKLib",
@@ -193,7 +199,7 @@ router.post(
         });
 
         console.log(
-          `✅ Verified ZKTeco connection to ${ip}:${port} (device replied to protocol)`
+          `Verified ZKTeco connection to ${ip}:${port} (device replied to protocol)`
         );
 
         // Release the probe connection; sync/door open their own as needed.
@@ -218,9 +224,9 @@ router.post(
           },
         });
       } catch (connectError) {
-        // Real failure — device did not respond to the protocol handshake.
+        // Real failure - device did not respond to the protocol handshake.
         console.error(
-          `❌ ZKTeco connection to ${ip}:${port} failed: ${connectError.message}`
+          `ZKTeco connection to ${ip}:${port} failed: ${connectError.message}`
         );
 
         // Clear any stale "connected" record for this IP.
@@ -230,6 +236,21 @@ router.post(
           await probeService.disconnect();
         } catch (_) {
           /* best-effort */
+        }
+
+        // A missing/broken zklib install throws from inside connect() too, and
+        // previously produced a 502 whose text was indistinguishable from an
+        // unreachable device - sending people to debug their network when the
+        // real fault was a server-side dependency. Separate the two.
+        if (/librar(y|ies) not available|cannot find module/i.test(connectError.message)) {
+          return res.status(500).json({
+            success: false,
+            message:
+              "Server misconfiguration: the ZKTeco driver library is not installed on the backend. " +
+              "This is not a network problem - run `npm install` in the backend directory.",
+            error: connectError.message,
+            machine: { ip, port: parseInt(port) || 4370, status: "driver_missing" },
+          });
         }
 
         return res.status(502).json({
@@ -243,7 +264,7 @@ router.post(
       }
 
     } catch (error) {
-      console.error("❌ Connection error:", error);
+      console.error("Connection error:", error);
       res.status(500).json({
         success: false,
         message: error.message || "Internal server error",
@@ -279,7 +300,7 @@ router.get(
         machine: connection,
       });
     } catch (error) {
-      console.error("❌ Status check error:", error);
+      console.error("Status check error:", error);
       res.status(500).json({
         success: false,
         message: "Failed to check connection status",
@@ -303,7 +324,7 @@ router.get(
         count: machines.length,
       });
     } catch (error) {
-      console.error("❌ Machines list error:", error);
+      console.error("Machines list error:", error);
       res.status(500).json({
         success: false,
         message: "Failed to retrieve machine connections",
@@ -323,7 +344,7 @@ router.post(
       const port = req.body.port || 4370;
 
       console.log(
-        `🔄 Force reconnecting to ${ip}:${port} using ONLY zklib (avoiding js-zklib)`
+        `Force reconnecting to ${ip}:${port} using ONLY zklib (avoiding js-zklib)`
       );
 
       // First disconnect existing connection
@@ -334,17 +355,17 @@ router.post(
           try {
             await zkInstance.disconnect();
           } catch (disconnectError) {
-            console.warn(`⚠️ Disconnect warning: ${disconnectError.message}`);
+            console.warn(`Disconnect warning: ${disconnectError.message}`);
           }
         }
         zkInstances.delete(ip);
         machineConnections.delete(ip);
-        console.log(`🔌 Cleaned up existing connection for ${ip}`);
+        console.log(`Cleaned up existing connection for ${ip}`);
       }
 
       // Try ONLY zklib (no fallback to js-zklib)
       try {
-        console.log(`🔌 Attempting connection with zklib ONLY...`);
+        console.log(`Attempting connection with zklib ONLY...`);
 
         let zkInstance;
         // Try different constructor patterns for zklib
@@ -359,10 +380,10 @@ router.post(
             timeout: 10000,
           });
           console.log(
-            `✅ Force reconnect Pattern 1 success (inport: ${forceInport})`
+            `Force reconnect Pattern 1 success (inport: ${forceInport})`
           );
         } catch (optionsError) {
-          console.log(`⚠️ Options pattern failed: ${optionsError.message}`);
+          console.log(`Options pattern failed: ${optionsError.message}`);
           try {
             // Retry with a different local port in case the first was in use.
             const retryInport = Math.floor(Math.random() * 10000) + 40000;
@@ -373,10 +394,10 @@ router.post(
               timeout: 15000,
             });
             console.log(
-              `✅ Force reconnect Pattern 2 success (inport: ${retryInport})`
+              `Force reconnect Pattern 2 success (inport: ${retryInport})`
             );
           } catch (directError) {
-            console.log(`⚠️ Retry with new inport failed: ${directError.message}`);
+            console.log(`Retry with new inport failed: ${directError.message}`);
             {
               // Last attempt before giving up: one more distinct local port.
               const lastInport = Math.floor(Math.random() * 10000) + 40000;
@@ -387,7 +408,7 @@ router.post(
                 timeout: 20000,
               });
               console.log(
-                `✅ Force reconnect Pattern 3 success (inport: ${lastInport})`
+                `Force reconnect Pattern 3 success (inport: ${lastInport})`
               );
             }
           }
@@ -399,9 +420,9 @@ router.post(
         let deviceInfo;
         if (typeof zkInstance.getInfo === "function") {
           deviceInfo = await zkInstance.getInfo();
-          console.log(`✅ Connected to ZKTeco device via zklib:`, deviceInfo);
+          console.log(`Connected to ZKTeco device via zklib:`, deviceInfo);
         } else {
-          console.log("⚠️ getInfo method not available in this SDK instance");
+          console.log("getInfo method not available in this SDK instance");
           deviceInfo = {
             connection: "established",
             library: zkInstance.constructor.name,
@@ -449,7 +470,7 @@ router.post(
           },
         });
       } catch (zklibError) {
-        console.error(`❌ zklib-only connection failed: ${zklibError.message}`);
+        console.error(`zklib-only connection failed: ${zklibError.message}`);
         res.status(500).json({
           success: false,
           message: `Failed to connect with zklib: ${zklibError.message}`,
@@ -459,7 +480,7 @@ router.post(
         });
       }
     } catch (error) {
-      console.error("❌ Force reconnect error:", error);
+      console.error("Force reconnect error:", error);
       res.status(500).json({
         success: false,
         message: "Failed to force reconnect with zklib",
@@ -498,23 +519,23 @@ router.post(
         try {
           await zkInstance.disconnect();
           zkInstances.delete(ip);
-          console.log(`🔌 Disconnected ZKTeco SDK from machine at ${ip}`);
+          console.log(`Disconnected ZKTeco SDK from machine at ${ip}`);
         } catch (error) {
-          console.log(`⚠️ Error disconnecting ZKTeco SDK: ${error.message}`);
+          console.log(`Error disconnecting ZKTeco SDK: ${error.message}`);
         }
       }
 
       // Remove connection info
       machineConnections.delete(ip);
 
-      console.log(`🔌 Disconnected from ZKTeco biometric machine at ${ip}`);
+      console.log(`Disconnected from ZKTeco biometric machine at ${ip}`);
 
       res.json({
         success: true,
         message: "Successfully disconnected from ZKTeco biometric machine",
       });
     } catch (error) {
-      console.error("❌ Disconnect error:", error);
+      console.error("Disconnect error:", error);
       res.status(500).json({
         success: false,
         message: "Failed to disconnect from machine",
@@ -542,7 +563,7 @@ router.get(
         });
       }
 
-      console.log(`📋 Fetching real employees from ZKTeco machine at ${ip}`);
+      console.log(`Fetching real employees from ZKTeco machine at ${ip}`);
 
       // Get ZKTeco instance
       const zkInstance = zkInstances.get(ip);
@@ -556,7 +577,7 @@ router.get(
 
       try {
         console.log(
-          `✅ Connected to ZKTeco machine at ${ip} - fetching employees...`
+          `Connected to ZKTeco machine at ${ip} - fetching employees...`
         );
 
         // Use the working ZKTecoService directly
@@ -567,12 +588,12 @@ router.get(
         try {
           // Connect to device
           await zkService.connect();
-          console.log(`✅ ZKTeco service connected successfully to ${ip}`);
+          console.log(`ZKTeco service connected successfully to ${ip}`);
 
           // Get employees directly from service
           const employees = await zkService.getUsers();
           console.log(
-            `✅ Retrieved ${employees.length} employees from ZKTeco device`
+            `Retrieved ${employees.length} employees from ZKTeco device`
           );
 
           // Format employees for API response with UserID as primary identifier
@@ -620,12 +641,12 @@ router.get(
             source: "device",
           });
         } catch (serviceError) {
-          console.error(`❌ ZKTeco service failed: ${serviceError.message}`);
+          console.error(`ZKTeco service failed: ${serviceError.message}`);
           throw serviceError;
         }
       } catch (error) {
         console.error(
-          `❌ Failed to fetch employees from ZKTeco machine:`,
+          `Failed to fetch employees from ZKTeco machine:`,
           error
         );
 
@@ -760,7 +781,7 @@ router.get(
         res.status(500).json(errorResponse);
       }
     } catch (error) {
-      console.error("❌ Failed to fetch employees:", error);
+      console.error("Failed to fetch employees:", error);
       res.status(500).json({
         success: false,
         message: "Failed to fetch employees from machine",
@@ -796,14 +817,14 @@ router.get(
       }
 
       console.log(
-        `📊 Fetching real attendance for employee ${employeeId} from ZKTeco machine ${ip}`
+        `Fetching real attendance for employee ${employeeId} from ZKTeco machine ${ip}`
       );
 
       // Log the date range being requested
       if (startDateParam && endDateParam) {
-        console.log(`📅 Date range: ${startDateParam} to ${endDateParam}`);
+        console.log(`Date range: ${startDateParam} to ${endDateParam}`);
       } else {
-        console.log(`📅 Using days fallback: ${days} days`);
+        console.log(`Using days fallback: ${days} days`);
       }
 
       // Get ZKTeco instance
@@ -834,11 +855,11 @@ router.get(
         }
 
         console.log(
-          `📅 Fetching attendance: ${startDateStr} to ${endDateStr}, forceSync: ${forceSync}`
+          `Fetching attendance: ${startDateStr} to ${endDateStr}, forceSync: ${forceSync}`
         );
 
         // Use REAL ZKTeco data service (no more mock data)
-        console.log("🔧 Using REAL ZKTeco data service for attendance fetch");
+        console.log("Using REAL ZKTeco data service for attendance fetch");
         const result = await zktecoRealDataService.getEmployeeAttendanceReal(
           ip,
           employeeId,
@@ -857,7 +878,7 @@ router.get(
         res.json(result);
       } catch (error) {
         console.error(
-          `❌ Failed to fetch attendance from ZKTeco machine:`,
+          `Failed to fetch attendance from ZKTeco machine:`,
           error
         );
         res.status(500).json({
@@ -867,7 +888,7 @@ router.get(
         });
       }
     } catch (error) {
-      console.error("❌ Failed to fetch attendance records:", error);
+      console.error("Failed to fetch attendance records:", error);
       res.status(500).json({
         success: false,
         message: "Failed to fetch attendance records from machine",
@@ -887,7 +908,7 @@ router.get(
       const { startDate, endDate, days = 7 } = req.query;
 
       console.log(
-        `📊 Fetching attendance from DATABASE for employee ${employeeId}`
+        `Fetching attendance from DATABASE for employee ${employeeId}`
       );
 
       // Calculate date range
@@ -907,7 +928,7 @@ router.get(
       }
 
       console.log(
-        `📅 Fetching from database: ${startDateStr} to ${endDateStr}`
+        `Fetching from database: ${startDateStr} to ${endDateStr}`
       );
 
       // Use the new database service
@@ -927,12 +948,12 @@ router.get(
       }
 
       console.log(
-        `✅ Successfully fetched ${result.totalRecords} records from database`
+        `Successfully fetched ${result.totalRecords} records from database`
       );
 
       res.json(result);
     } catch (error) {
-      console.error("❌ Failed to fetch attendance from database:", error);
+      console.error("Failed to fetch attendance from database:", error);
       res.status(500).json({
         success: false,
         message: "Failed to fetch attendance records from database",
@@ -953,7 +974,7 @@ router.get(
       const { startDate, endDate, days = 7 } = req.query;
 
       console.log(
-        `📊 Fetching attendance summary from DATABASE for employee ${employeeId}`
+        `Fetching attendance summary from DATABASE for employee ${employeeId}`
       );
 
       // Calculate date range
@@ -973,7 +994,7 @@ router.get(
       }
 
       console.log(
-        `📅 Fetching summary from database: ${startDateStr} to ${endDateStr}`
+        `Fetching summary from database: ${startDateStr} to ${endDateStr}`
       );
 
       // Use the new database service
@@ -992,13 +1013,13 @@ router.get(
       }
 
       console.log(
-        `✅ Successfully generated summary for ${result.totalDays} days from database`
+        `Successfully generated summary for ${result.totalDays} days from database`
       );
 
       res.json(result);
     } catch (error) {
       console.error(
-        "❌ Failed to fetch attendance summary from database:",
+        "Failed to fetch attendance summary from database:",
         error
       );
       res.status(500).json({
@@ -1019,7 +1040,7 @@ router.get(
     try {
       const { startDate, endDate, days = 30 } = req.query;
 
-      console.log(`📊 Fetching attendance statistics from DATABASE`);
+      console.log(`Fetching attendance statistics from DATABASE`);
 
       // Calculate date range
       let startDateStr, endDateStr;
@@ -1038,7 +1059,7 @@ router.get(
       }
 
       console.log(
-        `📅 Fetching stats from database: ${startDateStr} to ${endDateStr}`
+        `Fetching stats from database: ${startDateStr} to ${endDateStr}`
       );
 
       // Use the new database service
@@ -1056,13 +1077,13 @@ router.get(
       }
 
       console.log(
-        `✅ Successfully generated statistics: ${result.totalRecords} records, ${result.uniqueEmployeeCount} employees`
+        `Successfully generated statistics: ${result.totalRecords} records, ${result.uniqueEmployeeCount} employees`
       );
 
       res.json(result);
     } catch (error) {
       console.error(
-        "❌ Failed to fetch attendance statistics from database:",
+        "Failed to fetch attendance statistics from database:",
         error
       );
       res.status(500).json({
@@ -1086,7 +1107,7 @@ router.get(
       const { startDate, endDate, days = 7 } = req.query;
 
       console.log(
-        `📊 Employee ${req.user.name} (${employeeId}) viewing own attendance`
+        `Employee ${req.user.name} (${employeeId}) viewing own attendance`
       );
 
       // Calculate date range
@@ -1104,7 +1125,7 @@ router.get(
         endDateStr = endDateObj.toISOString().split("T")[0];
       }
 
-      console.log(`📅 Date range: ${startDateStr} to ${endDateStr}`);
+      console.log(`Date range: ${startDateStr} to ${endDateStr}`);
 
       const result = await AttendanceDbService.getEmployeeAttendance(
         employeeId,
@@ -1161,17 +1182,17 @@ router.get(
       const { startDate, endDate, days = 7 } = req.query;
 
       console.log(
-        `📊 Fetching attendance from LOCAL DATABASE for frontend compatibility - employee ${employeeId}`
+        `Fetching attendance from LOCAL DATABASE for frontend compatibility - employee ${employeeId}`
       );
-      console.log(`📍 Database host: ${mongoose.connection.host}`);
-      console.log(`📍 Database name: ${mongoose.connection.db.databaseName}`);
+      console.log(`Database host: ${mongoose.connection.host}`);
+      console.log(`Database name: ${mongoose.connection.db.databaseName}`);
 
       // VERIFY LOCAL CONNECTION
       if (
         mongoose.connection.host !== "127.0.0.1" &&
         mongoose.connection.host !== "localhost"
       ) {
-        console.error("⚠️  WARNING: Not connected to local database!");
+        console.error("WARNING: Not connected to local database!");
         console.error("Current host:", mongoose.connection.host);
         return res.status(500).json({
           success: false,
@@ -1198,7 +1219,7 @@ router.get(
       }
 
       console.log(
-        `📅 Fetching from LOCAL database: ${startDateStr} to ${endDateStr}`
+        `Fetching from LOCAL database: ${startDateStr} to ${endDateStr}`
       );
 
       // Get effective cutoff time for late detection using settings service
@@ -1229,7 +1250,7 @@ router.get(
         );
       } catch (err) {
         console.log(
-          `⚠️ Could not fetch late time settings, using default: ${cutoffTime}`
+          `Could not fetch late time settings, using default: ${cutoffTime}`
         );
       }
 
@@ -1268,10 +1289,10 @@ router.get(
       );
 
       console.log(
-        `✅ Successfully transformed ${result.totalRecords} records from LOCAL database`
+        `Successfully transformed ${result.totalRecords} records from LOCAL database`
       );
       console.log(
-        `📍 Confirmed database: ${mongoose.connection.db.databaseName} on ${mongoose.connection.host}`
+        `Confirmed database: ${mongoose.connection.db.databaseName} on ${mongoose.connection.host}`
       );
 
       res.json({
@@ -1287,7 +1308,7 @@ router.get(
       });
     } catch (error) {
       console.error(
-        "❌ Failed to fetch attendance from LOCAL database:",
+        "Failed to fetch attendance from LOCAL database:",
         error
       );
       res.status(500).json({
@@ -1469,7 +1490,7 @@ function transformToFrontendFormat(
 
     if (dayOfWeek === 0 || dayOfWeek === 6) {
       console.log(
-        `🚫 Skipping weekend record: ${record.date} (${
+        `Skipping weekend record: ${record.date} (${
           dayOfWeek === 0 ? "Sunday" : "Saturday"
         })`
       );
@@ -1548,29 +1569,29 @@ function transformToFrontendFormat(
   const totalOriginalRecords = attendance.length;
   const weekendRecordsFiltered = totalOriginalRecords - filteredRecords.length;
 
-  console.log(`📊 WEEKEND EXCLUSION STATS:`);
-  console.log(`   📅 Date Range: ${startDate} to ${endDate}`);
-  console.log(`   📆 Total Calendar Days: ${totalCalendarDays}`);
+  console.log(`WEEKEND EXCLUSION STATS:`);
+  console.log(`Date Range: ${startDate} to ${endDate}`);
+  console.log(`Total Calendar Days: ${totalCalendarDays}`);
   console.log(
-    `   💼 Total Working Days: ${totalWorkingDays} (excluded ${
+          `Total Working Days: ${totalWorkingDays} (excluded ${
       totalCalendarDays - totalWorkingDays
     } weekend days)`
   );
-  console.log(`   📋 Original Records: ${totalOriginalRecords}`);
-  console.log(`   🚫 Weekend Records Filtered: ${weekendRecordsFiltered}`);
-  console.log(`   ✅ Working Day Records Shown: ${filteredRecords.length}`);
-  console.log(`   ✅ Present Working Days: ${presentWorkingDays}`);
-  console.log(`   ❌ Absent Working Days: ${absentWorkingDays}`);
-  console.log(`   📈 Working Days Attendance Rate: ${attendanceRate}%`);
+  console.log(`Original Records: ${totalOriginalRecords}`);
+  console.log(`Weekend Records Filtered: ${weekendRecordsFiltered}`);
+  console.log(`Working Day Records Shown: ${filteredRecords.length}`);
+  console.log(`Present Working Days: ${presentWorkingDays}`);
+  console.log(`Absent Working Days: ${absentWorkingDays}`);
+  console.log(`Working Days Attendance Rate: ${attendanceRate}%`);
   console.log(
-    `   📊 Calendar Days Attendance Rate: ${
+          `Calendar Days Attendance Rate: ${
       totalCalendarDays > 0
         ? Math.round((presentDays / totalCalendarDays) * 100)
         : 0
     }%`
   );
   console.log(
-    `   🎯 Improvement: +${
+          `Improvement: +${
       attendanceRate -
       (totalCalendarDays > 0
         ? Math.round((presentDays / totalCalendarDays) * 100)
@@ -1610,7 +1631,7 @@ router.put(
         });
       }
     } catch (error) {
-      console.error("❌ Failed to update late time settings:", error);
+      console.error("Failed to update late time settings:", error);
       res.status(500).json({
         success: false,
         message: "Failed to update late time settings",
@@ -1633,7 +1654,7 @@ router.get(
       // Try to fetch time settings from any connected ZKTeco device
       for (const [ip, zkInstance] of zkInstances.entries()) {
         try {
-          console.log(`⚙️ Fetching time settings from ZKTeco machine ${ip}`);
+          console.log(`Fetching time settings from ZKTeco machine ${ip}`);
 
           // Try to get device info which may contain work time settings (only if method exists)
           if (typeof zkInstance.getInfo === "function") {
@@ -1645,7 +1666,7 @@ router.get(
                 workTime: deviceInfo.workTime,
                 deviceInfo: deviceInfo,
               };
-              console.log(`✅ Got machine time settings:`, machineSettings);
+              console.log(`Got machine time settings:`, machineSettings);
               break;
             }
 
@@ -1658,19 +1679,19 @@ router.get(
                 deviceInfo: deviceInfo,
               };
               console.log(
-                `✅ Got machine timezone/time info:`,
+                `Got machine timezone/time info:`,
                 machineSettings
               );
               break;
             }
           } else {
             console.log(
-              `⚠️ getInfo method not available for machine ${ip} - using default settings`
+              `getInfo method not available for machine ${ip} - using default settings`
             );
           }
         } catch (error) {
           console.log(
-            `⚠️ Failed to get time settings from machine ${ip}:`,
+            `Failed to get time settings from machine ${ip}:`,
             error.message
           );
         }
@@ -1703,7 +1724,7 @@ router.get(
         });
       }
     } catch (error) {
-      console.error("❌ Failed to fetch late time settings:", error);
+      console.error("Failed to fetch late time settings:", error);
       res.status(500).json({
         success: false,
         message: "Failed to fetch late time settings",
@@ -1729,7 +1750,7 @@ router.post(
         });
       }
 
-      console.log(`📡 Manual sync triggered for machine ${ip}`);
+      console.log(`Manual sync triggered for machine ${ip}`);
 
       const result = await attendanceSyncService.triggerManualSync(
         ip,
@@ -1742,7 +1763,7 @@ router.post(
         result,
       });
     } catch (error) {
-      console.error("❌ Manual sync error:", error);
+      console.error("Manual sync error:", error);
       res.status(500).json({
         success: false,
         message: "Failed to trigger manual sync",
@@ -1766,7 +1787,7 @@ router.get(
         status,
       });
     } catch (error) {
-      console.error("❌ Sync status error:", error);
+      console.error("Sync status error:", error);
       res.status(500).json({
         success: false,
         message: "Failed to get sync status",
@@ -1783,7 +1804,7 @@ router.post(
   authorizeRoles("admin"),
   async (req, res) => {
     try {
-      console.log("📡 Manual sync triggered for all connected machines");
+      console.log("Manual sync triggered for all connected machines");
 
       const results = await attendanceSyncService.syncAllConnectedMachines();
 
@@ -1793,7 +1814,7 @@ router.post(
         results,
       });
     } catch (error) {
-      console.error("❌ Sync all machines error:", error);
+      console.error("Sync all machines error:", error);
       res.status(500).json({
         success: false,
         message: "Failed to sync all machines",
@@ -1814,7 +1835,7 @@ router.get(
       const { days = 30 } = req.query;
 
       console.log(
-        `🔴 Real-time attendance fetch for employee ${employeeId} from ${ip}`
+        `Real-time attendance fetch for employee ${employeeId} from ${ip}`
       );
 
       // Check if machine is connected
@@ -1848,7 +1869,7 @@ router.get(
         const endDateStr = endDate.toISOString().split("T")[0];
 
         console.log(
-          `🔧 Real-time fetch for ${days} days: ${startDateStr} to ${endDateStr}`
+          `Real-time fetch for ${days} days: ${startDateStr} to ${endDateStr}`
         );
 
         // Use REAL ZKTeco data service for real-time data (always force sync for real-time)
@@ -1868,7 +1889,7 @@ router.get(
           message: "Data synchronized from machine in real-time",
         });
       } catch (error) {
-        console.error(`❌ Real-time fetch failed:`, error);
+        console.error(`Real-time fetch failed:`, error);
         res.status(500).json({
           success: false,
           message: `Real-time attendance fetch failed: ${error.message}`,
@@ -1876,7 +1897,7 @@ router.get(
         });
       }
     } catch (error) {
-      console.error("❌ Real-time attendance error:", error);
+      console.error("Real-time attendance error:", error);
       res.status(500).json({
         success: false,
         message: "Failed to fetch real-time attendance data",
@@ -1894,7 +1915,7 @@ router.get(
     try {
       const { ip } = req.params;
 
-      console.log(`🔍 Running diagnostics for ZKTeco machine ${ip}`);
+      console.log(`Running diagnostics for ZKTeco machine ${ip}`);
 
       // Check if machine is connected
       const connection = machineConnections.get(ip);
@@ -1929,7 +1950,7 @@ router.get(
           recommendations: generateRecommendations(diagnostics),
         });
       } catch (error) {
-        console.error(`❌ Diagnostics failed for machine ${ip}:`, error);
+        console.error(`Diagnostics failed for machine ${ip}:`, error);
         res.status(500).json({
           success: false,
           message: `Diagnostics failed: ${error.message}`,
@@ -1937,7 +1958,7 @@ router.get(
         });
       }
     } catch (error) {
-      console.error("❌ Diagnostic endpoint error:", error);
+      console.error("Diagnostic endpoint error:", error);
       res.status(500).json({
         success: false,
         message: "Failed to run diagnostics",
@@ -1952,7 +1973,7 @@ function generateRecommendations(diagnostics) {
 
   if (!diagnostics.success) {
     recommendations.push(
-      "❌ Connection verification failed - check network connectivity and device status"
+      "Connection verification failed - check network connectivity and device status"
     );
   }
 
@@ -1961,28 +1982,28 @@ function generateRecommendations(diagnostics) {
     diagnostics.capabilities.sdkLibraryIssues &&
     diagnostics.capabilities.sdkLibraryIssues.length > 0
   ) {
-    recommendations.push("🚫 SDK Library Issues Detected:");
+    recommendations.push("SDK Library Issues Detected:");
     diagnostics.capabilities.sdkLibraryIssues.forEach((issue) => {
       recommendations.push(`   • ${issue}`);
     });
     recommendations.push(
-      "💡 Solution: Try reconnecting to prefer zklib over js-zklib"
+      "Solution: Try reconnecting to prefer zklib over js-zklib"
     );
   }
 
   if (diagnostics.capabilities.availableMethods.length === 0) {
     recommendations.push(
-      "❌ No SDK methods available - try switching between zklib and js-zklib libraries"
+      "No SDK methods available - try switching between zklib and js-zklib libraries"
     );
   } else if (diagnostics.capabilities.availableMethods.length < 3) {
     recommendations.push(
-      "⚠️ Limited SDK methods available - some functionality may be restricted"
+      "Limited SDK methods available - some functionality may be restricted"
     );
   }
 
   if (!diagnostics.capabilities.connectionStable) {
     recommendations.push(
-      "⚠️ Connection appears unstable - consider network optimization or device restart"
+      "Connection appears unstable - consider network optimization or device restart"
     );
   }
 
@@ -1991,7 +2012,7 @@ function generateRecommendations(diagnostics) {
     !diagnostics.capabilities.availableMethods.includes("getLogs")
   ) {
     recommendations.push(
-      "❌ No attendance data methods available - attendance sync will not work"
+      "No attendance data methods available - attendance sync will not work"
     );
   }
 
@@ -2000,7 +2021,7 @@ function generateRecommendations(diagnostics) {
     diagnostics.capabilities.deviceInfo.logCounts > 50000
   ) {
     recommendations.push(
-      "⚠️ Large number of logs on device - consider using smaller batch sizes"
+      "Large number of logs on device - consider using smaller batch sizes"
     );
   }
 
@@ -2010,16 +2031,16 @@ function generateRecommendations(diagnostics) {
       issue.includes("buffer overflow")
     )
   ) {
-    recommendations.push("🚫 Critical: js-zklib buffer overflow detected");
-    recommendations.push("💡 Workaround: Reconnect to try zklib instead");
+    recommendations.push("Critical: js-zklib buffer overflow detected");
+    recommendations.push("Workaround: Reconnect to try zklib instead");
     recommendations.push(
-      "💡 Alternative: Use smaller date ranges in data requests"
+      "Alternative: Use smaller date ranges in data requests"
     );
   }
 
   if (recommendations.length === 0) {
     recommendations.push(
-      "✅ All diagnostics passed - device should work optimally"
+      "All diagnostics passed - device should work optimally"
     );
   }
 
@@ -2036,7 +2057,7 @@ router.post(
       const { ip } = req.params;
       let { startDate, endDate } = req.body;
 
-      console.log(`📅 On-demand attendance fetch requested for machine ${ip}`);
+      console.log(`On-demand attendance fetch requested for machine ${ip}`);
 
       // Default to last 2 months if no dates provided
       if (!startDate || !endDate) {
@@ -2048,7 +2069,7 @@ router.post(
         startDate = twoMonthsAgo.toISOString().split("T")[0];
 
         console.log(
-          `📅 Using default date range: ${startDate} to ${endDate} (last 2 months)`
+          `Using default date range: ${startDate} to ${endDate} (last 2 months)`
         );
       }
 
@@ -2091,7 +2112,7 @@ router.post(
       }
 
       console.log(
-        `🔄 Fetching attendance data from ${ip} for period: ${startDate} to ${endDate}`
+        `Fetching attendance data from ${ip} for period: ${startDate} to ${endDate}`
       );
 
       try {
@@ -2099,14 +2120,14 @@ router.post(
         const diffTime = Math.abs(endDateObj - startDateObj);
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
-        console.log(`📊 Date range spans ${diffDays} days`);
+        console.log(`Date range spans ${diffDays} days`);
 
         let result;
 
         if (diffDays > 60) {
           // For large date ranges, use 7-day batches
           console.log(
-            `📦 Using batch processing (7-day batches) for large date range`
+            `Using batch processing (7-day batches) for large date range`
           );
           result = await zktecoRealDataService.fetchRealAttendanceLogsBatched(
             ip,
@@ -2117,7 +2138,7 @@ router.post(
           );
         } else {
           // For smaller ranges, use standard fetch
-          console.log(`📦 Using standard fetch for small date range`);
+          console.log(`Using standard fetch for small date range`);
           result = await zktecoRealDataService.fetchRealAttendanceLogs(
             ip,
             startDate,
@@ -2138,7 +2159,7 @@ router.post(
         });
       } catch (error) {
         console.error(
-          `❌ Failed to fetch attendance data from machine:`,
+          `Failed to fetch attendance data from machine:`,
           error
         );
         res.status(500).json({
@@ -2148,7 +2169,7 @@ router.post(
         });
       }
     } catch (error) {
-      console.error("❌ Attendance fetch error:", error);
+      console.error("Attendance fetch error:", error);
       res.status(500).json({
         success: false,
         message: "Failed to fetch attendance data from machine",
@@ -2175,7 +2196,7 @@ router.post(
       }
 
       console.log(
-        `🔧 Force fetching REAL data from ${ip}: ${startDate} to ${endDate}`
+        `Force fetching REAL data from ${ip}: ${startDate} to ${endDate}`
       );
 
       // Check if machine is connected
@@ -2203,7 +2224,7 @@ router.post(
           result,
         });
       } catch (error) {
-        console.error(`❌ Failed to fetch real data from machine:`, error);
+        console.error(`Failed to fetch real data from machine:`, error);
         res.status(500).json({
           success: false,
           message: `Failed to fetch real attendance data: ${error.message}`,
@@ -2211,7 +2232,7 @@ router.post(
         });
       }
     } catch (error) {
-      console.error("❌ Real data fetch error:", error);
+      console.error("Real data fetch error:", error);
       res.status(500).json({
         success: false,
         message: "Failed to fetch real attendance data from machine",
@@ -2247,10 +2268,10 @@ router.post(
     };
     const requestedAt = new Date().toISOString();
     console.log(
-      `🚪 [DOOR-UNLOCK] Requested by ${actor.email || actor.id} at ${requestedAt} → device ${ip}:${port}`
+      ` [DOOR-UNLOCK] Requested by ${actor.email || actor.id} at ${requestedAt} → device ${ip}:${port}`
     );
 
-    // Reuse the existing, working connection service — no new integration.
+    // Reuse the existing, working connection service - no new integration.
     const ZKTecoService = require("../services/zktecoService");
     const zkService = new ZKTecoService(ip, port);
 
@@ -2259,7 +2280,7 @@ router.post(
       const result = await zkService.unlockDoor(DURATION_SECONDS);
 
       console.log(
-        `✅ [DOOR-UNLOCK] SUCCESS — ${actor.email || actor.id} opened door ${ip} for ${DURATION_SECONDS}s at ${requestedAt}`
+        ` [DOOR-UNLOCK] SUCCESS - ${actor.email || actor.id} opened door ${ip} for ${DURATION_SECONDS}s at ${requestedAt}`
       );
 
       return res.status(200).json({
@@ -2272,7 +2293,7 @@ router.post(
       });
     } catch (error) {
       console.error(
-        `❌ [DOOR-UNLOCK] FAILED — requested by ${actor.email || actor.id} for device ${ip} at ${requestedAt}: ${error.message}`
+        ` [DOOR-UNLOCK] FAILED - requested by ${actor.email || actor.id} for device ${ip} at ${requestedAt}: ${error.message}`
       );
 
       return res.status(500).json({

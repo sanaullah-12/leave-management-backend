@@ -2,7 +2,7 @@
  * Template registry.
  *
  * Every template is a pure function: data in, { subject, html, text } out.
- * No template sends anything or touches the transport — that keeps them
+ * No template sends anything or touches the transport - that keeps them
  * trivially testable and swappable.
  */
 

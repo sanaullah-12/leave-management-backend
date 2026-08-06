@@ -1,7 +1,7 @@
 /**
  * Password-changed confirmation.
  *
- * Sent AFTER a successful password change — a security notification, not a
+ * Sent AFTER a successful password change - a security notification, not a
  * link. If the user didn't do it, this is how they find out.
  */
 
@@ -22,12 +22,12 @@ module.exports = ({ user, loginUrl, changedAt = new Date() }) => {
     ${button(loginUrl, "Sign In", COLORS.success)}
     <p style="margin: 22px 0 0 0; padding-top: 16px; border-top: 1px solid ${COLORS.border};
               font-family: Arial, sans-serif; font-size: 13px; color: ${COLORS.danger};">
-      <strong>Didn't do this?</strong> Contact your administrator immediately — your account
+      <strong>Didn't do this?</strong> Contact your administrator immediately - your account
       may be compromised.
     </p>`;
 
   return {
-    subject: `${user.company} — Your password was changed`,
+    subject: `${user.company} - Your password was changed`,
     html: baseLayout({
       title: "Password Changed",
       heading: "Password changed",

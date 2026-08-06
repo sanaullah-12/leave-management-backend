@@ -3,7 +3,7 @@
  * -----------------
  * Tracks which users are currently online, per company. In-memory for now
  * (single instance); the interface is deliberately small so it can be swapped
- * for a Redis-backed implementation when horizontally scaling — without any
+ * for a Redis-backed implementation when horizontally scaling - without any
  * change to callers.
  *
  * A user may have multiple sockets (tabs/devices); we reference-count them so
