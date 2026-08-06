@@ -4,7 +4,7 @@ const mongoose = require("mongoose");
 const { authenticateToken, authorizeRoles } = require("../middleware/auth");
 
 /**
- * 🏆 MACHINE-BASED EMPLOYEE PERFORMANCE DASHBOARD
+ * MACHINE-BASED EMPLOYEE PERFORMANCE DASHBOARD
  * Focus: Employees from biometric machines + their attendance data
  * Data Source: Machine employees + attendancelogs collection
  */
@@ -30,7 +30,7 @@ router.get(
       const queryEndDate = endDate || defaultEndDate;
 
       console.log(
-        `🏆 Generating machine employee leaderboard for ${ip} (${queryStartDate} to ${queryEndDate})`
+        `Generating machine employee leaderboard for ${ip} (${queryStartDate} to ${queryEndDate})`
       );
 
       // Step 1: Get employees from machine (simulated - normally would call machine API)
@@ -60,7 +60,7 @@ router.get(
       }
 
       console.log(
-        `📊 Found ${uniqueEmployees.length} employees in machine ${ip} logs`
+        `Found ${uniqueEmployees.length} employees in machine ${ip} logs`
       );
 
       // Step 2: Analyze performance for each machine employee
@@ -190,7 +190,7 @@ router.get(
           });
         } catch (error) {
           console.error(
-            `❌ Error analyzing machine employee ${employeeId}:`,
+            `Error analyzing machine employee ${employeeId}:`,
             error
           );
           // Continue with other employees
@@ -211,7 +211,7 @@ router.get(
         }));
 
       console.log(
-        `✅ Generated machine leaderboard with ${rankedLeaderboard.length} employees`
+        `Generated machine leaderboard with ${rankedLeaderboard.length} employees`
       );
 
       res.json({
@@ -230,7 +230,7 @@ router.get(
       });
     } catch (error) {
       console.error(
-        "❌ Machine employee leaderboard generation failed:",
+        "Machine employee leaderboard generation failed:",
         error
       );
       res.status(500).json({
@@ -264,7 +264,7 @@ router.get(
       const queryEndDate = endDate || defaultEndDate;
 
       console.log(
-        `📊 Generating machine analytics for ${ip} (${queryStartDate} to ${queryEndDate})`
+        `Generating machine analytics for ${ip} (${queryStartDate} to ${queryEndDate})`
       );
 
       const attendanceCollection =
@@ -372,7 +372,7 @@ router.get(
         analytics.statistics.uniqueEmployees?.length || 0;
 
       console.log(
-        `✅ Generated machine analytics: ${analytics.statistics.totalRecords} records, ${analytics.statistics.uniqueEmployeeCount} employees`
+        `Generated machine analytics: ${analytics.statistics.totalRecords} records, ${analytics.statistics.uniqueEmployeeCount} employees`
       );
 
       res.json({
@@ -381,7 +381,7 @@ router.get(
         generatedAt: new Date().toISOString(),
       });
     } catch (error) {
-      console.error("❌ Machine analytics generation failed:", error);
+      console.error("Machine analytics generation failed:", error);
       res.status(500).json({
         success: false,
         message: "Failed to generate machine analytics",
@@ -402,7 +402,7 @@ router.get(
       const { ip } = req.params;
       const { startDate, endDate } = req.query;
 
-      console.log(`🎯 Generating complete machine dashboard for ${ip}`);
+      console.log(`Generating complete machine dashboard for ${ip}`);
 
       // For now, we'll create a simplified dashboard without internal API calls
       // Get basic machine data directly
@@ -468,7 +468,7 @@ router.get(
         },
       };
 
-      console.log(`✅ Generated complete machine dashboard for ${ip}`);
+      console.log(`Generated complete machine dashboard for ${ip}`);
 
       res.json({
         success: true,
@@ -476,7 +476,7 @@ router.get(
         generatedAt: new Date().toISOString(),
       });
     } catch (error) {
-      console.error("❌ Machine dashboard generation failed:", error);
+      console.error("Machine dashboard generation failed:", error);
       res.status(500).json({
         success: false,
         message: "Failed to generate machine dashboard",

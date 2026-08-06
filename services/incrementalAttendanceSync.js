@@ -14,27 +14,30 @@ class IncrementalAttendanceSyncService {
   initialize(zkInstances, machineConnections) {
     this.zkInstances = zkInstances;
     this.machineConnections = machineConnections;
-    console.log("📡 Incremental Attendance Sync Service initialized");
+    console.log("Incremental Attendance Sync Service initialized");
   }
 
   // Start scheduled incremental sync (every 6 hours)
   startScheduledSync() {
     if (this.syncInterval) {
-      console.log("📡 Incremental attendance sync already running");
+      console.log("Incremental attendance sync already running");
       return;
     }
 
     console.log(
-      "📡 Starting scheduled incremental attendance sync (every 6 hours)"
+      "Starting scheduled incremental attendance sync (every 6 hours)",
     );
 
     // Sync immediately on start (last 24 hours)
     this.syncAllConnectedMachinesIncremental();
 
     // Schedule regular syncs every 6 hours
-    this.syncInterval = setInterval(() => {
-      this.syncAllConnectedMachinesIncremental();
-    }, 6 * 60 * 60 * 1000); // 6 hours
+    this.syncInterval = setInterval(
+      () => {
+        this.syncAllConnectedMachinesIncremental();
+      },
+      6 * 60 * 60 * 1000,
+    ); // 6 hours
   }
 
   // Stop scheduled sync
@@ -42,25 +45,25 @@ class IncrementalAttendanceSyncService {
     if (this.syncInterval) {
       clearInterval(this.syncInterval);
       this.syncInterval = null;
-      console.log("📡 Stopped scheduled incremental attendance sync");
+      console.log("Stopped scheduled incremental attendance sync");
     }
   }
 
   // Sync attendance logs from all connected machines incrementally
   async syncAllConnectedMachinesIncremental() {
     if (!this.zkInstances || !this.machineConnections) {
-      console.log("⚠️ Incremental sync service not initialized properly");
+      console.log("Incremental sync service not initialized properly");
       return [];
     }
 
     if (this.isRunning) {
-      console.log("📡 Incremental sync already in progress, skipping...");
+      console.log("Incremental sync already in progress, skipping...");
       return [];
     }
 
     this.isRunning = true;
     console.log(
-      "📡 Starting incremental attendance sync for all connected machines"
+      "Starting incremental attendance sync for all connected machines",
     );
 
     const results = [];
@@ -69,14 +72,14 @@ class IncrementalAttendanceSyncService {
       if (connection.status === "connected") {
         try {
           console.log(
-            `📡 Incremental syncing attendance from machine ${machineIp}`
+            `Incremental syncing attendance from machine ${machineIp}`,
           );
           const result = await this.syncMachineAttendanceIncremental(machineIp);
           results.push({ machineIp, ...result });
         } catch (error) {
           console.error(
-            `❌ Failed to incrementally sync machine ${machineIp}:`,
-            error.message
+            `Failed to incrementally sync machine ${machineIp}:`,
+            error.message,
           );
           results.push({
             machineIp,
@@ -91,8 +94,8 @@ class IncrementalAttendanceSyncService {
 
     this.isRunning = false;
     console.log(
-      "📡 Incremental attendance sync completed for all machines:",
-      results
+      "Incremental attendance sync completed for all machines:",
+      results,
     );
     return results;
   }
@@ -101,7 +104,7 @@ class IncrementalAttendanceSyncService {
   async syncMachineAttendanceIncremental(
     machineIp,
     companyId = null,
-    forceDays = null
+    forceDays = null,
   ) {
     const zkInstance = this.zkInstances.get(machineIp);
     if (!zkInstance) {
@@ -109,7 +112,7 @@ class IncrementalAttendanceSyncService {
     }
 
     try {
-      console.log(`📊 Starting incremental sync for machine ${machineIp}`);
+      console.log(`Starting incremental sync for machine ${machineIp}`);
 
       // Determine sync period
       const lastSync = this.lastSyncMap.get(machineIp);
@@ -120,27 +123,27 @@ class IncrementalAttendanceSyncService {
         syncFromDate = new Date();
         syncFromDate.setDate(syncFromDate.getDate() - forceDays);
         console.log(
-          `🔄 Force syncing last ${forceDays} days from ${
+          `Force syncing last ${forceDays} days from ${
             syncFromDate.toISOString().split("T")[0]
-          }`
+          }`,
         );
       } else if (lastSync) {
         // Sync from last successful sync date (with 1-day overlap for safety)
         syncFromDate = new Date(lastSync);
         syncFromDate.setDate(syncFromDate.getDate() - 1);
         console.log(
-          `🔄 Incremental sync from last sync date: ${
+          `Incremental sync from last sync date: ${
             syncFromDate.toISOString().split("T")[0]
-          }`
+          }`,
         );
       } else {
         // First sync - get last 7 days
         syncFromDate = new Date();
         syncFromDate.setDate(syncFromDate.getDate() - 7);
         console.log(
-          `🔄 First sync - getting last 7 days from ${
+          `First sync - getting last 7 days from ${
             syncFromDate.toISOString().split("T")[0]
-          }`
+          }`,
         );
       }
 
@@ -148,20 +151,18 @@ class IncrementalAttendanceSyncService {
       const startDateStr = syncFromDate.toISOString().split("T")[0];
       const endDateStr = today.toISOString().split("T")[0];
 
-      console.log(
-        `📅 Syncing attendance from ${startDateStr} to ${endDateStr}`
-      );
+      console.log(`Syncing attendance from ${startDateStr} to ${endDateStr}`);
 
       // Fetch attendance logs from ZKTeco device with shorter timeout
       const attendanceLogs = await this.fetchAttendanceFromDevice(
         zkInstance,
         machineIp,
         startDateStr,
-        endDateStr
+        endDateStr,
       );
 
       if (attendanceLogs.length === 0) {
-        console.log(`ℹ️ No new attendance logs found for machine ${machineIp}`);
+        console.log(`No new attendance logs found for machine ${machineIp}`);
         this.lastSyncMap.set(machineIp, new Date());
         return {
           success: true,
@@ -176,14 +177,14 @@ class IncrementalAttendanceSyncService {
       const storedCount = await this.storeAttendanceLogsInDatabase(
         attendanceLogs,
         machineIp,
-        companyId
+        companyId,
       );
 
       // Update last sync timestamp
       this.lastSyncMap.set(machineIp, new Date());
 
       console.log(
-        `✅ Successfully synced ${storedCount} attendance logs for machine ${machineIp}`
+        `Successfully synced ${storedCount} attendance logs for machine ${machineIp}`,
       );
 
       return {
@@ -196,8 +197,8 @@ class IncrementalAttendanceSyncService {
       };
     } catch (error) {
       console.error(
-        `❌ Failed to incrementally sync machine ${machineIp}:`,
-        error
+        `Failed to incrementally sync machine ${machineIp}:`,
+        error,
       );
       throw error;
     }
@@ -207,7 +208,7 @@ class IncrementalAttendanceSyncService {
   async fetchAttendanceFromDevice(zkInstance, machineIp, startDate, endDate) {
     try {
       console.log(
-        `🔧 Fetching attendance from device ${machineIp} (${startDate} to ${endDate})`
+        `Fetching attendance from device ${machineIp} (${startDate} to ${endDate})`,
       );
 
       // Use shorter timeout for incremental sync
@@ -215,8 +216,8 @@ class IncrementalAttendanceSyncService {
         setTimeout(
           () =>
             reject(new Error("Device fetch timeout (60s) - incremental sync")),
-          60000
-        )
+          60000,
+        ),
       );
 
       const fetchPromise = new Promise((resolve, reject) => {
@@ -247,19 +248,16 @@ class IncrementalAttendanceSyncService {
       });
 
       console.log(
-        `📊 Device returned ${rawLogs.length} total logs, ${filteredLogs.length} in date range`
+        `Device returned ${rawLogs.length} total logs, ${filteredLogs.length} in date range`,
       );
       return filteredLogs;
     } catch (error) {
-      console.error(
-        `❌ Failed to fetch from device ${machineIp}:`,
-        error.message
-      );
+      console.error(`Failed to fetch from device ${machineIp}:`, error.message);
 
       if (error.message.includes("timeout")) {
         // For timeout, try to continue with empty result rather than fail
         console.log(
-          `⚠️ Device timeout - continuing with empty result for incremental sync`
+          `Device timeout - continuing with empty result for incremental sync`,
         );
         return [];
       }
@@ -272,7 +270,7 @@ class IncrementalAttendanceSyncService {
   async storeAttendanceLogsInDatabase(attendanceLogs, machineIp, companyId) {
     try {
       console.log(
-        `💾 Storing ${attendanceLogs.length} attendance logs in database`
+        `Storing ${attendanceLogs.length} attendance logs in database`,
       );
 
       let storedCount = 0;
@@ -285,7 +283,7 @@ class IncrementalAttendanceSyncService {
           try {
             // Create unique key to prevent duplicates
             const uniqueKey = `${machineIp}_${log.uid || log.userId}_${new Date(
-              log.timestamp
+              log.timestamp,
             ).getTime()}`;
 
             // Check if log already exists
@@ -317,29 +315,26 @@ class IncrementalAttendanceSyncService {
               // Duplicate key error - skip
               continue;
             }
-            console.error(
-              `❌ Failed to save attendance log:`,
-              saveError.message
-            );
+            console.error(`Failed to save attendance log:`, saveError.message);
           }
         }
 
         // Log progress for large batches
         if (attendanceLogs.length > batchSize) {
           console.log(
-            `💾 Processed batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(
-              attendanceLogs.length / batchSize
-            )}`
+            `Processed batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(
+              attendanceLogs.length / batchSize,
+            )}`,
           );
         }
       }
 
       console.log(
-        `✅ Successfully stored ${storedCount} new attendance logs in database`
+        `Successfully stored ${storedCount} new attendance logs in database`,
       );
       return storedCount;
     } catch (error) {
-      console.error(`❌ Failed to store attendance logs:`, error);
+      console.error(`Failed to store attendance logs:`, error);
       throw error;
     }
   }
@@ -379,11 +374,11 @@ class IncrementalAttendanceSyncService {
     employeeId,
     startDate,
     endDate,
-    companyId
+    companyId,
   ) {
     try {
       console.log(
-        `📊 Fetching attendance from database for employee ${employeeId} (${startDate} to ${endDate})`
+        `Fetching attendance from database for employee ${employeeId} (${startDate} to ${endDate})`,
       );
 
       const query = {
@@ -408,9 +403,7 @@ class IncrementalAttendanceSyncService {
         .sort({ timestamp: 1 })
         .lean();
 
-      console.log(
-        `✅ Found ${attendanceLogs.length} attendance logs in database`
-      );
+      console.log(`Found ${attendanceLogs.length} attendance logs in database`);
 
       return {
         success: true,
@@ -422,7 +415,7 @@ class IncrementalAttendanceSyncService {
         fetchedAt: new Date(),
       };
     } catch (error) {
-      console.error(`❌ Failed to fetch attendance from database:`, error);
+      console.error(`Failed to fetch attendance from database:`, error);
       return {
         success: false,
         error: error.message,
@@ -435,7 +428,7 @@ class IncrementalAttendanceSyncService {
   async forceSyncDateRange(machineIp, startDate, endDate, companyId) {
     try {
       console.log(
-        `🔄 Force syncing date range ${startDate} to ${endDate} for machine ${machineIp}`
+        `Force syncing date range ${startDate} to ${endDate} for machine ${machineIp}`,
       );
 
       const zkInstance = this.zkInstances.get(machineIp);
@@ -448,21 +441,21 @@ class IncrementalAttendanceSyncService {
       const end = new Date(endDate);
       const diffDays = Math.ceil((end - start) / (1000 * 60 * 60 * 24));
 
-      console.log(`📅 Force syncing ${diffDays} days of data`);
+      console.log(`Force syncing ${diffDays} days of data`);
 
       // Fetch attendance logs from device
       const attendanceLogs = await this.fetchAttendanceFromDevice(
         zkInstance,
         machineIp,
         startDate,
-        endDate
+        endDate,
       );
 
       // Store in database
       const storedCount = await this.storeAttendanceLogsInDatabase(
         attendanceLogs,
         machineIp,
-        companyId
+        companyId,
       );
 
       // Update last sync timestamp
@@ -477,7 +470,7 @@ class IncrementalAttendanceSyncService {
         message: `Force synced ${storedCount} attendance logs for ${diffDays} days`,
       };
     } catch (error) {
-      console.error(`❌ Force sync failed:`, error);
+      console.error(`Force sync failed:`, error);
       throw error;
     }
   }
@@ -515,7 +508,7 @@ class IncrementalAttendanceSyncService {
     if (date instanceof Date && !isNaN(date.getTime())) {
       return date;
     }
-    if (typeof date === 'string' || typeof date === 'number') {
+    if (typeof date === "string" || typeof date === "number") {
       const parsedDate = new Date(date);
       if (!isNaN(parsedDate.getTime())) {
         return parsedDate;
@@ -537,13 +530,13 @@ class IncrementalAttendanceSyncService {
   async triggerManualSync(machineIp, companyId, days = 7) {
     try {
       console.log(
-        `🔄 Manual sync triggered for machine ${machineIp} (last ${days} days)`
+        `Manual sync triggered for machine ${machineIp} (last ${days} days)`,
       );
 
       const result = await this.syncMachineAttendanceIncremental(
         machineIp,
         companyId,
-        days
+        days,
       );
 
       return {
@@ -552,7 +545,7 @@ class IncrementalAttendanceSyncService {
         result,
       };
     } catch (error) {
-      console.error(`❌ Manual sync failed for machine ${machineIp}:`, error);
+      console.error(`Manual sync failed for machine ${machineIp}:`, error);
       throw error;
     }
   }

@@ -1,7 +1,7 @@
 const mongoose = require("mongoose");
 
 /**
- * Announcement — a company notice-board post authored by HR/admin and visible
+ * Announcement - a company notice-board post authored by HR/admin and visible
  * to the whole company (or admins only). Tenant-scoped by `company`, mirroring
  * the Leave / EmployeeVoice models. Tracks read receipts and lightweight emoji
  * reactions so the board feels alive.
@@ -65,7 +65,7 @@ const announcementSchema = new mongoose.Schema(
       default: "all",
     },
     pinned: { type: Boolean, default: false },
-    // Optional auto-expiry — expired notices are hidden from the board.
+    // Optional auto-expiry - expired notices are hidden from the board.
     expiresAt: { type: Date },
     reads: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     reactions: [reactionSchema],
@@ -73,7 +73,7 @@ const announcementSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Query performance — board is read pinned-first, newest-first, per company.
+// Query performance - board is read pinned-first, newest-first, per company.
 announcementSchema.index({ company: 1, pinned: -1, createdAt: -1 });
 announcementSchema.index({ company: 1, category: 1 });
 

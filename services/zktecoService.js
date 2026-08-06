@@ -3,29 +3,25 @@ let ZKLib, JSZKLib;
 
 try {
   ZKLib = require("zklib");
-  console.log("✅ zklib imported successfully for ZKTecoService");
+  console.log("zklib imported successfully for ZKTecoService");
 } catch (importError) {
-  console.log("⚠️ zklib import failed for ZKTecoService:", importError.message);
+  console.log("zklib import failed for ZKTecoService:", importError.message);
   try {
     ZKLib = require("node-zklib");
-    console.log("✅ node-zklib imported as fallback for ZKTecoService");
+    console.log("node-zklib imported as fallback for ZKTecoService");
   } catch (nodeZklibError) {
     console.log(
-      "⚠️ node-zklib import also failed for ZKTecoService:",
-      nodeZklibError.message
+      "node-zklib import also failed for ZKTecoService:",
+      nodeZklibError.message,
     );
   }
 }
 
-try {
-  JSZKLib = require("js-zklib");
-  console.log("✅ js-zklib imported successfully for ZKTecoService");
-} catch (jsImportError) {
-  console.log(
-    "⚠️ js-zklib import failed for ZKTecoService:",
-    jsImportError.message
-  );
-}
+// NOTE: `js-zklib` is not a dependency of this project and was never installed -
+// the previous require() here only ever threw, printing an alarming require-stack
+// on every startup that looked like a device connection failure. JSZKLib is not
+// used anywhere in this file, so it stays null.
+JSZKLib = null;
 
 class ZKTecoService {
   constructor(ip, port = 4370) {
@@ -42,17 +38,17 @@ class ZKTecoService {
 
   async connect() {
     try {
-      console.log(`🔌 Connecting to ZKTeco device at ${this.ip}:${this.port}`);
+      console.log(`Connecting to ZKTeco device at ${this.ip}:${this.port}`);
 
       if (!ZKLib) {
         throw new Error(
-          "ZKTeco libraries not available. Please ensure zklib is properly installed."
+          "ZKTeco libraries not available. Please ensure zklib is properly installed.",
         );
       }
 
       // Try different constructor patterns with enhanced error handling
       const randomInport = this.generateRandomInport();
-      console.log(`🔌 Using random inport: ${randomInport} to avoid conflicts`);
+      console.log(`Using random inport: ${randomInport} to avoid conflicts`);
 
       try {
         // Pattern 1: Options object with correct parameter names
@@ -63,11 +59,11 @@ class ZKTecoService {
           timeout: 10000,
         });
         console.log(
-          `✅ Options object constructor success (inport: ${randomInport})`
+          `Options object constructor success (inport: ${randomInport})`,
         );
       } catch (optionsError) {
         console.log(
-          `⚠️ Options constructor (inport) failed: ${optionsError.message}`
+          `Options constructor (inport) failed: ${optionsError.message}`,
         );
 
         try {
@@ -80,31 +76,31 @@ class ZKTecoService {
             timeout: 10000,
           });
           console.log(
-            `✅ Alternative options constructor success (inport: ${fallbackInport})`
+            `Alternative options constructor success (inport: ${fallbackInport})`,
           );
         } catch (altOptionsError) {
           console.log(
-            `⚠️ Alternative options constructor failed: ${altOptionsError.message}`
+            `Alternative options constructor failed: ${altOptionsError.message}`,
           );
 
           try {
             // Pattern 3: Simple constructor (no inport)
             this.zkInstance = new ZKLib(this.ip, parseInt(this.port));
-            console.log(`✅ Simple constructor success`);
+            console.log(`Simple constructor success`);
           } catch (simpleError) {
-            console.log(`⚠️ Simple constructor failed: ${simpleError.message}`);
+            console.log(`Simple constructor failed: ${simpleError.message}`);
 
             try {
               // Pattern 4: With timeout parameter (last resort)
               this.zkInstance = new ZKLib(this.ip, parseInt(this.port), 15000);
-              console.log(`✅ Constructor with timeout success`);
+              console.log(`Constructor with timeout success`);
             } catch (timeoutError) {
-              console.log(`⚠️ All zklib constructor patterns failed`);
+              console.log(`All zklib constructor patterns failed`);
               console.log(
-                `🔧 Error details: ${optionsError.message} | ${altOptionsError.message} | ${simpleError.message} | ${timeoutError.message}`
+                `Error details: ${optionsError.message} | ${altOptionsError.message} | ${simpleError.message} | ${timeoutError.message}`,
               );
               throw new Error(
-                `ZKTeco library connection failed - all constructor patterns exhausted. This may be due to port conflicts or device connectivity issues.`
+                `ZKTeco library connection failed - all constructor patterns exhausted. This may be due to port conflicts or device connectivity issues.`,
               );
             }
           }
@@ -118,7 +114,7 @@ class ZKTecoService {
           if (typeof this.zkInstance.connect === "function") {
             this.zkInstance.connect((err) => {
               if (err) {
-                reject(new Error(`Connection failed: ${err}`));
+                reject(err instanceof Error ? err : new Error(String(err)));
               } else {
                 resolve("Connected successfully");
               }
@@ -126,7 +122,7 @@ class ZKTecoService {
           } else if (typeof this.zkInstance.createConnection === "function") {
             this.zkInstance.createConnection((err) => {
               if (err) {
-                reject(new Error(`Connection failed: ${err}`));
+                reject(err instanceof Error ? err : new Error(String(err)));
               } else {
                 resolve("Connected successfully");
               }
@@ -168,8 +164,8 @@ class ZKTecoService {
           } catch (noCallbackError) {
             reject(
               new Error(
-                `Connection failed: ${syncError.message} | ${noCallbackError.message}`
-              )
+                `Connection failed: ${syncError.message} | ${noCallbackError.message}`,
+              ),
             );
           }
         }
@@ -180,17 +176,17 @@ class ZKTecoService {
           () =>
             reject(
               new Error(
-                "Connection timeout (20s) - Device may be unreachable or network issue"
-              )
+                "Connection timeout (20s) - Device may be unreachable or network issue",
+              ),
             ),
-          20000
-        )
+          20000,
+        ),
       );
 
       await Promise.race([connectPromise, timeoutPromise]);
 
       this.isConnected = true;
-      console.log(`✅ Connected to ZKTeco device at ${this.ip}:${this.port}`);
+      console.log(`Connected to ZKTeco device at ${this.ip}:${this.port}`);
 
       // Try to get device info if available
       let deviceInfo = null;
@@ -198,20 +194,20 @@ class ZKTecoService {
         try {
           const infoPromise = this.zkInstance.getInfo();
           const infoTimeoutPromise = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error("getInfo timeout (8s)")), 8000)
+            setTimeout(() => reject(new Error("getInfo timeout (8s)")), 8000),
           );
 
           deviceInfo = await Promise.race([infoPromise, infoTimeoutPromise]);
-          console.log(`✅ Device info retrieved:`, deviceInfo);
+          console.log(`Device info retrieved:`, deviceInfo);
         } catch (infoError) {
-          console.log(`⚠️ Could not get device info: ${infoError.message}`);
+          console.log(`Could not get device info: ${infoError.message}`);
           deviceInfo = {
             connection: "established",
             note: `getInfo failed: ${infoError.message}`,
           };
         }
       } else {
-        console.log("⚠️ getInfo method not available");
+        console.log("getInfo method not available");
         deviceInfo = {
           connection: "established",
           note: "getInfo method not available",
@@ -225,25 +221,30 @@ class ZKTecoService {
         connectedAt: new Date(),
       };
     } catch (error) {
-      console.error(`❌ Failed to connect to ZKTeco device: ${error.message}`);
+      console.error(`Failed to connect to ZKTeco device: ${error.message}`);
       this.isConnected = false;
 
-      // Enhanced error reporting
-      if (error.message.includes("timeout")) {
+      // Enhanced error reporting.
+      // NOTE: match case-insensitively - zklib emits "Timeout error" (capital T),
+      // which a lowercase includes("timeout") silently missed, suppressing the
+      // most useful diagnostic below and falling through to the generic branch.
+      const reason = error.message.toLowerCase();
+
+      if (reason.includes("timeout")) {
         throw new Error(
-          `Connection failed: Device at ${this.ip}:${this.port} is not responding. Please check device power, network connection, and IP address.`
+          `Connection failed: Device at ${this.ip}:${this.port} is not responding. Please check device power, network connection, and IP address.`,
         );
-      } else if (error.message.includes("EADDRINUSE")) {
+      } else if (reason.includes("eaddrinuse")) {
         throw new Error(
-          `Connection failed: Port conflict detected. Please restart the application or check for other ZKTeco connections.`
+          `Connection failed: Port conflict detected. Please restart the application or check for other ZKTeco connections.`,
         );
-      } else if (error.message.includes("ECONNREFUSED")) {
+      } else if (reason.includes("econnrefused")) {
         throw new Error(
-          `Connection failed: Device at ${this.ip}:${this.port} refused connection. Check device IP and port settings.`
+          `Connection failed: Device at ${this.ip}:${this.port} refused connection. Check device IP and port settings.`,
         );
       } else {
         throw new Error(
-          `Connection failed: ${error.message}. Please verify device connectivity and configuration.`
+          `Connection failed: ${error.message}. Please verify device connectivity and configuration.`,
         );
       }
     }
@@ -264,10 +265,10 @@ class ZKTecoService {
         this.isConnected = false;
         this.zkInstance = null;
         console.log(
-          `🔌 Disconnected from ZKTeco device at ${this.ip}:${this.port}`
+          `Disconnected from ZKTeco device at ${this.ip}:${this.port}`,
         );
       } catch (error) {
-        console.warn(`⚠️ Disconnect warning: ${error.message}`);
+        console.warn(`Disconnect warning: ${error.message}`);
         this.isConnected = false;
         this.zkInstance = null;
       }
@@ -283,11 +284,11 @@ class ZKTecoService {
       // Check if getUser method is available (callback-style)
       if (typeof this.zkInstance.getUser !== "function") {
         throw new Error(
-          "getUser method not available - device may not support user management via SDK"
+          "getUser method not available - device may not support user management via SDK",
         );
       }
 
-      console.log(`📋 Fetching users from ZKTeco device...`);
+      console.log(`Fetching users from ZKTeco device...`);
 
       // Disable device first to prevent interference
       if (typeof this.zkInstance.disableDevice === "function") {
@@ -295,8 +296,8 @@ class ZKTecoService {
           this.zkInstance.disableDevice((err) => {
             if (err) {
               console.log(
-                "⚠️ Could not disable device, continuing anyway:",
-                err.message || err
+                "Could not disable device, continuing anyway:",
+                err.message || err,
               );
             }
             resolve(); // Continue regardless of disable result
@@ -326,16 +327,16 @@ class ZKTecoService {
         await new Promise((resolve) => {
           this.zkInstance.enableDevice((err) => {
             if (err) {
-              console.log("⚠️ Could not re-enable device:", err.message || err);
+              console.log("Could not re-enable device:", err.message || err);
             }
             resolve(); // Continue regardless
           });
         });
       }
       console.log(
-        `✅ Retrieved users data:`,
+        `Retrieved users data:`,
         typeof usersData,
-        Array.isArray(usersData) ? usersData.length : "unknown"
+        Array.isArray(usersData) ? usersData.length : "unknown",
       );
 
       // Handle different response formats
@@ -347,9 +348,7 @@ class ZKTecoService {
           usersData.users ||
           usersData.result || [usersData];
       } else {
-        console.log(
-          "⚠️ Unexpected users response format, returning empty array"
-        );
+        console.log("Unexpected users response format, returning empty array");
         userArray = [];
       }
 
@@ -372,11 +371,11 @@ class ZKTecoService {
       }));
 
       console.log(
-        `✅ Processed ${formattedUsers.length} users from ZKTeco device`
+        `Processed ${formattedUsers.length} users from ZKTeco device`,
       );
       return formattedUsers;
     } catch (error) {
-      console.error(`❌ Failed to get users: ${error.message}`);
+      console.error(`Failed to get users: ${error.message}`);
       throw error;
     }
   }
@@ -390,11 +389,11 @@ class ZKTecoService {
       // Check if getAttendance method is available (callback-style)
       if (typeof this.zkInstance.getAttendance !== "function") {
         throw new Error(
-          "getAttendance method not available - device may not support attendance log retrieval via SDK"
+          "getAttendance method not available - device may not support attendance log retrieval via SDK",
         );
       }
 
-      console.log(`📊 Fetching attendance logs from ZKTeco device...`);
+      console.log(`Fetching attendance logs from ZKTeco device...`);
 
       // Disable device first to prevent interference
       if (typeof this.zkInstance.disableDevice === "function") {
@@ -402,8 +401,8 @@ class ZKTecoService {
           this.zkInstance.disableDevice((err) => {
             if (err) {
               console.log(
-                "⚠️ Could not disable device, continuing anyway:",
-                err.message || err
+                "Could not disable device, continuing anyway:",
+                err.message || err,
               );
             }
             resolve(); // Continue regardless
@@ -420,7 +419,7 @@ class ZKTecoService {
           clearTimeout(timeout);
           if (err) {
             reject(
-              new Error(`Failed to get attendance logs: ${err.message || err}`)
+              new Error(`Failed to get attendance logs: ${err.message || err}`),
             );
           } else {
             resolve(attendanceData);
@@ -435,16 +434,16 @@ class ZKTecoService {
         await new Promise((resolve) => {
           this.zkInstance.enableDevice((err) => {
             if (err) {
-              console.log("⚠️ Could not re-enable device:", err.message || err);
+              console.log("Could not re-enable device:", err.message || err);
             }
             resolve(); // Continue regardless
           });
         });
       }
       console.log(
-        `✅ Retrieved attendance data:`,
+        `Retrieved attendance data:`,
         typeof attendanceData,
-        Array.isArray(attendanceData) ? attendanceData.length : "unknown"
+        Array.isArray(attendanceData) ? attendanceData.length : "unknown",
       );
 
       // Handle different response formats
@@ -458,7 +457,7 @@ class ZKTecoService {
           attendanceData.result || [attendanceData];
       } else {
         console.log(
-          "⚠️ Unexpected attendance response format, returning empty array"
+          "Unexpected attendance response format, returning empty array",
         );
         logsArray = [];
       }
@@ -486,11 +485,11 @@ class ZKTecoService {
       }));
 
       console.log(
-        `✅ Processed ${formattedLogs.length} attendance logs from ZKTeco device`
+        `Processed ${formattedLogs.length} attendance logs from ZKTeco device`,
       );
       return formattedLogs;
     } catch (error) {
-      console.error(`❌ Failed to get attendance logs: ${error.message}`);
+      console.error(`Failed to get attendance logs: ${error.message}`);
       throw error;
     }
   }
@@ -511,7 +510,7 @@ class ZKTecoService {
         throw new Error("getAttendance method not available");
       }
 
-      console.log(`📊 Fetching attendance logs from ZKTeco device...`);
+      console.log(`Fetching attendance logs from ZKTeco device...`);
 
       // Disable device to prevent interference
       if (typeof this.zkInstance.disableDevice === "function") {
@@ -519,8 +518,8 @@ class ZKTecoService {
           this.zkInstance.disableDevice((err) => {
             if (err) {
               console.log(
-                "⚠️ Could not disable device, continuing anyway:",
-                err.message || err
+                "Could not disable device, continuing anyway:",
+                err.message || err,
               );
             }
             resolve();
@@ -537,7 +536,7 @@ class ZKTecoService {
           clearTimeout(timeout);
           if (err) {
             reject(
-              new Error(`Failed to get attendance: ${err.message || err}`)
+              new Error(`Failed to get attendance: ${err.message || err}`),
             );
           } else {
             resolve(attendanceData || []);
@@ -552,7 +551,7 @@ class ZKTecoService {
         await new Promise((resolve) => {
           this.zkInstance.enableDevice((err) => {
             if (err) {
-              console.log("⚠️ Could not re-enable device:", err.message || err);
+              console.log("Could not re-enable device:", err.message || err);
             }
             resolve();
           });
@@ -560,16 +559,16 @@ class ZKTecoService {
       }
 
       console.log(
-        `✅ Retrieved attendance data: ${
+        `Retrieved attendance data: ${
           Array.isArray(attendanceData)
             ? attendanceData.length
             : typeof attendanceData
-        } records`
+        } records`,
       );
 
       return Array.isArray(attendanceData) ? attendanceData : [];
     } catch (error) {
-      console.error(`❌ getAttendance failed: ${error.message}`);
+      console.error(`getAttendance failed: ${error.message}`);
       throw error;
     }
   }
@@ -580,7 +579,7 @@ class ZKTecoService {
    *
    * Reuses the SAME connection path as attendance sync. Uses the ZKTeco
    * native UNLOCK command (constants.Commands.UNLOCK = 31), whose payload is
-   * a 4-byte little-endian door-open duration in seconds — the identical
+   * a 4-byte little-endian door-open duration in seconds - the identical
    * low-level pattern the SDK's disableDevice() uses via executeCmd().
    *
    * @param {number} durationSeconds How long the relay stays open (default 10).
@@ -600,12 +599,12 @@ class ZKTecoService {
 
     if (typeof this.zkInstance.executeCmd !== "function") {
       throw new Error(
-        "ZKTeco SDK does not expose executeCmd — remote unlock is not supported by this device/library."
+        "ZKTeco SDK does not expose executeCmd - remote unlock is not supported by this device/library.",
       );
     }
 
     console.log(
-      `🚪 Sending remote UNLOCK to ZKTeco device at ${this.ip}:${this.port} (open for ${durationSeconds}s)...`
+      `Sending remote UNLOCK to ZKTeco device at ${this.ip}:${this.port} (open for ${durationSeconds}s)...`,
     );
 
     await new Promise((resolve, reject) => {
@@ -619,8 +618,8 @@ class ZKTecoService {
           if (err) {
             reject(
               new Error(
-                `Device rejected unlock command: ${err.message || err}`
-              )
+                `Device rejected unlock command: ${err.message || err}`,
+              ),
             );
           } else {
             resolve();
@@ -633,7 +632,7 @@ class ZKTecoService {
     });
 
     console.log(
-      `✅ ZKTeco relay triggered — door open for ${durationSeconds}s, will auto-lock after.`
+      `ZKTeco relay triggered - door open for ${durationSeconds}s, will auto-lock after.`,
     );
 
     return { success: true, durationSeconds };
@@ -656,7 +655,7 @@ class ZKTecoService {
     ];
 
     return methodsToCheck.filter(
-      (method) => typeof this.zkInstance[method] === "function"
+      (method) => typeof this.zkInstance[method] === "function",
     );
   }
 }

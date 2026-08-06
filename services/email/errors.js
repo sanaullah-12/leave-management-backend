@@ -1,7 +1,7 @@
 /**
  * Brevo error classification.
  *
- * Single responsibility: turn a Brevo API error into a verdict — what
+ * Single responsibility: turn a Brevo API error into a verdict - what
  * happened, why, how to fix it, and whether retrying could ever help.
  *
  * The retryable flag matters: retrying a bad API key or an unverified sender
@@ -34,7 +34,7 @@ const classifyEmailError = (error, config = {}) => {
     return {
       ...base,
       title: "Could not resolve the Brevo API host",
-      cause: "DNS lookup for api.brevo.com failed — no DNS, or no outbound network.",
+      cause: "DNS lookup for api.brevo.com failed - no DNS, or no outbound network.",
       solution:
         "Confirm the host has working DNS and outbound HTTPS access. Transient DNS " +
         "failures usually clear on retry.",
@@ -57,13 +57,13 @@ const classifyEmailError = (error, config = {}) => {
       title: "Network error reaching the Brevo API",
       cause: `A connection-level failure occurred calling api.brevo.com (${nodeCode || "network"}).`,
       solution:
-        "Confirm the host allows outbound HTTPS on port 443. Usually transient — the " +
+        "Confirm the host allows outbound HTTPS on port 443. Usually transient - the " +
         "retry logic will attempt again.",
       retryable: true,
     };
   }
 
-  // ---- Authentication — never retried -------------------------------------
+  // ---- Authentication - never retried -------------------------------------
   if (status === 401 || brevoCode === "unauthorized") {
     return {
       ...base,
@@ -78,7 +78,7 @@ const classifyEmailError = (error, config = {}) => {
     };
   }
 
-  // ---- Sender verification — the most common real-world blocker -----------
+  // ---- Sender verification - the most common real-world blocker -----------
   // Brevo only sends from a verified sender address or verified domain.
   if (
     message.includes("sender") &&
@@ -89,7 +89,7 @@ const classifyEmailError = (error, config = {}) => {
   ) {
     return {
       ...base,
-      title: "Sender address rejected — not verified in Brevo",
+      title: "Sender address rejected - not verified in Brevo",
       cause:
         `Brevo will only send from a verified sender. EMAIL_FROM (${
           config.fromEmail || "unset"
@@ -128,7 +128,7 @@ const classifyEmailError = (error, config = {}) => {
     };
   }
 
-  // ---- Rate limiting — retry, it may clear --------------------------------
+  // ---- Rate limiting - retry, it may clear --------------------------------
   if (status === 429) {
     return {
       ...base,
@@ -141,7 +141,7 @@ const classifyEmailError = (error, config = {}) => {
     };
   }
 
-  // ---- Request shape — permanent ------------------------------------------
+  // ---- Request shape - permanent ------------------------------------------
   if (
     status === 400 ||
     brevoCode === "invalid_parameter" ||
@@ -164,7 +164,7 @@ const classifyEmailError = (error, config = {}) => {
     return {
       ...base,
       title: "Brevo endpoint or resource not found",
-      cause: "The API responded 404 — usually an SDK/endpoint mismatch.",
+      cause: "The API responded 404 - usually an SDK/endpoint mismatch.",
       solution: "Ensure @getbrevo/brevo is up to date (npm install @getbrevo/brevo@latest).",
       retryable: false,
     };
@@ -180,12 +180,12 @@ const classifyEmailError = (error, config = {}) => {
     };
   }
 
-  // ---- Server-side — retry ------------------------------------------------
+  // ---- Server-side - retry ------------------------------------------------
   if (status >= 500) {
     return {
       ...base,
       title: "Brevo API server error",
-      cause: `Brevo returned ${status} — a problem on their side, not yours.`,
+      cause: `Brevo returned ${status} - a problem on their side, not yours.`,
       solution:
         "Transient; the retry logic will attempt again. Check https://status.brevo.com " +
         "if it persists.",

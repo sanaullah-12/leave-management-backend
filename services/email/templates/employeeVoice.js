@@ -1,4 +1,4 @@
-/** Employee Voice notification — sent when feedback is submitted or answered. */
+/** Employee Voice notification - sent when feedback is submitted or answered. */
 
 const { baseLayout, button, detailsBox, greeting, p, esc, COLORS } = require("./layout");
 
@@ -35,7 +35,7 @@ module.exports = ({ recipient, voice, submittedBy, actionUrl, isResponse = false
   return {
     subject: isResponse
       ? `Your Employee Voice submission has a response`
-      : `New Employee Voice submission — ${voice.subject || voice.title || "feedback"}`,
+      : `New Employee Voice submission - ${voice.subject || voice.title || "feedback"}`,
     html: baseLayout({
       title: "Employee Voice",
       heading: isResponse ? "You have a response" : "New submission",

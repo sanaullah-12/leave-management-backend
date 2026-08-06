@@ -5,7 +5,7 @@ const { authenticateToken, authorizeRoles } = require("../middleware/auth");
 const User = require("../models/User");
 
 /**
- * 🏆 EMPLOYEE PERFORMANCE DASHBOARD API
+ * EMPLOYEE PERFORMANCE DASHBOARD API
  * Dedicated endpoints for employee-only performance tracking
  * Excludes admins and focuses on employee competition & analytics
  */
@@ -30,7 +30,7 @@ router.get(
       const queryEndDate = endDate || defaultEndDate;
 
       console.log(
-        `🏆 Generating employee leaderboard (${queryStartDate} to ${queryEndDate})`
+        `Generating employee leaderboard (${queryStartDate} to ${queryEndDate})`
       );
 
       // Get all employees (exclude admins)
@@ -55,7 +55,7 @@ router.get(
         });
       }
 
-      console.log(`📊 Found ${employees.length} employees to analyze`);
+      console.log(`Found ${employees.length} employees to analyze`);
 
       // Get attendance collection
       const attendanceCollection =
@@ -181,7 +181,7 @@ router.get(
             },
           });
         } catch (error) {
-          console.error(`❌ Error analyzing employee ${employee.name}:`, error);
+          console.error(`Error analyzing employee ${employee.name}:`, error);
           // Continue with other employees
         }
       }
@@ -200,7 +200,7 @@ router.get(
         }));
 
       console.log(
-        `✅ Generated leaderboard with ${rankedLeaderboard.length} employees`
+        `Generated leaderboard with ${rankedLeaderboard.length} employees`
       );
 
       res.json({
@@ -212,7 +212,7 @@ router.get(
         generatedAt: new Date().toISOString(),
       });
     } catch (error) {
-      console.error("❌ Employee leaderboard generation failed:", error);
+      console.error("Employee leaderboard generation failed:", error);
       res.status(500).json({
         success: false,
         message: "Failed to generate employee leaderboard",
@@ -242,7 +242,7 @@ router.get(
       const queryEndDate = endDate || defaultEndDate;
 
       console.log(
-        `📊 Analyzing department performance (${queryStartDate} to ${queryEndDate})`
+        `Analyzing department performance (${queryStartDate} to ${queryEndDate})`
       );
 
       // Get all employees grouped by department
@@ -349,7 +349,7 @@ router.get(
             totalLateMinutes += lateMinutes;
           } catch (error) {
             console.error(
-              `❌ Error analyzing employee ${employee.name} in ${departmentName}:`,
+              `Error analyzing employee ${employee.name} in ${departmentName}:`,
               error
             );
           }
@@ -381,7 +381,7 @@ router.get(
         rank: index + 1,
       }));
 
-      console.log(`✅ Analyzed ${rankedDepartments.length} departments`);
+      console.log(`Analyzed ${rankedDepartments.length} departments`);
 
       res.json({
         success: true,
@@ -391,7 +391,7 @@ router.get(
         generatedAt: new Date().toISOString(),
       });
     } catch (error) {
-      console.error("❌ Department performance analysis failed:", error);
+      console.error("Department performance analysis failed:", error);
       res.status(500).json({
         success: false,
         message: "Failed to analyze department performance",
@@ -421,7 +421,7 @@ router.get(
       const queryEndDate = endDate || defaultEndDate;
 
       console.log(
-        `🎖️ Analyzing employee achievements (${queryStartDate} to ${queryEndDate})`
+        `Analyzing employee achievements (${queryStartDate} to ${queryEndDate})`
       );
 
       // Get leaderboard data to extract achievements
@@ -457,7 +457,7 @@ router.get(
         generatedAt: new Date().toISOString(),
       });
     } catch (error) {
-      console.error("❌ Employee achievements analysis failed:", error);
+      console.error("Employee achievements analysis failed:", error);
       res.status(500).json({
         success: false,
         message: "Failed to analyze employee achievements",
@@ -487,7 +487,7 @@ router.get(
       const queryEndDate = endDate || defaultEndDate;
 
       console.log(
-        `📈 Generating performance overview (${queryStartDate} to ${queryEndDate})`
+        `Generating performance overview (${queryStartDate} to ${queryEndDate})`
       );
 
       // Get total employee count
@@ -523,7 +523,7 @@ router.get(
       };
 
       console.log(
-        `✅ Generated overview: ${totalEmployees} employees, ${totalRecords} records`
+        `Generated overview: ${totalEmployees} employees, ${totalRecords} records`
       );
 
       res.json({
@@ -532,7 +532,7 @@ router.get(
         generatedAt: new Date().toISOString(),
       });
     } catch (error) {
-      console.error("❌ Performance overview generation failed:", error);
+      console.error("Performance overview generation failed:", error);
       res.status(500).json({
         success: false,
         message: "Failed to generate performance overview",

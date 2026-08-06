@@ -10,8 +10,8 @@ const path = require("path");
 const fs = require("fs");
 // Don't trust NODE_ENV alone to pick the env file: it must be set explicitly
 // on the host, and if it's ever missing (e.g. not configured in the Railway
-// dashboard), this would silently fall back to loading the local dev .env —
-// which has a localhost FRONTEND_URL — while still deployed for real users.
+// dashboard), this would silently fall back to loading the local dev .env -
+// which has a localhost FRONTEND_URL - while still deployed for real users.
 // RAILWAY_ENVIRONMENT is injected automatically by Railway on every deploy,
 // so it's a reliable second signal that we're actually running in production.
 const isDeployedProduction =
@@ -28,22 +28,22 @@ if (isDeployedProduction) {
 // Debug environment variables
 console.log("=== ENVIRONMENT VARIABLES ===");
 console.log("NODE_ENV:", process.env.NODE_ENV);
-console.log("MONGODB_URI:", process.env.MONGODB_URI ? "✅ Set" : "❌ Missing");
-console.log("JWT_SECRET:", process.env.JWT_SECRET ? "✅ Set" : "❌ Missing");
+console.log("MONGODB_URI:", process.env.MONGODB_URI ? "Set" : "Missing");
+console.log("JWT_SECRET:", process.env.JWT_SECRET ? "Set" : "Missing");
 console.log(
   "ALLOWED_ORIGINS:",
-  process.env.ALLOWED_ORIGINS ? "✅ Set" : "❌ Missing"
+  process.env.ALLOWED_ORIGINS ? "Set" : "Missing"
 );
 console.log(
   "FRONTEND_URL:",
-  process.env.FRONTEND_URL ? "✅ Set" : "❌ Missing"
+  process.env.FRONTEND_URL ? "Set" : "Missing"
 );
-console.log("📧 EMAIL CONFIGURATION (provider: Brevo):");
+console.log("EMAIL CONFIGURATION (provider: Brevo):");
 console.log(
   "BREVO_API_KEY:",
-  process.env.BREVO_API_KEY ? "✅ Set" : "❌ Missing"
+  process.env.BREVO_API_KEY ? "Set" : "Missing"
 );
-console.log("EMAIL_FROM:", process.env.EMAIL_FROM || "❌ Missing");
+console.log("EMAIL_FROM:", process.env.EMAIL_FROM || "Missing");
 console.log(
   "EMAIL_FROM_NAME:",
   process.env.EMAIL_FROM_NAME || "(default) Nexora"
@@ -67,12 +67,12 @@ const app = express();
 // Railway (and most PaaS hosts) sit behind a reverse proxy that terminates
 // TLS and forwards the real client IP via X-Forwarded-For. Without this,
 // Express ignores that header, so req.ip resolves to the proxy's own IP for
-// every request — which trips express-rate-limit's X-Forwarded-For sanity
+// every request - which trips express-rate-limit's X-Forwarded-For sanity
 // check (ERR_ERL_UNEXPECTED_X_FORWARDED_FOR) and would rate-limit/log all
 // traffic as a single client. `1` trusts exactly one hop (Railway's edge
 // proxy), which is the correct, spoofing-safe value here (vs `true`, which
 // trusts the whole chain and would let a client forge its own IP). Must be
-// set before any middleware that reads the client IP — rate limiting,
+// set before any middleware that reads the client IP - rate limiting,
 // request logging (morgan), and auth all sit below this line.
 app.set("trust proxy", 1);
 
@@ -138,12 +138,12 @@ app.use(express.urlencoded({ extended: true }));
 
 // Serve static files for profile pictures with better error handling
 const uploadsPath = path.join(__dirname, "uploads");
-console.log("📁 Static files directory:", uploadsPath);
+console.log("Static files directory:", uploadsPath);
 
 // Ensure uploads directory exists
 if (!fs.existsSync(uploadsPath)) {
   fs.mkdirSync(uploadsPath, { recursive: true });
-  console.log("📁 Created uploads directory");
+  console.log("Created uploads directory");
 }
 
 app.use(
@@ -160,7 +160,7 @@ app.use(
 
 // Handle static file 404s
 app.use("/uploads/*", (req, res) => {
-  console.log("❌ Static file not found:", req.path);
+  console.log("Static file not found:", req.path);
   res.status(404).json({
     message: "File not found",
     path: req.path,
@@ -177,12 +177,12 @@ const connectDB = async (retryCount = 0) => {
     let connectionString;
 
     // Check if this is actually a production deployment. Don't rely on
-    // NODE_ENV alone — it's easy to forget to add it as a Railway dashboard
+    // NODE_ENV alone - it's easy to forget to add it as a Railway dashboard
     // variable, and if it's missing this used to silently fall through to
     // "FORCE LOCAL DATABASE" below, ignoring a correctly-set MONGODB_URI
     // entirely. RAILWAY_ENVIRONMENT/RAILWAY_ENVIRONMENT_NAME/RAILWAY_PROJECT_ID
-    // are injected automatically by Railway on every deploy — no dashboard
-    // configuration required — so treat any of them as proof we're actually
+    // are injected automatically by Railway on every deploy - no dashboard
+    // configuration required - so treat any of them as proof we're actually
     // running on Railway (there is no local Mongo container there to fall
     // back to anyway).
     const isActualProduction =
@@ -199,18 +199,18 @@ const connectDB = async (retryCount = 0) => {
       connectionString = process.env.MONGODB_URI;
       if (!connectionString) {
         console.error(
-          "❌ CRITICAL: MONGODB_URI is not set in the production environment."
+          "CRITICAL: MONGODB_URI is not set in the production environment."
         );
         process.exit(1);
       }
       if (isActualProduction) {
-        console.log("🚀 PRODUCTION DEPLOYMENT: Using MongoDB Atlas");
+        console.log("PRODUCTION DEPLOYMENT: Using MongoDB Atlas");
       } else {
         console.log(
-          "⚠️  USE_PRODUCTION_DB=true — LOCAL SERVER IS USING THE LIVE ATLAS DATABASE."
+          "USE_PRODUCTION_DB=true - LOCAL SERVER IS USING THE LIVE ATLAS DATABASE."
         );
         console.log(
-          "⚠️  Reads AND WRITES affect real production records. Set it to false when done."
+          "Reads AND WRITES affect real production records. Set it to false when done."
         );
       }
     } else {
@@ -220,14 +220,14 @@ const connectDB = async (retryCount = 0) => {
       connectionString =
         process.env.LOCAL_MONGODB_URI ||
         "mongodb://127.0.0.1:27018/leave-management-dev";
-      console.log("🔒 DEVELOPMENT MODE: FORCING LOCAL DATABASE CONNECTION");
-      console.log("📍 Connecting to:", connectionString);
-      console.log("🚫 Ignoring MONGODB_URI environment variable");
-      console.log("🚫 Ignoring NODE_ENV setting");
-      console.log("💡 Set USE_PRODUCTION_DB=true to use the live Atlas data.");
+      console.log("DEVELOPMENT MODE: FORCING LOCAL DATABASE CONNECTION");
+      console.log("Connecting to:", connectionString);
+      console.log("Ignoring MONGODB_URI environment variable");
+      console.log("Ignoring NODE_ENV setting");
+      console.log("Set USE_PRODUCTION_DB=true to use the live Atlas data.");
     }
 
-    console.log("🔍 MONGODB CONNECTION DEBUG:");
+    console.log("MONGODB CONNECTION DEBUG:");
     console.log("Retry attempt:", retryCount + 1, "/", maxRetries + 1);
     console.log("NODE_ENV:", process.env.NODE_ENV);
     console.log("PORT:", process.env.PORT);
@@ -239,7 +239,7 @@ const connectDB = async (retryCount = 0) => {
     console.log("Current time:", new Date().toISOString());
 
     const targetLabel = isActualProduction || useProductionDB ? "ATLAS" : "LOCAL";
-    console.log(`📡 Attempting to connect to ${targetLabel} MongoDB...`);
+    console.log(`Attempting to connect to ${targetLabel} MongoDB...`);
     const startTime = Date.now();
 
     await mongoose.connect(connectionString, {
@@ -251,7 +251,7 @@ const connectDB = async (retryCount = 0) => {
     });
 
     const connectionTime = Date.now() - startTime;
-    console.log(`✅ ${targetLabel} MongoDB connected successfully!`);
+    console.log(` ${targetLabel} MongoDB connected successfully!`);
     console.log(`Connection time: ${connectionTime}ms`);
     console.log("Database name:", mongoose.connection.db.databaseName);
     console.log("Connection host:", mongoose.connection.host);
@@ -263,19 +263,19 @@ const connectDB = async (retryCount = 0) => {
       mongoose.connection.host === "localhost";
     if (targetLabel === "ATLAS" && isLocalHost) {
       console.log(
-        "⚠️  WARNING: Expected Atlas but connected to a local host:",
+        "WARNING: Expected Atlas but connected to a local host:",
         mongoose.connection.host
       );
     } else if (targetLabel === "LOCAL" && !isLocalHost) {
       console.log(
-        "⚠️  WARNING: Expected local but connected to a remote host:",
+        "WARNING: Expected local but connected to a remote host:",
         mongoose.connection.host
       );
     } else {
-      console.log(`✅ CONFIRMED: Connected to ${targetLabel} database as intended`);
+      console.log(`CONFIRMED: Connected to ${targetLabel} database as intended`);
     }
   } catch (error) {
-    console.error("❌ LOCAL MongoDB connection failed:");
+    console.error("LOCAL MongoDB connection failed:");
     console.error("Error name:", error.name);
     console.error("Error message:", error.message);
     console.error("Error code:", error.code);
@@ -286,9 +286,9 @@ const connectDB = async (retryCount = 0) => {
       error.message.includes("connect ECONNREFUSED")
     ) {
       console.error(
-        "🔌 Local MongoDB connection refused - is MongoDB running?"
+        "Local MongoDB connection refused - is MongoDB running?"
       );
-      console.error("💡 Start MongoDB with one of these commands:");
+      console.error("Start MongoDB with one of these commands:");
       console.error("   • mongod");
       console.error(
         "   • brew services start mongodb/brew/mongodb-community (Mac)"
@@ -299,20 +299,20 @@ const connectDB = async (retryCount = 0) => {
       error.message.includes("ENOTFOUND") ||
       error.message.includes("getaddrinfo")
     ) {
-      console.error("🌐 DNS lookup failed for localhost - network issue");
+      console.error("DNS lookup failed for localhost - network issue");
       console.error(
-        "💡 Check: MongoDB is installed and running on localhost:27017"
+        "Check: MongoDB is installed and running on localhost:27017"
       );
     } else if (error.message.includes("timeout")) {
       console.error("⏰ Connection timeout to local MongoDB");
-      console.error("💡 Check: MongoDB service is running and responsive");
+      console.error("Check: MongoDB service is running and responsive");
     }
 
     // Retry logic for local connection
     if (retryCount < maxRetries) {
       const retryDelay = (retryCount + 1) * 2000; // 2s, 4s, 6s delays
       console.log(
-        `🔄 Retrying LOCAL connection in ${retryDelay / 1000} seconds... (${
+        ` Retrying LOCAL connection in ${retryDelay / 1000} seconds... (${
           retryCount + 1
         }/${maxRetries})`
       );
@@ -323,9 +323,9 @@ const connectDB = async (retryCount = 0) => {
 
     console.error("Full error object:", JSON.stringify(error, null, 2));
     console.log(
-      "💥 All retry attempts failed. LOCAL MongoDB connection could not be established."
+      "All retry attempts failed. LOCAL MongoDB connection could not be established."
     );
-    console.log("🔧 Local MongoDB Troubleshooting:");
+    console.log("Local MongoDB Troubleshooting:");
     console.log("   1. Install MongoDB Community Edition");
     console.log("   2. Start MongoDB service:");
     console.log("      • Windows: net start MongoDB");
@@ -344,58 +344,58 @@ connectDB();
 
 // Add database connection event listeners for stability
 mongoose.connection.on("connected", () => {
-  console.log("✅ Mongoose connected to MongoDB");
+  console.log("Mongoose connected to MongoDB");
 });
 
 mongoose.connection.on("error", (err) => {
-  console.error("❌ Mongoose connection error:", err);
+  console.error("Mongoose connection error:", err);
 });
 
 mongoose.connection.on("disconnected", () => {
-  console.log("⚠️  Mongoose disconnected from MongoDB");
+  console.log("Mongoose disconnected from MongoDB");
   console.log(
-    "💡 If this happens frequently, check your MongoDB connection or restart the server"
+    "If this happens frequently, check your MongoDB connection or restart the server"
   );
 });
 
 // Handle process termination gracefully
 process.on("SIGINT", async () => {
-  console.log("📴 SIGINT received. Gracefully shutting down...");
+  console.log("SIGINT received. Gracefully shutting down...");
   await mongoose.connection.close();
   process.exit(0);
 });
 
 process.on("SIGTERM", async () => {
-  console.log("📴 SIGTERM received. Gracefully shutting down...");
+  console.log("SIGTERM received. Gracefully shutting down...");
   await mongoose.connection.close();
   process.exit(0);
 });
 
 // Handle uncaught exceptions
 process.on("uncaughtException", (error) => {
-  console.error("💥 Uncaught Exception:", error);
+  console.error("Uncaught Exception:", error);
   console.error("Stack trace:", error.stack);
   // Don't exit immediately - log and continue
 });
 
 process.on("unhandledRejection", (reason, promise) => {
-  console.error("💥 Unhandled Rejection at:", promise, "reason:", reason);
+  console.error("Unhandled Rejection at:", promise, "reason:", reason);
   // Don't exit immediately - log and continue
 });
 
 // Global request logging for debugging invite issues
 app.use("/api/auth/invite-employee", (req, res, next) => {
-  console.log("🔴 === INTERCEPTED INVITE REQUEST ===");
-  console.log("🔴 Timestamp:", new Date().toISOString());
-  console.log("🔴 Method:", req.method);
-  console.log("🔴 URL:", req.url);
-  console.log("🔴 Body:", JSON.stringify(req.body));
-  console.log("🔴 Content-Type:", req.headers["content-type"]);
+  console.log(" === INTERCEPTED INVITE REQUEST ===");
+  console.log("Timestamp:", new Date().toISOString());
+  console.log("Method:", req.method);
+  console.log("URL:", req.url);
+  console.log("Body:", JSON.stringify(req.body));
+  console.log("Content-Type:", req.headers["content-type"]);
   console.log(
-    "🔴 Authorization:",
+    "Authorization:",
     req.headers.authorization ? "Present" : "Missing"
   );
-  console.log("🔴 === FORWARDING TO ROUTE ===");
+  console.log(" === FORWARDING TO ROUTE ===");
   next();
 });
 
@@ -477,20 +477,20 @@ app.get("/api/test-db", async (req, res) => {
         const User = require("./models/User");
         const userCount = await User.countDocuments();
         testResults.userCount = userCount;
-        testResults.dataAccess = "✅ Success";
+        testResults.dataAccess = "Success";
       } catch (error) {
-        testResults.dataAccess = `❌ Failed: ${error.message}`;
+        testResults.dataAccess = `Failed: ${error.message}`;
       }
     }
 
     res.status(200).json({
-      message: "🧪 Railway MongoDB Connection Test",
+      message: "Railway MongoDB Connection Test",
       timestamp: new Date().toISOString(),
       database: testResults,
     });
   } catch (error) {
     res.status(500).json({
-      message: "🧪 Railway MongoDB Connection Test",
+      message: "Railway MongoDB Connection Test",
       timestamp: new Date().toISOString(),
       database: {
         connectionState: "error",
@@ -503,7 +503,7 @@ app.get("/api/test-db", async (req, res) => {
 // Debug endpoint for Railway troubleshooting
 app.get("/api/debug", (req, res) => {
   res.status(200).json({
-    message: "🔍 Railway Debug Information",
+    message: "Railway Debug Information",
     timestamp: new Date().toISOString(),
     database: {
       connectionState: mongoose.connection.readyState,
@@ -586,7 +586,7 @@ app.post("/api/debug/test-write", async (req, res) => {
     const readBack = await testCollection.findOne({ _id: result.insertedId });
 
     res.status(200).json({
-      message: "✅ Database write test successful",
+      message: "Database write test successful",
       database: mongoose.connection.db.databaseName,
       host: mongoose.connection.host,
       inserted_id: result.insertedId,
@@ -595,7 +595,7 @@ app.post("/api/debug/test-write", async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({
-      message: "❌ Database write test failed",
+      message: "Database write test failed",
       error: error.message,
       database: mongoose.connection.db.databaseName,
       host: mongoose.connection.host,
@@ -604,29 +604,29 @@ app.post("/api/debug/test-write", async (req, res) => {
   }
 });
 
-// SendGrid test endpoint — removed. This deployment sends via Brevo.
+// SendGrid test endpoint - removed. This deployment sends via Brevo.
 app.post("/api/debug/test-sendgrid", async (req, res) => {
   res.status(410).json({
     message:
-      "SendGrid has been removed. This deployment sends email via Brevo — use /api/debug/email-health.",
+      "SendGrid has been removed. This deployment sends email via Brevo - use /api/debug/email-health.",
   });
 });
 
-// Email health check — validates config and confirms the Brevo API key is
+// Email health check - validates config and confirms the Brevo API key is
 // accepted, WITHOUT sending a message.
 app.get("/api/debug/email-health", async (req, res) => {
   const { checkEmailHealth } = require("./services/email");
   const result = await checkEmailHealth();
   res.status(result.ok ? 200 : 503).json({
     message: result.ok
-      ? "✅ Email provider (Brevo) is reachable and authenticated"
-      : "❌ Email provider check failed",
+      ? "Email provider (Brevo) is reachable and authenticated"
+      : "Email provider check failed",
     ...result,
     timestamp: new Date().toISOString(),
   });
 });
 
-// Pending invitations — users created by an invite whose email never got
+// Pending invitations - users created by an invite whose email never got
 // through, so they never accepted. These are re-invitable (the invite routes
 // resend rather than reject); this endpoint just makes them visible.
 // Addresses are masked: this endpoint is unauthenticated like the other debug
@@ -657,7 +657,7 @@ app.get("/api/debug/pending-invites", async (req, res) => {
   }
 });
 
-// Full email diagnostic, executed FROM INSIDE this container — the only way to
+// Full email diagnostic, executed FROM INSIDE this container - the only way to
 // observe the deployment's real network egress. Checks config, DNS, outbound
 // HTTPS to api.brevo.com, and the API key, then reports a verdict.
 app.get("/api/debug/email-diagnose", async (req, res) => {
@@ -666,14 +666,14 @@ app.get("/api/debug/email-diagnose", async (req, res) => {
     const report = await runDiagnostics({ timeoutMs: 8000 });
     res.status(report.blocker ? 503 : 200).json({
       message: report.blocker
-        ? `❌ Email blocked: ${report.blocker}`
-        : "✅ Email path is healthy",
+        ? `Email blocked: ${report.blocker}`
+        : "Email path is healthy",
       ...report,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
     res.status(500).json({
-      message: "❌ Diagnostic failed to run",
+      message: "Diagnostic failed to run",
       error: error.message,
     });
   }
@@ -681,7 +681,7 @@ app.get("/api/debug/email-diagnose", async (req, res) => {
 
 // Test email sending endpoint - ENHANCED VERSION
 app.post("/api/debug/test-email", async (req, res) => {
-  console.log("\n🧪 EMAIL TEST ENDPOINT CALLED");
+  console.log("\n EMAIL TEST ENDPOINT CALLED");
 
   try {
     const targetEmail = req.body.email;
@@ -690,7 +690,7 @@ app.post("/api/debug/test-email", async (req, res) => {
         message: "Provide a recipient: POST { \"email\": \"you@example.com\" }",
       });
     }
-    console.log("🎯 Target email:", targetEmail);
+    console.log("Target email:", targetEmail);
 
     // Import fresh every time to avoid caching issues
     delete require.cache[require.resolve("./utils/email")];
@@ -698,9 +698,9 @@ app.post("/api/debug/test-email", async (req, res) => {
 
     const result = await sendEmail({
       email: targetEmail,
-      subject: "🧪 URGENT TEST - Leave Management Email System",
+      subject: "URGENT TEST - Leave Management Email System",
       html:
-        "<h1>🎉 SUCCESS!</h1><p>If you received this, your email system is working!</p><p>Time: " +
+        "<h1> SUCCESS!</h1><p>If you received this, your email system is working!</p><p>Time: " +
         new Date().toISOString() +
         "</p>",
       text:
@@ -709,10 +709,10 @@ app.post("/api/debug/test-email", async (req, res) => {
       category: "test",
     });
 
-    console.log("✅ Test email completed successfully");
+    console.log("Test email completed successfully");
 
     res.status(200).json({
-      message: "✅ Test email completed - check your inbox!",
+      message: "Test email completed - check your inbox!",
       target_email: targetEmail,
       result: result,
       environment_check: {
@@ -724,10 +724,10 @@ app.post("/api/debug/test-email", async (req, res) => {
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
-    console.error("❌ Test email failed:", error.message);
+    console.error("Test email failed:", error.message);
 
     res.status(500).json({
-      message: "❌ Test email failed",
+      message: "Test email failed",
       error: error.message,
       diagnosis: error.emailDiagnosis || null,
       environment_check: {
@@ -744,7 +744,7 @@ app.post("/api/debug/test-email", async (req, res) => {
 // Simple test endpoint
 app.get("/api/test", (req, res) => {
   res.status(200).json({
-    message: "🎉 Backend is deployed and working!",
+    message: "Backend is deployed and working!",
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || "development",
     mongodb_connected: mongoose.connection.readyState === 1,
@@ -759,13 +759,13 @@ app.get("/", (req, res) => {
     <html>
       <head><title>Leave Management API</title></head>
       <body style="font-family: Arial; text-align: center; padding: 50px;">
-        <h1>🎉 Leave Management API is Live!</h1>
+        <h1>Leave Management API is Live!</h1>
         <p>Backend deployed successfully at ${new Date().toLocaleString()}</p>
         <p>Environment: ${process.env.NODE_ENV || "development"}</p>
         <p>MongoDB Status: ${
           mongoose.connection.readyState === 1
-            ? "✅ Connected"
-            : "❌ Disconnected"
+            ? "Connected"
+            : "Disconnected"
         }</p>
         <div style="margin: 30px 0;">
           <a href="/api/test" style="background: #3b82f6; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; margin: 5px;">JSON Test</a>
@@ -811,12 +811,12 @@ app.get("/api/debug/email-config", (req, res) => {
     };
 
     res.status(200).json({
-      message: "📧 Email Configuration Debug",
+      message: "Email Configuration Debug",
       config: emailConfig,
     });
   } catch (error) {
     res.status(500).json({
-      message: "❌ Email config debug failed",
+      message: "Email config debug failed",
       error: error.message,
     });
   }
@@ -851,13 +851,13 @@ app.get("/api/debug/uploads", (req, res) => {
     }
 
     res.status(200).json({
-      message: "📁 Uploads Directory Debug",
+      message: "Uploads Directory Debug",
       timestamp: new Date().toISOString(),
       data: result,
     });
   } catch (error) {
     res.status(500).json({
-      message: "❌ Debug uploads failed",
+      message: "Debug uploads failed",
       error: error.message,
       timestamp: new Date().toISOString(),
     });
@@ -879,7 +879,7 @@ app.use((req, res, next) => {
 
 // Global error handler with better logging
 app.use((err, req, res, next) => {
-  console.error(`💥 Error in ${req.method} ${req.path}:`);
+  console.error(`Error in ${req.method} ${req.path}:`);
   console.error("Error message:", err.message);
   console.error("Error stack:", err.stack);
 
@@ -908,7 +908,13 @@ const PORT = process.env.PORT || 5000;
 const server = http.createServer(app);
 require("./socket/socketServer").init(server);
 
+// Notification layer: reports its effective channel configuration once, and
+// names anything that would silently prevent WhatsApp delivery. It never
+// throws - a misconfigured WhatsApp channel must not stop the server, only
+// stop sending.
+require("./notifications").NotificationService.init();
+
 server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
-  console.log(`⚡ Real-time (Socket.IO) ready on the same port`);
+  console.log(`Real-time (Socket.IO) ready on the same port`);
 });

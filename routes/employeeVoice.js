@@ -73,7 +73,7 @@ router.post("/", authenticateToken, uploadVoiceAttachments, async (req, res) => 
       req.body.isAnonymous === true || req.body.isAnonymous === "true";
     const department = req.body.department || req.user.department;
 
-    // Validation (manual — matches the codebase convention).
+    // Validation (manual - matches the codebase convention).
     if (!category || !VALID_CATEGORIES.includes(category)) {
       return res.status(400).json({ message: "Please select a valid category" });
     }

@@ -120,7 +120,7 @@ router.post('/clear/:ip', authenticateToken, authorizeRoles('admin'), async (req
       });
     }
 
-    console.log(`⚠️  Clearing ALL attendance logs from ${ip}:${devicePort}...`);
+    console.log(`Clearing ALL attendance logs from ${ip}:${devicePort}...`);
     // Generate random local port to avoid EADDRINUSE errors (wider range)
     const randomInport = 5000 + Math.floor(Math.random() * 5000); // Range: 5000-9999
     zkInstance = new NodeZKLib(ip, devicePort, 10000, randomInport);
@@ -131,7 +131,7 @@ router.post('/clear/:ip', authenticateToken, authorizeRoles('admin'), async (req
 
     await zkInstance.disconnect();
 
-    console.log(`✅ Attendance logs cleared from ${ip}`);
+    console.log(`Attendance logs cleared from ${ip}`);
 
     res.json({
       success: true,

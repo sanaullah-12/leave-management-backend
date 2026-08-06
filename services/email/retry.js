@@ -4,7 +4,7 @@
  * Single responsibility: re-attempt work that failed for a *transient* reason,
  * and get out of the way immediately for a permanent one.
  *
- * Retrying a permanent failure is actively harmful — it delays the real error
+ * Retrying a permanent failure is actively harmful - it delays the real error
  * reaching the logs and can trip Gmail's rate limiting or lock the account.
  */
 
@@ -24,17 +24,17 @@ const withRetry = async (operation, isRetryable, label = "operation") => {
   let lastError;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    log(`Attempt ${attempt}/${MAX_ATTEMPTS} — ${label}`);
+    log(`Attempt ${attempt}/${MAX_ATTEMPTS} - ${label}`);
 
     try {
       const result = await operation(attempt);
-      if (attempt > 1) log(`✅ Succeeded on attempt ${attempt}/${MAX_ATTEMPTS}`);
+      if (attempt > 1) log(`Succeeded on attempt ${attempt}/${MAX_ATTEMPTS}`);
       return result;
     } catch (error) {
       lastError = error;
 
       if (!isRetryable(error)) {
-        warn(`Attempt ${attempt} failed permanently — not retrying (it cannot succeed).`);
+        warn(`Attempt ${attempt} failed permanently - not retrying (it cannot succeed).`);
         throw error;
       }
 

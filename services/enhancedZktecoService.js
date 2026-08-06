@@ -18,7 +18,7 @@ class EnhancedZKTecoService {
   async initBestLibrary() {
     // First try zklib (the original one that's actually working)
     try {
-      console.log(`🔌 Trying to initialize with zklib for ${this.ip}:${this.port} (inport: ${this.inport})`);
+      console.log(`Trying to initialize with zklib for ${this.ip}:${this.port} (inport: ${this.inport})`);
       // zklib requires both ip and inport parameters
       this.zkInstance = new ZKLib({
         ip: this.ip,
@@ -33,18 +33,18 @@ class EnhancedZKTecoService {
             reject(new Error(`zklib socket creation failed: ${err.message}`));
           } else {
             this.currentLibrary = 'zklib';
-            console.log('✅ Using zklib');
+            console.log('Using zklib');
             resolve();
           }
         });
       });
       return true;
     } catch (zklibError) {
-      console.log(`⚠️ zklib initialization failed: ${zklibError.message}`);
+      console.log(`zklib initialization failed: ${zklibError.message}`);
       
       // Fallback to node-zklib
       try {
-        console.log(`🔌 Trying to initialize with node-zklib for ${this.ip}:${this.port}`);
+        console.log(`Trying to initialize with node-zklib for ${this.ip}:${this.port}`);
         // node-zklib uses (ip, port, timeout, inport) format
         this.nodeZkInstance = new nodeZKLib(this.ip, parseInt(this.port), this.timeout, this.inport);
         
@@ -66,10 +66,10 @@ class EnhancedZKTecoService {
         });
         
         this.currentLibrary = 'node-zklib';
-        console.log('✅ Using node-zklib');
+        console.log('Using node-zklib');
         return true;
       } catch (nodeZklibError) {
-        console.log(`❌ Both libraries failed: ${nodeZklibError.message}`);
+        console.log(`Both libraries failed: ${nodeZklibError.message}`);
         throw new Error(`Could not initialize any ZKTeco library: zklib-${zklibError.message}, node-zklib-${nodeZklibError.message}`);
       }
     }
@@ -77,7 +77,7 @@ class EnhancedZKTecoService {
 
   async connect() {
     try {
-      console.log(`🔌 Connecting to ZKTeco device at ${this.ip}:${this.port}`);
+      console.log(`Connecting to ZKTeco device at ${this.ip}:${this.port}`);
       
       await this.initBestLibrary();
       
@@ -86,11 +86,11 @@ class EnhancedZKTecoService {
       
       if (connectionStatus.success) {
         this.isConnected = true;
-        console.log(`✅ Connected to ZKTeco device at ${this.ip}:${this.port}`);
+        console.log(`Connected to ZKTeco device at ${this.ip}:${this.port}`);
         
         // Get device info
         const deviceInfo = await this.getDeviceInfo();
-        console.log('✅ Device info:', deviceInfo);
+        console.log('Device info:', deviceInfo);
         
         return {
           success: true,
@@ -103,7 +103,7 @@ class EnhancedZKTecoService {
         throw new Error('Connection test failed');
       }
     } catch (error) {
-      console.error(`❌ Failed to connect to ZKTeco device: ${error.message}`);
+      console.error(`Failed to connect to ZKTeco device: ${error.message}`);
       this.isConnected = false;
       throw error;
     }
@@ -124,9 +124,11 @@ class EnhancedZKTecoService {
             this.zkInstance.getTime((err, timeData) => {
               clearTimeout(timeout);
               if (err) {
-                console.log('getTime failed but device might still be responsive:', err.message);
-                // Don't fail the connection test if getTime fails
-                resolve({ success: true, time: null });
+                // A failed getTime means the device did NOT answer. Reporting
+                // success here produced a false "connected" state for devices
+                // that were powered off or unreachable - the whole point of a
+                // connection test is that it can fail.
+                reject(err instanceof Error ? err : new Error(String(err)));
               } else {
                 resolve({ success: true, time: timeData });
               }
@@ -134,8 +136,12 @@ class EnhancedZKTecoService {
           });
           return { success: true, time: timeResult.time };
         } else {
-          // If even getTime is not available, try another approach
-          return { success: true, note: 'getTime not available but connection established' };
+          // No way to positively confirm the device answered, so this cannot be
+          // reported as a verified connection.
+          return {
+            success: false,
+            error: 'Cannot verify device: getTime is unavailable on this zklib instance'
+          };
         }
       } else if (this.currentLibrary === 'node-zklib' && this.nodeZkInstance) {
         // Test with getInfo if available
@@ -149,7 +155,7 @@ class EnhancedZKTecoService {
         }
       }
     } catch (error) {
-      console.log(`⚠️ Connection test failed: ${error.message}`);
+      console.log(`Connection test failed: ${error.message}`);
       return { success: false, error: error.message };
     }
   }
@@ -194,7 +200,7 @@ class EnhancedZKTecoService {
         return { info: 'Device connected with node-zklib' };
       }
     } catch (error) {
-      console.log(`⚠️ Could not get device info: ${error.message}`);
+      console.log(`Could not get device info: ${error.message}`);
       return { error: error.message };
     }
   }
@@ -205,14 +211,14 @@ class EnhancedZKTecoService {
       await this.connect();
     }
 
-    console.log(`📋 Fetching users from ZKTeco device (library: ${this.currentLibrary})...`);
+    console.log(`Fetching users from ZKTeco device (library: ${this.currentLibrary})...`);
 
     // Try different approaches based on the library being used
     try {
       if (this.currentLibrary === 'zklib' && this.zkInstance) {
         // For zklib, getUser is a callback-based method
         if (typeof this.zkInstance.getUser === 'function') {
-          console.log('🔧 Using zklib getUser method');
+          console.log('Using zklib getUser method');
           
           // Disable device to avoid interference during user fetch
           if (typeof this.zkInstance.disableDevice === 'function') {
@@ -220,20 +226,20 @@ class EnhancedZKTecoService {
               await new Promise((resolve) => {
                 this.zkInstance.disableDevice((err) => {
                   if (err) {
-                    console.log('⚠️ Could not disable device, continuing anyway:', err.message);
+                    console.log('Could not disable device, continuing anyway:', err.message);
                   }
                   resolve();
                 });
               });
             } catch (disableErr) {
-              console.log('⚠️ Device disable failed, continuing:', disableErr.message);
+              console.log('Device disable failed, continuing:', disableErr.message);
             }
           }
           
           // Get users with timeout protection
           const usersData = await new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
-              console.log('⚠️ getUser timeout - device might not have enrolled users or firmware limitation');
+              console.log('getUser timeout - device might not have enrolled users or firmware limitation');
               // Instead of rejecting, resolve with empty array to try fallback
               resolve([]);
             }, 25000); // Reduced timeout to 25s
@@ -241,7 +247,7 @@ class EnhancedZKTecoService {
             this.zkInstance.getUser((err, users) => {
               clearTimeout(timeout);
               if (err) {
-                console.log('⚠️ getUser failed - might be firmware limitation, trying fallback:', err.message);
+                console.log('getUser failed - might be firmware limitation, trying fallback:', err.message);
                 // Resolve with empty array to try fallback
                 resolve([]);
               } else {
@@ -258,32 +264,32 @@ class EnhancedZKTecoService {
                 await new Promise((resolve) => {
                   this.zkInstance.enableDevice((err) => {
                     if (err) {
-                      console.log('⚠️ Could not enable device after user fetch:', err.message);
+                      console.log('Could not enable device after user fetch:', err.message);
                     }
                     resolve();
                   });
                 });
               } catch (enableErr) {
-                console.log('⚠️ Device enable failed:', enableErr.message);
+                console.log('Device enable failed:', enableErr.message);
               }
             }
             
             return this.formatUsers(usersData);
           }
         } else {
-          console.log('⚠️ zklib getUser method is not available on this device firmware');
+          console.log('zklib getUser method is not available on this device firmware');
         }
       } else if (this.currentLibrary === 'node-zklib' && this.nodeZkInstance) {
         // For node-zklib, getUsers is a promise-based method
         if (typeof this.nodeZkInstance.getUsers === 'function') {
-          console.log('🔧 Using node-zklib getUsers method');
+          console.log('Using node-zklib getUsers method');
           
           // Disable device to avoid interference
           if (typeof this.nodeZkInstance.disableDevice === 'function') {
             try {
               await this.nodeZkInstance.disableDevice();
             } catch (disableErr) {
-              console.log('⚠️ Could not disable device, continuing anyway:', disableErr.message);
+              console.log('Could not disable device, continuing anyway:', disableErr.message);
             }
           }
           
@@ -294,39 +300,39 @@ class EnhancedZKTecoService {
             try {
               await this.nodeZkInstance.enableDevice();
             } catch (enableErr) {
-              console.log('⚠️ Could not enable device after user fetch:', enableErr.message);
+              console.log('Could not enable device after user fetch:', enableErr.message);
             }
           }
           
           return this.formatUsers(usersData);
         } else {
-          console.log('⚠️ node-zklib getUsers method is not available on this device firmware');
+          console.log('node-zklib getUsers method is not available on this device firmware');
         }
       } else {
         throw new Error(`No valid ZKTeco library instance available (current: ${this.currentLibrary})`);
       }
     } catch (error) {
-      console.error(`❌ Main user retrieval failed: ${error.message}`);
+      console.error(`Main user retrieval failed: ${error.message}`);
     }
 
     // If main method didn't return users, try alternative methods
-    console.log('🔄 Trying alternative methods to retrieve user data...');
+    console.log('Trying alternative methods to retrieve user data...');
     
     // Alternative 1: Try getAllUserID if available
     try {
       if (this.currentLibrary === 'zklib' && this.zkInstance && typeof this.zkInstance.getAllUserID === 'function') {
-        console.log('🔧 Trying zklib getAllUserID method');
+        console.log('Trying zklib getAllUserID method');
         
         const userIds = await new Promise((resolve, reject) => {
           const timeout = setTimeout(() => {
-            console.log('⚠️ getAllUserID timeout');
+            console.log('getAllUserID timeout');
             resolve([]);
           }, 20000);
           
           this.zkInstance.getAllUserID((err, data) => {
             clearTimeout(timeout);
             if (err) {
-              console.log('⚠️ getAllUserID failed:', err.message);
+              console.log('getAllUserID failed:', err.message);
               resolve([]);
             } else {
               resolve(data);
@@ -335,7 +341,7 @@ class EnhancedZKTecoService {
         });
         
         if (userIds && userIds.length > 0) {
-          console.log(`✅ Retrieved ${userIds.length} user IDs via getAllUserID`);
+          console.log(`Retrieved ${userIds.length} user IDs via getAllUserID`);
           // Format the IDs as users
           return userIds.map(id => ({
             uid: id.toString(),
@@ -351,12 +357,12 @@ class EnhancedZKTecoService {
         }
       }
     } catch (alt1Error) {
-      console.log('⚠️ Alternative method 1 (getAllUserID) failed:', alt1Error.message);
+      console.log('Alternative method 1 (getAllUserID) failed:', alt1Error.message);
     }
     
     // Alternative 2: Try getAttendance to extract users (this is often more reliable)
     try {
-      console.log('🔄 Extracting users from attendance logs...');
+      console.log('Extracting users from attendance logs...');
       const attendanceLogs = await this.getAttendanceLogs();
       
       // Create unique users based on attendance records
@@ -379,29 +385,29 @@ class EnhancedZKTecoService {
         }
       });
       
-      console.log(`✅ Extracted ${Object.keys(uniqueUsers).length} users from attendance logs`);
+      console.log(`Extracted ${Object.keys(uniqueUsers).length} users from attendance logs`);
       if (Object.keys(uniqueUsers).length > 0) {
         return Object.values(uniqueUsers);
       }
     } catch (attendanceError) {
-      console.log('⚠️ Could not extract users from attendance logs:', attendanceError.message);
+      console.log('Could not extract users from attendance logs:', attendanceError.message);
     }
     
     // Alternative 3: Try to read raw user template data if available
     try {
       if (this.currentLibrary === 'zklib' && this.zkInstance && typeof this.zkInstance.getUserTemplate === 'function') {
-        console.log('🔧 Trying zklib getUserTemplate method');
+        console.log('Trying zklib getUserTemplate method');
         
         const templateData = await new Promise((resolve, reject) => {
           const timeout = setTimeout(() => {
-            console.log('⚠️ getUserTemplate timeout');
+            console.log('getUserTemplate timeout');
             resolve([]);
           }, 30000);
           
           this.zkInstance.getUserTemplate((err, data) => {
             clearTimeout(timeout);
             if (err) {
-              console.log('⚠️ getUserTemplate failed:', err.message);
+              console.log('getUserTemplate failed:', err.message);
               resolve([]);
             } else {
               resolve(data);
@@ -410,7 +416,7 @@ class EnhancedZKTecoService {
         });
         
         if (templateData && templateData.length > 0) {
-          console.log(`✅ Retrieved ${templateData.length} user templates`);
+          console.log(`Retrieved ${templateData.length} user templates`);
           return templateData.map(template => ({
             uid: template.uid ? template.uid.toString() : 'unknown',
             name: template.name || `User ${template.uid || 'unknown'}`,
@@ -425,11 +431,11 @@ class EnhancedZKTecoService {
         }
       }
     } catch (templateError) {
-      console.log('⚠️ Alternative method 3 (getUserTemplate) failed:', templateError.message);
+      console.log('Alternative method 3 (getUserTemplate) failed:', templateError.message);
     }
     
     // If all methods fail, return empty array but with info
-    console.log('⚠️ All user retrieval methods exhausted - device may not have enrolled users or firmware limitation');
+    console.log('All user retrieval methods exhausted - device may not have enrolled users or firmware limitation');
     return [];
   }
 
@@ -443,7 +449,7 @@ class EnhancedZKTecoService {
       // Handle different possible response formats
       userArray = usersData.data || usersData.users || usersData.result || [usersData];
     } else {
-      console.log('⚠️ Unexpected users response format, using empty array');
+      console.log('Unexpected users response format, using empty array');
       userArray = [];
     }
 
@@ -468,7 +474,7 @@ class EnhancedZKTecoService {
       };
     });
 
-    console.log(`✅ Formatted ${formattedUsers.length} users`);
+    console.log(`Formatted ${formattedUsers.length} users`);
     return formattedUsers;
   }
 
@@ -478,7 +484,7 @@ class EnhancedZKTecoService {
       await this.connect();
     }
 
-    console.log(`📊 Fetching attendance logs from ZKTeco device...`);
+    console.log(`Fetching attendance logs from ZKTeco device...`);
     
     try {
       let attendanceData = null;
@@ -487,14 +493,14 @@ class EnhancedZKTecoService {
         // zklib uses callback-based getAttendance
         attendanceData = await new Promise((resolve, reject) => {
           const timeout = setTimeout(() => {
-            console.log('⚠️ getAttendance timeout - trying to continue without attendance data');
+            console.log('getAttendance timeout - trying to continue without attendance data');
             resolve([]); // Resolve with empty array instead of rejecting
           }, 30000);
           
           this.zkInstance.getAttendance((err, data) => {
             clearTimeout(timeout);
             if (err) {
-              console.log('⚠️ getAttendance failed:', err.message);
+              console.log('getAttendance failed:', err.message);
               resolve([]); // Resolve with empty array instead of rejecting
             } else {
               resolve(data);
@@ -506,12 +512,12 @@ class EnhancedZKTecoService {
         try {
           attendanceData = await this.nodeZkInstance.getAttendances();
         } catch (getAttendancesError) {
-          console.log('⚠️ getAttendances failed, trying getAttendance:', getAttendancesError.message);
+          console.log('getAttendances failed, trying getAttendance:', getAttendancesError.message);
           // Fallback to getAttendance if getAttendances is not available
           attendanceData = await new Promise((resolve, reject) => {
             this.nodeZkInstance.getAttendance((err, data) => {
               if (err) {
-                console.log('⚠️ getAttendance also failed:', err.message);
+                console.log('getAttendance also failed:', err.message);
                 resolve([]);
               } else {
                 resolve(data);
@@ -536,7 +542,7 @@ class EnhancedZKTecoService {
       
       return logsArray;
     } catch (error) {
-      console.error(`⚠️ Failed to get attendance logs: ${error.message}, continuing with empty logs`);
+      console.error(`Failed to get attendance logs: ${error.message}, continuing with empty logs`);
       return []; // Return empty array instead of throwing error
     }
   }
@@ -550,7 +556,7 @@ class EnhancedZKTecoService {
     } else if (attendanceData && typeof attendanceData === 'object') {
       logsArray = attendanceData.data || attendanceData.logs || attendanceData.records || [attendanceData];
     } else {
-      console.log('⚠️ Unexpected attendance response format, using empty array');
+      console.log('Unexpected attendance response format, using empty array');
       logsArray = [];
     }
 
@@ -565,7 +571,7 @@ class EnhancedZKTecoService {
       rawData: log
     }));
 
-    console.log(`✅ Formatted ${formattedLogs.length} attendance logs`);
+    console.log(`Formatted ${formattedLogs.length} attendance logs`);
     return formattedLogs;
   }
 
@@ -575,7 +581,7 @@ class EnhancedZKTecoService {
         await new Promise((resolve, reject) => {
           this.zkInstance.disableDevice((err) => {
             if (err) {
-              console.log('⚠️ Could not disable device:', err.message);
+              console.log('Could not disable device:', err.message);
             }
             resolve();
           });
@@ -584,7 +590,7 @@ class EnhancedZKTecoService {
         await this.nodeZkInstance.disableDevice();
       }
     } catch (error) {
-      console.log('⚠️ Error disabling device:', error.message);
+      console.log('Error disabling device:', error.message);
     }
   }
 
@@ -594,7 +600,7 @@ class EnhancedZKTecoService {
         await new Promise((resolve) => {
           this.zkInstance.enableDevice((err) => {
             if (err) {
-              console.log('⚠️ Could not enable device:', err.message);
+              console.log('Could not enable device:', err.message);
             }
             resolve();
           });
@@ -603,7 +609,7 @@ class EnhancedZKTecoService {
         await this.nodeZkInstance.enableDevice();
       }
     } catch (error) {
-      console.log('⚠️ Error enabling device:', error.message);
+      console.log('Error enabling device:', error.message);
     }
   }
 
@@ -619,13 +625,13 @@ class EnhancedZKTecoService {
         }
       }
     } catch (error) {
-      console.log('⚠️ Error during disconnection:', error.message);
+      console.log('Error during disconnection:', error.message);
     }
     
     this.isConnected = false;
     this.zkInstance = null;
     this.nodeZkInstance = null;
-    console.log(`🔌 Disconnected from ZKTeco device at ${this.ip}:${this.port}`);
+    console.log(`Disconnected from ZKTeco device at ${this.ip}:${this.port}`);
   }
 
   // Get available methods for diagnostics
