@@ -38,7 +38,7 @@ router.get(
       const { ip } = req.params;
       const { startDate, endDate, limit = 10 } = req.query;
 
-      console.log(`🔍 Fetching performance for machine ${ip}`);
+      console.log(`Fetching performance for machine ${ip}`);
 
       // Default to last 30 days
       const defaultEndDate = new Date();
@@ -49,16 +49,16 @@ router.get(
       const queryEndDate = endDate ? new Date(endDate) : defaultEndDate;
 
       // Step 1: Get users from machine
-      console.log(`📋 Step 1: Getting users from machine ${ip}`);
+      console.log(`Step 1: Getting users from machine ${ip}`);
       const zkService = new ZKTecoService(ip, 4370);
       await zkService.connect();
       const machineUsers = await zkService.getUsers();
       await zkService.disconnect();
 
-      console.log(`👥 Found ${machineUsers.length} users in machine`);
+      console.log(`Found ${machineUsers.length} users in machine`);
 
       // Step 2: Get attendance data for these users
-      console.log(`📊 Step 2: Getting attendance data`);
+      console.log(`Step 2: Getting attendance data`);
       const attendanceCollection =
         mongoose.connection.db.collection("attendancelogs");
 
@@ -78,11 +78,11 @@ router.get(
         if (userAttendance.length > 0) {
           usersWithData.push({ user, attendance: userAttendance });
           console.log(
-            `✅ User ${user.name} (UID: ${userId}): ${userAttendance.length} records`
+            `User ${user.name} (UID: ${userId}): ${userAttendance.length} records`
           );
         } else {
           console.log(
-            `⚠️ User ${user.name} (UID: ${userId}): No records found`
+            `User ${user.name} (UID: ${userId}): No records found`
           );
         }
       }
@@ -90,14 +90,14 @@ router.get(
       // If no machine users have data, get users with actual attendance data
       if (usersWithData.length === 0) {
         console.log(
-          `🔍 No machine users have attendance data. Getting users with actual data...`
+          `No machine users have attendance data. Getting users with actual data...`
         );
 
         const activeUIDs = await attendanceCollection.distinct("uid", {
           timestamp: { $gte: queryStartDate, $lte: queryEndDate },
         });
 
-        console.log(`📊 Found active UIDs: ${activeUIDs}`);
+        console.log(`Found active UIDs: ${activeUIDs}`);
 
         for (const uid of activeUIDs) {
           const userAttendance = await attendanceCollection
@@ -122,14 +122,14 @@ router.get(
               attendance: userAttendance,
             });
             console.log(
-              `✅ Virtual User ${uid}: ${userAttendance.length} records`
+              `Virtual User ${uid}: ${userAttendance.length} records`
             );
           }
         }
       }
 
       console.log(
-        `📈 Processing ${usersWithData.length} users with actual attendance data`
+        `Processing ${usersWithData.length} users with actual attendance data`
       );
 
       // Create performance array
@@ -245,7 +245,7 @@ router.get(
       ).length;
 
       console.log(
-        `✅ Performance analysis complete: ${leaderboard.length} users ranked`
+        `Performance analysis complete: ${leaderboard.length} users ranked`
       );
 
       res.json({
@@ -273,7 +273,7 @@ router.get(
         },
       });
     } catch (error) {
-      console.error("❌ Machine users performance error:", error);
+      console.error("Machine users performance error:", error);
       res.status(500).json({
         success: false,
         message: "Failed to fetch machine users performance",
@@ -324,7 +324,7 @@ router.get("/machine-summary/:ip", authenticateToken, async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("❌ Machine summary error:", error);
+    console.error("Machine summary error:", error);
     res.status(500).json({
       success: false,
       message: "Failed to fetch machine summary",

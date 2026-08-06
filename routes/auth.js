@@ -1,13 +1,15 @@
 const express = require("express");
 const { generateToken } = require("../utils/jwt");
 const { authenticateToken } = require("../middleware/auth");
+const { validatePhoneField } = require("../middleware/phoneValidation");
+const { serializeAuthUser } = require("../utils/serializeUser");
 const User = require("../models/User");
 const Company = require("../models/Company");
 
 const router = express.Router();
 
 // Register company admin
-router.post("/register-company", async (req, res) => {
+router.post("/register-company", validatePhoneField("phone"), async (req, res) => {
   console.log("=== REGISTRATION REQUEST ===");
   console.log("Request body:", req.body);
   console.log("Headers:", req.headers);
@@ -104,13 +106,7 @@ router.post("/register-company", async (req, res) => {
     res.status(201).json({
       message: "Company registered successfully",
       token,
-      user: {
-        id: admin._id,
-        name: admin.name,
-        email: admin.email,
-        role: admin.role,
-        company: company.name,
-      },
+      user: serializeAuthUser({ ...admin.toObject(), company }),
     });
   } catch (error) {
     console.error("Registration error:", error);
@@ -184,16 +180,7 @@ router.post("/login", async (req, res) => {
     res.status(200).json({
       message: "Login successful",
       token,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        employeeId: user.employeeId,
-        department: user.department,
-        position: user.position,
-        company: user.company.name,
-      },
+      user: serializeAuthUser(user),
     });
   } catch (error) {
     console.error("Login error:", error);
@@ -205,16 +192,16 @@ router.post("/login", async (req, res) => {
 });
 
 // Invite employee
-router.post("/invite-employee", authenticateToken, async (req, res) => {
-  console.log("🟢 === INVITE ROUTE HIT === REQUEST RECEIVED ===");
-  console.log("🟢 Method:", req.method, "URL:", req.url);
-  console.log("🟢 Body:", req.body);
-  console.log("🟢 User:", req.user?.email);
+router.post("/invite-employee", authenticateToken, validatePhoneField("phone"), async (req, res) => {
+  console.log("=== INVITE ROUTE HIT === REQUEST RECEIVED ===");
+  console.log("Method:", req.method, "URL:", req.url);
+  console.log("Body:", req.body);
+  console.log("User:", req.user?.email);
 
   const startTime = Date.now();
 
   try {
-    console.log("🚀 INVITE ROUTE START:", new Date().toISOString());
+    console.log("INVITE ROUTE START:", new Date().toISOString());
 
     // Only admins can invite employees
     if (req.user.role !== "admin") {
@@ -223,10 +210,10 @@ router.post("/invite-employee", authenticateToken, async (req, res) => {
         .json({ message: "Only admins can invite employees" });
     }
 
-    const { name, email, department, position, joinDate, employeeId } =
+    const { name, email, phone, department, position, joinDate, employeeId } =
       req.body;
-    console.log("📝 Processing invite for:", email);
-    console.log("🆔 Custom Employee ID provided:", employeeId);
+    console.log("Processing invite for:", email);
+    console.log("Custom Employee ID provided:", employeeId);
 
     // An existing record does NOT always mean "already registered".
     //
@@ -237,11 +224,11 @@ router.post("/invite-employee", authenticateToken, async (req, res) => {
     // "Email already registered" for someone who was never actually
     // registered. Only an ACCEPTED invite (status !== "pending") is a genuine
     // conflict; a still-pending one is re-invited below.
-    console.log("🔍 Checking for existing user:", email);
+    console.log("Checking for existing user:", email);
     const existingUser = await User.findOne({ email });
 
     if (existingUser && existingUser.status !== "pending") {
-      console.log("❌ Email belongs to an active account:", email);
+      console.log("Email belongs to an active account:", email);
       return res.status(400).json({
         message: "Email already registered",
         hint: "This person has already accepted an invitation and has an active account.",
@@ -250,16 +237,16 @@ router.post("/invite-employee", authenticateToken, async (req, res) => {
 
     const isResend = !!existingUser;
     if (isResend) {
-      console.log("🔁 Existing PENDING invite found — resending instead of failing.");
+      console.log("Existing PENDING invite found - resending instead of failing.");
     } else {
-      console.log("✅ Email available:", email);
+      console.log("Email available:", email);
     }
 
     // Check if custom employeeId already exists (if provided).
     // Exclude the pending record we're about to re-invite, or it would
     // collide with itself.
     if (employeeId) {
-      console.log("🔍 Checking for existing employeeId:", employeeId);
+      console.log("Checking for existing employeeId:", employeeId);
       const employeeIdQuery = {
         employeeId,
         company: req.user.company,
@@ -267,10 +254,10 @@ router.post("/invite-employee", authenticateToken, async (req, res) => {
       };
       const existingEmployee = await User.findOne(employeeIdQuery);
       if (existingEmployee) {
-        console.log("❌ Employee ID already exists:", employeeId);
+        console.log("Employee ID already exists:", employeeId);
         return res.status(400).json({ message: "Employee ID already exists" });
       }
-      console.log("✅ Employee ID available:", employeeId);
+      console.log("Employee ID available:", employeeId);
     }
 
     // Reuse the pending record on a resend so we don't create duplicates;
@@ -286,9 +273,12 @@ router.post("/invite-employee", authenticateToken, async (req, res) => {
       employee.invitedBy = req.user._id;
       employee.status = "pending";
       if (employeeId) employee.employeeId = employeeId;
-      console.log("👤 Updating existing pending employee record...");
+      // Only overwrite a stored number when a new one was supplied, so a
+      // resend does not wipe a number the employee set themselves.
+      if (phone) employee.phone = phone;
+      console.log("Updating existing pending employee record...");
     } else {
-      console.log("👤 Creating employee record...");
+      console.log("Creating employee record...");
       employee = new User({
         name,
         email,
@@ -299,17 +289,18 @@ router.post("/invite-employee", authenticateToken, async (req, res) => {
         company: req.user.company,
         invitedBy: req.user._id,
         status: "pending",
+        ...(phone && { phone }), // Enables WhatsApp notifications for this user
         ...(employeeId && { employeeId }), // Use custom employeeId if provided
       });
     }
 
     // Generate a fresh invitation token (invalidates any previous link)
-    console.log("🔑 Generating invitation token...");
+    console.log("Generating invitation token...");
     const invitationToken = employee.generateInvitationToken();
 
-    console.log("💾 Saving employee to database...");
+    console.log("Saving employee to database...");
     await employee.save();
-    console.log(`✅ Employee ${isResend ? "updated" : "saved"} in database`);
+    console.log(`Employee ${isResend ? "updated" : "saved"} in database`);
 
     // Queue email for background processing instead of sending synchronously
     const emailQueue = require("../utils/emailQueue");
@@ -329,9 +320,9 @@ router.post("/invite-employee", authenticateToken, async (req, res) => {
 
     const totalTime = Date.now() - startTime;
     console.log(
-      `✅ Employee ${isResend ? "re-invited" : "created"} and email queued in ${totalTime}ms`
+      `Employee ${isResend ? "re-invited" : "created"} and email queued in ${totalTime}ms`
     );
-    console.log(`📬 Email job ID: ${emailJobId}`);
+    console.log(`Email job ID: ${emailJobId}`);
 
     // Respond immediately with success
     res.status(isResend ? 200 : 201).json({
@@ -353,11 +344,11 @@ router.post("/invite-employee", authenticateToken, async (req, res) => {
       processingTime: totalTime,
       note: "Email delivery is processing in background - employee will receive invitation shortly",
     });
-    console.log("📤 SUCCESS response sent to frontend");
+    console.log("SUCCESS response sent to frontend");
   } catch (error) {
     const totalTime = Date.now() - startTime;
-    console.error("💥 Invite route error:", error.message);
-    console.error(`💥 Failed after ${totalTime}ms`);
+    console.error("Invite route error:", error.message);
+    console.error(`Failed after ${totalTime}ms`);
 
     res.status(500).json({
       message: "Failed to invite employee",
@@ -365,12 +356,12 @@ router.post("/invite-employee", authenticateToken, async (req, res) => {
       processingTime: totalTime,
       timestamp: new Date().toISOString(),
     });
-    console.log("📤 ERROR response sent to frontend");
+    console.log("ERROR response sent to frontend");
   }
 });
 
 // Invite admin
-router.post("/invite-admin", authenticateToken, async (req, res) => {
+router.post("/invite-admin", authenticateToken, validatePhoneField("phone"), async (req, res) => {
   try {
     // Only admins can invite other admins
     if (req.user.role !== "admin") {
@@ -382,13 +373,14 @@ router.post("/invite-admin", authenticateToken, async (req, res) => {
     const {
       name,
       email,
+      phone,
       department = "Administration",
       position = "Administrator",
     } = req.body;
 
     // A still-pending record means the invite was created but never accepted
     // (commonly because an earlier email send failed). Re-invite rather than
-    // permanently blocking the address — see the employee invite route above.
+    // permanently blocking the address - see the employee invite route above.
     const existingUser = await User.findOne({ email });
     if (existingUser && existingUser.status !== "pending") {
       return res.status(400).json({
@@ -408,7 +400,9 @@ router.post("/invite-admin", authenticateToken, async (req, res) => {
       admin.company = req.user.company;
       admin.invitedBy = req.user._id;
       admin.status = "pending";
-      console.log("🔁 Existing PENDING admin invite found — resending.");
+      // Only overwrite a stored number when a new one was supplied.
+      if (phone) admin.phone = phone;
+      console.log("Existing PENDING admin invite found - resending.");
     } else {
       admin = new User({
         name,
@@ -420,6 +414,7 @@ router.post("/invite-admin", authenticateToken, async (req, res) => {
         company: req.user.company,
         invitedBy: req.user._id,
         status: "pending",
+        ...(phone && { phone }), // Enables WhatsApp notifications for this user
       });
     }
 
@@ -430,7 +425,7 @@ router.post("/invite-admin", authenticateToken, async (req, res) => {
 
     // Send invitation email
     const { sendInvitationEmail } = require("../utils/email");
-    console.log("🚀 Sending admin invitation email to:", email);
+    console.log("Sending admin invitation email to:", email);
 
     try {
       await sendInvitationEmail(
@@ -443,7 +438,7 @@ router.post("/invite-admin", authenticateToken, async (req, res) => {
         "admin"
       );
 
-      console.log("✅ Admin invitation email sent successfully");
+      console.log("Admin invitation email sent successfully");
       res.status(201).json({
         message: "Admin invitation sent successfully",
         admin: {
@@ -457,8 +452,8 @@ router.post("/invite-admin", authenticateToken, async (req, res) => {
         },
       });
     } catch (emailError) {
-      console.error("❌ Admin email sending error:", emailError.message);
-      console.error("❌ Full admin email error:", emailError);
+      console.error("Admin email sending error:", emailError.message);
+      console.error("Full admin email error:", emailError);
 
       // Return success but with email warning - don't fail the invitation
       return res.status(201).json({
@@ -500,19 +495,7 @@ router.get("/profile", authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user._id).populate("company");
 
-    res.status(200).json({
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        employeeId: user.employeeId,
-        department: user.department,
-        position: user.position,
-        joinDate: user.joinDate,
-        company: user.company.name,
-      },
-    });
+    res.status(200).json({ user: serializeAuthUser(user) });
   } catch (error) {
     res
       .status(500)
@@ -589,17 +572,7 @@ router.post("/verify-invitation/:token", async (req, res) => {
     res.status(200).json({
       message: "Account verified successfully",
       token: jwtToken,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        employeeId: user.employeeId,
-        department: user.department,
-        position: user.position,
-        company: user.company.name,
-        status: user.status,
-      },
+      user: serializeAuthUser(user),
     });
   } catch (error) {
     console.error("Verification error:", error);

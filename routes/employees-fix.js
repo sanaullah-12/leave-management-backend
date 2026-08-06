@@ -12,7 +12,7 @@ router.get(
   async (req, res) => {
     try {
       const { ip } = req.params;
-      console.log(`📋 Fetching employees from ZKTeco machine at ${ip}`);
+      console.log(`Fetching employees from ZKTeco machine at ${ip}`);
 
       const zkService = new ZKTecoService(ip, 4370);
 
@@ -55,7 +55,7 @@ router.get(
         fetchedAt: new Date(),
       });
     } catch (error) {
-      console.error(`❌ Failed to fetch employees:`, error);
+      console.error(`Failed to fetch employees:`, error);
       res.status(500).json({
         success: false,
         message: `Failed to fetch employees: ${error.message}`,

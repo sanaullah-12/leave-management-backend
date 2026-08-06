@@ -6,7 +6,7 @@
  * service. Lazy-initialised from the HTTP server in server.js.
  *
  * Scalability: to run multiple backend instances, attach the Redis adapter in
- * `init()` (io.adapter(createAdapter(pub, sub))) — nothing else changes because
+ * `init()` (io.adapter(createAdapter(pub, sub))) - nothing else changes because
  * all emits go through room names.
  */
 const { Server } = require("socket.io");
@@ -55,17 +55,17 @@ const init = (httpServer) => {
 
   // 2) Wire per-connection lifecycle (rooms, presence, cleanup).
   io.on("connection", (socket) => {
-    console.log(`⚡ Socket connected: ${socket.user?.id} (${socket.user?.role})`);
+    console.log(`Socket connected: ${socket.user?.id} (${socket.user?.role})`);
     registerHandlers(io, socket);
   });
 
-  console.log("⚡ Socket.IO initialised");
+  console.log("Socket.IO initialised");
   return io;
 };
 
 /** Get the initialised io instance (throws if called before init). */
 const getIO = () => {
-  if (!io) throw new Error("Socket.IO not initialised — call init() first");
+  if (!io) throw new Error("Socket.IO not initialised - call init() first");
   return io;
 };
 

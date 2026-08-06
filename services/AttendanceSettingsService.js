@@ -22,7 +22,7 @@ class AttendanceSettingsService {
         },
       };
     } catch (error) {
-      console.error("❌ Failed to get attendance settings:", error);
+      console.error("Failed to get attendance settings:", error);
 
       // Return safe defaults on error
       return {
@@ -72,7 +72,7 @@ class AttendanceSettingsService {
         userId
       );
 
-      console.log("✅ Late time settings updated in database:", {
+      console.log("Late time settings updated in database:", {
         useCustomCutoff: updatedSettings.lateTimeSettings.useCustomCutoff,
         cutoffTime: updatedSettings.lateTimeSettings.cutoffTime,
         updatedBy: updatedSettings.updatedBy,
@@ -84,7 +84,7 @@ class AttendanceSettingsService {
         settings: updatedSettings.lateTimeSettings,
       };
     } catch (error) {
-      console.error("❌ Failed to update late time settings:", error);
+      console.error("Failed to update late time settings:", error);
       return {
         success: false,
         message: "Failed to update late time settings",
@@ -115,7 +115,7 @@ class AttendanceSettingsService {
       console.log(`⏰ Using DEFAULT cutoff time: ${settings.cutoffTime}`);
       return settings.cutoffTime;
     } catch (error) {
-      console.error("❌ Error getting effective cutoff time:", error);
+      console.error("Error getting effective cutoff time:", error);
       console.log(`⏰ Using FALLBACK cutoff time: 09:00`);
       return "09:00";
     }
@@ -151,7 +151,7 @@ class AttendanceSettingsService {
         settings: enhancedSettings,
       };
     } catch (error) {
-      console.error("❌ Failed to get enhanced settings:", error);
+      console.error("Failed to get enhanced settings:", error);
 
       // Return safe defaults
       return {
@@ -195,13 +195,13 @@ class AttendanceSettingsService {
         });
 
         await defaultSettings.save();
-        console.log("✅ Initialized default attendance settings");
+        console.log("Initialized default attendance settings");
         return defaultSettings;
       }
 
       return existingSettings;
     } catch (error) {
-      console.error("❌ Failed to initialize default settings:", error);
+      console.error("Failed to initialize default settings:", error);
       throw error;
     }
   }

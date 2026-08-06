@@ -1,4 +1,4 @@
-/** Welcome email — sent once an invited user has completed registration. */
+/** Welcome email - sent once an invited user has completed registration. */
 
 const { baseLayout, button, detailsBox, greeting, p, COLORS } = require("./layout");
 
@@ -21,7 +21,7 @@ module.exports = ({ user, loginUrl }) => {
     ${button(loginUrl, "Go to Dashboard", COLORS.success)}`;
 
   return {
-    subject: `Welcome to ${user.company} — your account is ready`,
+    subject: `Welcome to ${user.company} - your account is ready`,
     html: baseLayout({
       title: "Welcome",
       heading: "Your account is ready",

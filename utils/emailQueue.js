@@ -28,8 +28,8 @@ class EmailQueue {
       this.queue.push(job);
     }
 
-    console.log(`📬 Email job added to queue: ${jobType} (Priority: ${priority})`);
-    console.log(`📊 Queue size: ${this.queue.length}`);
+    console.log(`Email job added to queue: ${jobType} (Priority: ${priority})`);
+    console.log(`Queue size: ${this.queue.length}`);
 
     // Start processing if not already running
     this.startProcessing();
@@ -42,7 +42,7 @@ class EmailQueue {
     if (this.processing) return;
 
     this.processing = true;
-    console.log('🚀 Email queue processing started');
+    console.log('Email queue processing started');
 
     // Process queue every 2 seconds
     this.processingInterval = setInterval(() => {
@@ -60,7 +60,7 @@ class EmailQueue {
       this.processingInterval = null;
     }
     this.processing = false;
-    console.log('🛑 Email queue processing stopped');
+    console.log('Email queue processing stopped');
   }
 
   // Process next job in queue
@@ -71,7 +71,7 @@ class EmailQueue {
     job.status = 'processing';
     job.attempts++;
 
-    console.log(`📧 Processing email job: ${job.type} (Attempt ${job.attempts}/${job.maxAttempts})`);
+    console.log(`Processing email job: ${job.type} (Attempt ${job.attempts}/${job.maxAttempts})`);
 
     try {
       let result;
@@ -98,11 +98,11 @@ class EmailQueue {
       job.completedAt = new Date();
       job.result = result;
 
-      console.log(`✅ Email job completed: ${job.type}`);
-      console.log(`📧 Message ID: ${result.messageId}`);
+      console.log(`Email job completed: ${job.type}`);
+      console.log(`Message ID: ${result.messageId}`);
 
     } catch (error) {
-      console.error(`❌ Email job failed: ${job.type} - ${error.message}`);
+      console.error(`Email job failed: ${job.type} - ${error.message}`);
 
       job.status = 'failed';
       job.error = error.message;
@@ -114,7 +114,7 @@ class EmailQueue {
       // the real cause under duplicate noise.
       if (error.emailDiagnosis && error.emailDiagnosis.retryable === false) {
         console.error(
-          `🚫 Not re-queueing: ${error.emailDiagnosis.title} — retrying cannot fix this.`
+          `Not re-queueing: ${error.emailDiagnosis.title} - retrying cannot fix this.`
         );
         console.error(`   Fix: ${error.emailDiagnosis.solution}`);
         return;
@@ -123,7 +123,7 @@ class EmailQueue {
       // Retry if attempts remaining
       if (job.attempts < job.maxAttempts) {
         job.status = 'retrying';
-        console.log(`🔄 Retrying email job: ${job.type} (Attempt ${job.attempts + 1}/${job.maxAttempts})`);
+        console.log(`Retrying email job: ${job.type} (Attempt ${job.attempts + 1}/${job.maxAttempts})`);
 
         // Add back to queue with delay
         setTimeout(() => {
@@ -134,7 +134,7 @@ class EmailQueue {
         }, 5000); // 5 second delay before retry
 
       } else {
-        console.error(`💀 Email job permanently failed: ${job.type} after ${job.maxAttempts} attempts`);
+        console.error(`Email job permanently failed: ${job.type} after ${job.maxAttempts} attempts`);
       }
     }
   }
@@ -165,12 +165,12 @@ const emailQueue = new EmailQueue();
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
-  console.log('📪 Gracefully shutting down email queue...');
+  console.log('Gracefully shutting down email queue...');
   emailQueue.stopProcessing();
 });
 
 process.on('SIGINT', () => {
-  console.log('📪 Gracefully shutting down email queue...');
+  console.log('Gracefully shutting down email queue...');
   emailQueue.stopProcessing();
 });
 

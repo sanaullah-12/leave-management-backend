@@ -1,7 +1,7 @@
 const mongoose = require("mongoose");
 
 /**
- * EmployeeVoice — a secure communication record raised by an employee
+ * EmployeeVoice - a secure communication record raised by an employee
  * (workplace issue, complaint, suggestion, HR support, appreciation or feedback).
  * Mirrors the Leave model's company/employee tenant-scoping and attachment shape.
  */
@@ -117,7 +117,7 @@ const employeeVoiceSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Query performance — mirrors the Leave model indexes.
+// Query performance - mirrors the Leave model indexes.
 employeeVoiceSchema.index({ company: 1, status: 1 });
 employeeVoiceSchema.index({ employee: 1, status: 1 });
 employeeVoiceSchema.index({ company: 1, createdAt: -1 });

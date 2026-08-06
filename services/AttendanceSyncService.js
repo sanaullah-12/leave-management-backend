@@ -27,7 +27,7 @@ class AttendanceSyncService {
       // Step 1: Connect to device
       console.log('Step 1: Connecting to device...');
       await biometricService.connect();
-      console.log('✅ Connected\n');
+      console.log('Connected\n');
 
       // Step 2: Fetch logs from device
       console.log('Step 2: Fetching attendance logs from device...');
@@ -38,11 +38,11 @@ class AttendanceSyncService {
       }
 
       const deviceLogs = await biometricService.getAttendanceLogs(startDate, endDate);
-      console.log(`✅ Retrieved ${deviceLogs.length} logs from device\n`);
+      console.log(`Retrieved ${deviceLogs.length} logs from device\n`);
 
       // Step 3: Disconnect from device
       await biometricService.disconnect();
-      console.log('✅ Disconnected from device\n');
+      console.log('Disconnected from device\n');
 
       if (deviceLogs.length === 0) {
         console.log('No logs to sync');
@@ -77,7 +77,7 @@ class AttendanceSyncService {
         };
       });
 
-      console.log(`✅ Transformed ${transformedLogs.length} logs\n`);
+      console.log(`Transformed ${transformedLogs.length} logs\n`);
 
       // Step 5: Bulk insert into database
       console.log('Step 4: Inserting logs into database...');
@@ -88,10 +88,10 @@ class AttendanceSyncService {
       console.log(`\n${'='.repeat(70)}`);
       console.log('SYNC COMPLETE');
       console.log(`${'='.repeat(70)}`);
-      console.log(`✅ Inserted: ${result.inserted}`);
-      console.log(`⏭️  Skipped (duplicates): ${result.skipped}`);
-      console.log(`📊 Total: ${result.total}`);
-      console.log(`⏱️  Duration: ${duration}s`);
+      console.log(`Inserted: ${result.inserted}`);
+      console.log(`⏭ Skipped (duplicates): ${result.skipped}`);
+      console.log(`Total: ${result.total}`);
+      console.log(`⏱ Duration: ${duration}s`);
       console.log(`${'='.repeat(70)}\n`);
 
       return {
@@ -107,7 +107,7 @@ class AttendanceSyncService {
       };
 
     } catch (error) {
-      console.error('\n❌ Sync failed:', error.message);
+      console.error('\n Sync failed:', error.message);
 
       // Ensure device is disconnected
       try {

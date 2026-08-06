@@ -39,7 +39,7 @@ router.get("/simple-leaderboard", authenticateToken, async (req, res) => {
     const queryStartDate = startDate ? new Date(startDate) : defaultStartDate;
     const queryEndDate = endDate ? new Date(endDate) : defaultEndDate;
 
-    console.log("🔍 Simple Leaderboard Query:", {
+    console.log("Simple Leaderboard Query:", {
       queryStartDate,
       queryEndDate,
       limit,
@@ -102,7 +102,7 @@ router.get("/simple-leaderboard", authenticateToken, async (req, res) => {
       ])
       .toArray();
 
-    console.log(`📊 Found ${employeeStats.length} employees with data`);
+    console.log(`Found ${employeeStats.length} employees with data`);
 
     // Calculate working days in period
     const totalWorkingDays = getWorkingDays(queryStartDate, queryEndDate);
@@ -196,7 +196,7 @@ router.get("/simple-leaderboard", authenticateToken, async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("❌ Simple leaderboard error:", error);
+    console.error("Simple leaderboard error:", error);
     res.status(500).json({
       success: false,
       message: "Failed to fetch attendance performance",
@@ -266,7 +266,7 @@ router.get("/simple-stats", authenticateToken, async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("❌ Simple stats error:", error);
+    console.error("Simple stats error:", error);
     res.status(500).json({
       success: false,
       message: "Failed to fetch attendance statistics",

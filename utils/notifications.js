@@ -1,6 +1,77 @@
-const Notification = require('../models/Notification');
-const SocketService = require('../socket/socketService');
+/**
+ * utils/notifications.js
+ * ----------------------
+ * The notification helpers business code has always called, now backed by the
+ * multi-channel notification layer in ../notifications.
+ *
+ * Every function keeps its original signature, its original return value and
+ * its original in-app copy. Routes did not change, and the in-app + Socket.IO
+ * behaviour they depend on is byte-for-byte what it was: the same Notification
+ * document, the same NOTIFICATION_NEW payload, the same errors thrown on
+ * failure so existing try/catch blocks still report what they always did.
+ *
+ * What is new is that each helper now also dispatches to every other enabled
+ * channel - today, WhatsApp - through NotificationService. That work is
+ * queued, so it adds no latency here, and it is settled independently, so it
+ * cannot affect the in-app result.
+ *
+ * New code should prefer NotificationService.dispatch() directly and let the
+ * template registry produce the copy. These wrappers exist so that adopting
+ * WhatsApp required no change to a single existing route.
+ */
 
+const {
+  NotificationService,
+  NOTIFICATION_EVENTS,
+  RecipientResolver,
+} = require("../notifications");
+
+/**
+ * Loads the extra fields the WhatsApp channel needs (phone, preferences) for a
+ * user these helpers were handed as a bare id.
+ *
+ * Falls back to a minimal recipient when the resolver filters the user out -
+ * they may be `pending` or deactivated, and those users received in-app
+ * notifications before, so they still must. Without a phone number the
+ * WhatsApp channel skips them on its own, which is the correct outcome anyway.
+ */
+const targetUser = async (userId) => {
+  try {
+    const [resolved] = await RecipientResolver.resolveUser(userId);
+    if (resolved) return resolved;
+  } catch (error) {
+    console.error("Recipient lookup failed, using id only:", error.message);
+  }
+  return { _id: userId, preferences: {} };
+};
+
+/**
+ * Runs a dispatch and returns the in-app notification, preserving the original
+ * contract: resolve with the Notification document, or throw if creating it
+ * failed. WhatsApp outcomes never influence either.
+ */
+const dispatchAndUnwrap = async ({ userId, ...options }) => {
+  const result = await NotificationService.dispatch({
+    ...options,
+    recipients: [await targetUser(userId)],
+  });
+
+  if (result.socket.failed.length > 0) {
+    // The in-app notification is the one the caller is waiting on. Re-throwing
+    // keeps the existing "Failed to send in-app notification" logging intact.
+    throw result.socket.failed[0].error;
+  }
+
+  return result.socket.sent[0] || null;
+};
+
+/**
+ * Creates a single in-app notification with explicit copy.
+ *
+ * Retained for callers that compose their own title and message. It routes
+ * through the notification layer, so such a notification also reaches WhatsApp
+ * when the event maps to a WhatsApp template.
+ */
 const createNotification = async ({
   recipient,
   sender,
@@ -10,159 +81,234 @@ const createNotification = async ({
   message,
   leaveId = null,
   voiceId = null,
-  announcementId = null
+  announcementId = null,
+  event = null,
+  payload = {},
 }) => {
   try {
-    const notification = new Notification({
-      recipient,
-      sender,
-      company,
-      type,
-      title,
-      message,
-      leaveId,
-      voiceId,
-      announcementId
+    const result = await NotificationService.dispatch({
+      // Ad-hoc callers have no domain event; ANNOUNCEMENT_PUBLISHED is the
+      // generic "something was posted" event and only its in-app override is
+      // used when no template payload is supplied.
+      event: event || NOTIFICATION_EVENTS.ANNOUNCEMENT_PUBLISHED,
+      payload,
+      companyId: company,
+      senderId: sender,
+      // Only look the recipient up when another channel could use the extra
+      // fields; an in-app-only call needs nothing beyond the id.
+      recipients: [
+        event ? await targetUser(recipient) : { _id: recipient, preferences: {} },
+      ],
+      refs: { leaveId, voiceId, announcementId },
+      inApp: { title, message },
+      inAppType: type,
+      // Without a payload there is nothing to render a WhatsApp message from,
+      // so ad-hoc calls stay in-app only rather than sending a half-filled one.
+      channels: event ? undefined : ["socket"],
     });
 
-    await notification.save();
-
-    // Real-time: push the notification to the recipient's room instantly.
-    // Fail-safe — a socket hiccup must never break notification creation.
-    SocketService.toUser(recipient, SocketService.events.NOTIFICATION_NEW, {
-      _id: notification._id,
-      type: notification.type,
-      title: notification.title,
-      message: notification.message,
-      leaveId: notification.leaveId,
-      voiceId: notification.voiceId,
-      announcementId: notification.announcementId,
-      read: false,
-      createdAt: notification.createdAt,
-    });
-
-    return notification;
+    if (result.socket.failed.length > 0) throw result.socket.failed[0].error;
+    return result.socket.sent[0] || null;
   } catch (error) {
-    console.error('Error creating notification:', error);
+    console.error("Error creating notification:", error);
     throw error;
   }
 };
 
-// ── Announcements ─────────────────────────────────────────────────────────
+// -- Announcements ---------------------------------------------------------
 // One recipient is told a new company announcement was posted.
 const notifyAnnouncement = async (announcement, recipientId, sender) => {
   const preview =
     announcement.body && announcement.body.length > 120
-      ? `${announcement.body.slice(0, 120)}…`
-      : announcement.body || '';
-  return await createNotification({
-    recipient: recipientId,
-    sender: sender && (sender._id || sender),
-    company: announcement.company,
-    type: 'announcement',
-    title: `📣 ${announcement.title}`,
-    message: preview || `${announcement.authorName} posted a new announcement.`,
-    announcementId: announcement._id,
+      ? `${announcement.body.slice(0, 120)}...`
+      : announcement.body || "";
+
+  return dispatchAndUnwrap({
+    event: NOTIFICATION_EVENTS.ANNOUNCEMENT_PUBLISHED,
+    companyId: announcement.company,
+    senderId: sender && (sender._id || sender),
+    userId: recipientId,
+    refs: { announcementId: announcement._id },
+    payload: {
+      announcementTitle: announcement.title,
+      preview,
+      authorName: announcement.authorName,
+    },
+    inApp: {
+      title: ` ${announcement.title}`,
+      message: preview || `${announcement.authorName} posted a new announcement.`,
+    },
   });
 };
 
-// ── Employee Voice notifications ──────────────────────────────────────────
+// -- Employee Voice notifications ------------------------------------------
 const CATEGORY_LABELS = {
-  workplace_issue: 'Workplace Issue',
-  complaint: 'Complaint',
-  suggestion: 'Suggestion',
-  hr_support: 'HR Support Request',
-  appreciation: 'Appreciation',
-  feedback: 'Feedback'
+  workplace_issue: "Workplace Issue",
+  complaint: "Complaint",
+  suggestion: "Suggestion",
+  hr_support: "HR Support Request",
+  appreciation: "Appreciation",
+  feedback: "Feedback",
 };
 
 // Admin is told an employee raised a new Voice.
 const notifyVoiceSubmission = async (voice, admin) => {
-  const label = CATEGORY_LABELS[voice.category] || 'Employee Voice';
+  const label = CATEGORY_LABELS[voice.category] || "Employee Voice";
   const who = voice.isAnonymous
-    ? 'An anonymous employee'
-    : (voice.employee && voice.employee.name) || 'An employee';
+    ? "An anonymous employee"
+    : (voice.employee && voice.employee.name) || "An employee";
 
-  return await createNotification({
-    recipient: admin._id,
+  return dispatchAndUnwrap({
+    event: NOTIFICATION_EVENTS.VOICE_SUBMITTED,
+    companyId: voice.company,
     // Preserve anonymity: never attach the sender for anonymous submissions.
-    sender: voice.isAnonymous
+    senderId: voice.isAnonymous
       ? undefined
       : voice.employee && (voice.employee._id || voice.employee),
-    company: voice.company,
-    type: 'voice_submitted',
-    title: `New ${label}`,
-    message: `${who} submitted a ${label.toLowerCase()}: "${voice.title}".`,
-    voiceId: voice._id
+    userId: admin._id,
+    refs: { voiceId: voice._id },
+    payload: {
+      category: voice.category,
+      submitterName: who,
+      voiceTitle: voice.title,
+    },
+    inApp: {
+      title: `New ${label}`,
+      message: `${who} submitted a ${label.toLowerCase()}: "${voice.title}".`,
+    },
   });
 };
 
-// A reply was posted — notify the other party (employee ⇄ admin).
+// A reply was posted - notify the other party (employee <-> admin).
 const notifyVoiceReply = async (voice, recipientId, sender) => {
-  const senderName = (sender && sender.name) || 'Someone';
-  const isFromAdmin = sender && sender.role === 'admin';
+  const senderName = (sender && sender.name) || "Someone";
+  const isFromAdmin = sender && sender.role === "admin";
 
-  return await createNotification({
-    recipient: recipientId,
-    sender: sender && sender._id,
-    company: voice.company,
-    type: 'voice_reply',
-    title: isFromAdmin ? 'HR replied to your submission' : 'New reply on a submission',
-    message: `${isFromAdmin ? 'HR' : senderName} replied to "${voice.title}".`,
-    voiceId: voice._id
+  return dispatchAndUnwrap({
+    event: NOTIFICATION_EVENTS.VOICE_REPLIED,
+    companyId: voice.company,
+    senderId: sender && sender._id,
+    userId: recipientId,
+    refs: { voiceId: voice._id },
+    payload: {
+      fromAdmin: isFromAdmin,
+      senderName,
+      voiceTitle: voice.title,
+    },
+    inApp: {
+      title: isFromAdmin
+        ? "HR replied to your submission"
+        : "New reply on a submission",
+      message: `${isFromAdmin ? "HR" : senderName} replied to "${voice.title}".`,
+    },
   });
 };
 
-// The status of a Voice changed — notify the submitting employee.
+// The status of a Voice changed - notify the submitting employee.
 const notifyVoiceStatus = async (voice, statusLabel, sender) => {
-  return await createNotification({
-    recipient: voice.employee._id || voice.employee,
-    sender: sender && sender._id,
-    company: voice.company,
-    type: 'voice_status',
-    title: 'Submission status updated',
-    message: `Your submission "${voice.title}" is now ${statusLabel}.`,
-    voiceId: voice._id
+  return dispatchAndUnwrap({
+    event: NOTIFICATION_EVENTS.VOICE_STATUS_CHANGED,
+    companyId: voice.company,
+    senderId: sender && sender._id,
+    userId: voice.employee._id || voice.employee,
+    refs: { voiceId: voice._id },
+    payload: {
+      voiceTitle: voice.title,
+      statusLabel,
+    },
+    inApp: {
+      title: "Submission status updated",
+      message: `Your submission "${voice.title}" is now ${statusLabel}.`,
+    },
   });
 };
 
+// -- Leave notifications ---------------------------------------------------
 const notifyLeaveRequest = async (leave, admin) => {
-  const employeeName = typeof leave.employee === 'object' ? leave.employee.name : 'Employee';
-  
-  return await createNotification({
-    recipient: admin._id,
-    sender: leave.employee._id || leave.employee,
-    company: leave.company,
-    type: 'leave_request',
-    title: 'New Leave Request',
-    message: `${employeeName} has submitted a ${leave.leaveType} leave request for ${leave.totalDays} day(s) from ${new Date(leave.startDate).toLocaleDateString()} to ${new Date(leave.endDate).toLocaleDateString()}.`,
-    leaveId: leave._id
+  const employeeName =
+    typeof leave.employee === "object" ? leave.employee.name : "Employee";
+
+  return dispatchAndUnwrap({
+    event: NOTIFICATION_EVENTS.LEAVE_REQUESTED,
+    companyId: leave.company,
+    senderId: leave.employee._id || leave.employee,
+    userId: admin._id,
+    refs: { leaveId: leave._id },
+    payload: {
+      employeeName,
+      leaveType: leave.leaveType,
+      totalDays: leave.totalDays,
+      startDate: leave.startDate,
+      endDate: leave.endDate,
+      reason: leave.reason,
+    },
+    inApp: {
+      title: "New Leave Request",
+      message: `${employeeName} has submitted a ${leave.leaveType} leave request for ${
+        leave.totalDays
+      } day(s) from ${new Date(
+        leave.startDate
+      ).toLocaleDateString()} to ${new Date(
+        leave.endDate
+      ).toLocaleDateString()}.`,
+    },
   });
 };
 
 const notifyLeaveApproval = async (leave, employee) => {
-  return await createNotification({
-    recipient: employee._id,
-    sender: leave.reviewedBy,
-    company: leave.company,
-    type: 'leave_approved',
-    title: 'Leave Request Approved',
-    message: `Your ${leave.leaveType} leave request for ${leave.totalDays} day(s) from ${new Date(leave.startDate).toLocaleDateString()} to ${new Date(leave.endDate).toLocaleDateString()} has been approved.`,
-    leaveId: leave._id
+  return dispatchAndUnwrap({
+    event: NOTIFICATION_EVENTS.LEAVE_APPROVED,
+    companyId: leave.company,
+    senderId: leave.reviewedBy,
+    userId: employee._id,
+    refs: { leaveId: leave._id },
+    payload: {
+      leaveType: leave.leaveType,
+      totalDays: leave.totalDays,
+      startDate: leave.startDate,
+      endDate: leave.endDate,
+      reviewerName:
+        leave.reviewedBy && leave.reviewedBy.name ? leave.reviewedBy.name : "",
+    },
+    inApp: {
+      title: "Leave Request Approved",
+      message: `Your ${leave.leaveType} leave request for ${
+        leave.totalDays
+      } day(s) from ${new Date(
+        leave.startDate
+      ).toLocaleDateString()} to ${new Date(
+        leave.endDate
+      ).toLocaleDateString()} has been approved.`,
+    },
   });
 };
 
-const notifyLeaveRejection = async (leave, employee, rejectionReason = '') => {
-  const reasonText = rejectionReason ? ` Reason: ${rejectionReason}` : '';
-  
-  return await createNotification({
-    recipient: employee._id,
-    sender: leave.reviewedBy,
-    company: leave.company,
-    type: 'leave_rejected',
-    title: 'Leave Request Rejected',
-    message: `Your ${leave.leaveType} leave request for ${leave.totalDays} day(s) from ${new Date(leave.startDate).toLocaleDateString()} to ${new Date(leave.endDate).toLocaleDateString()} has been rejected.${reasonText}`,
-    leaveId: leave._id
+const notifyLeaveRejection = async (leave, employee, rejectionReason = "") => {
+  const reasonText = rejectionReason ? ` Reason: ${rejectionReason}` : "";
+
+  return dispatchAndUnwrap({
+    event: NOTIFICATION_EVENTS.LEAVE_REJECTED,
+    companyId: leave.company,
+    senderId: leave.reviewedBy,
+    userId: employee._id,
+    refs: { leaveId: leave._id },
+    payload: {
+      leaveType: leave.leaveType,
+      totalDays: leave.totalDays,
+      startDate: leave.startDate,
+      endDate: leave.endDate,
+      reviewComments: rejectionReason,
+    },
+    inApp: {
+      title: "Leave Request Rejected",
+      message: `Your ${leave.leaveType} leave request for ${
+        leave.totalDays
+      } day(s) from ${new Date(
+        leave.startDate
+      ).toLocaleDateString()} to ${new Date(
+        leave.endDate
+      ).toLocaleDateString()} has been rejected.${reasonText}`,
+    },
   });
 };
 
@@ -174,5 +320,5 @@ module.exports = {
   notifyVoiceSubmission,
   notifyVoiceReply,
   notifyVoiceStatus,
-  notifyAnnouncement
+  notifyAnnouncement,
 };

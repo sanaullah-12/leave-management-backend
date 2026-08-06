@@ -183,7 +183,7 @@ router.post("/", authenticateToken, async (req, res) => {
     setImmediate(async () => {
       try {
         console.log(
-          `📧 Sending notifications to ${admins.length} admin(s) asynchronously`
+          `Sending notifications to ${admins.length} admin(s) asynchronously`
         );
 
         // Process notifications in background
@@ -201,10 +201,10 @@ router.post("/", authenticateToken, async (req, res) => {
             ]);
 
             await emailPromise;
-            console.log(`✅ Email notification sent to admin: ${admin.email}`);
+            console.log(`Email notification sent to admin: ${admin.email}`);
           } catch (emailError) {
             console.error(
-              `❌ Failed to send email to admin ${admin.email}:`,
+              `Failed to send email to admin ${admin.email}:`,
               emailError.message
             );
           }
@@ -212,10 +212,10 @@ router.post("/", authenticateToken, async (req, res) => {
           try {
             // Send in-app notification
             await notifyLeaveRequest(leave, admin);
-            console.log(`✅ In-app notification sent to admin: ${admin.name}`);
+            console.log(`In-app notification sent to admin: ${admin.name}`);
           } catch (notificationError) {
             console.error(
-              `❌ Failed to send in-app notification to admin ${admin.name}:`,
+              `Failed to send in-app notification to admin ${admin.name}:`,
               notificationError.message
             );
           }
@@ -224,11 +224,11 @@ router.post("/", authenticateToken, async (req, res) => {
         // Wait for all notifications to complete (or timeout)
         await Promise.allSettled(notificationPromises);
         console.log(
-          `📧 Background notification processing completed for leave request ${leave._id}`
+          `Background notification processing completed for leave request ${leave._id}`
         );
       } catch (error) {
         console.error(
-          `❌ Background notification processing failed:`,
+          `Background notification processing failed:`,
           error.message
         );
       }
@@ -646,19 +646,19 @@ router.get(
   authorizeRoles("admin"),
   async (req, res) => {
     try {
-      console.log("📊 === DASHBOARD STATS DEBUG ===");
-      console.log("📊 req.user exists:", !!req.user);
-      console.log("📊 req.user:", req.user);
+      console.log("=== DASHBOARD STATS DEBUG ===");
+      console.log("req.user exists:", !!req.user);
+      console.log("req.user:", req.user);
 
       if (!req.user) {
-        console.log("📊 ERROR: req.user is undefined!");
+        console.log("ERROR: req.user is undefined!");
         return res
           .status(401)
           .json({ message: "Authentication failed - user not found" });
       }
-      console.log("📊 Dashboard stats request from user:", req.user.email);
-      console.log("📊 User company:", req.user.company);
-      console.log("📊 Company ID:", req.user.company?._id);
+      console.log("Dashboard stats request from user:", req.user.email);
+      console.log("User company:", req.user.company);
+      console.log("Company ID:", req.user.company?._id);
 
       const currentMonth = new Date();
       const startOfMonth = new Date(
@@ -672,7 +672,7 @@ router.get(
         0
       );
       const companyId = req.user.company._id || req.user.company;
-      console.log("📊 Using company ID for queries:", companyId);
+      console.log("Using company ID for queries:", companyId);
       // Total leaves this month
       const thisMonthLeaves = await Leave.countDocuments({
         company: req.user.company._id,
@@ -723,7 +723,7 @@ router.get(
         },
       ]);
 
-      console.log("📊 Final stats:", {
+      console.log("Final stats:", {
         thisMonthLeaves,
         pendingLeaves,
         totalEmployees,
@@ -739,7 +739,7 @@ router.get(
         leavesByStatus,
       });
     } catch (error) {
-      console.error("📊 Dashboard stats error:", error);
+      console.error("Dashboard stats error:", error);
       res.status(500).json({
         message: "Failed to get leave statistics",
         error: error.message,
@@ -816,7 +816,7 @@ router.put(
 
       // Merge into the existing policy so flags (preventOverlappingLeaves,
       // maxConcurrentLeaves) are preserved. Accept both the short frontend keys
-      // (annual/sick/casual) and the schema keys (annualLeave/…).
+      // (annual/sick/casual) and the schema keys (annualLeave/...).
       const company = await Company.findById(user.company._id);
       if (!company) {
         return res.status(404).json({ message: "Company not found" });
@@ -983,12 +983,12 @@ router.post(
   }
 );
 
-// ✅ ADD THIS ROUTE - Place it BEFORE any routes with /:id parameter
+// ADD THIS ROUTE - Place it BEFORE any routes with /:id parameter
 router.get("/my-leaves", authenticateToken, async (req, res) => {
   try {
-    console.log("📊 Fetching leaves for employee:", req.user.email);
-    console.log("📊 Employee ID:", req.user._id);
-    console.log("📊 Employee company:", req.user.company);
+    console.log("Fetching leaves for employee:", req.user.email);
+    console.log("Employee ID:", req.user._id);
+    console.log("Employee company:", req.user.company);
 
     const leaves = await Leave.find({
       employee: req.user._id,
@@ -997,8 +997,8 @@ router.get("/my-leaves", authenticateToken, async (req, res) => {
       .sort({ createdAt: -1 })
       .lean();
 
-    console.log("📊 Found leaves for employee:", leaves.length);
-    console.log("📊 Leaves data:", leaves);
+    console.log("Found leaves for employee:", leaves.length);
+    console.log("Leaves data:", leaves);
 
     res.status(200).json({
       success: true,
@@ -1008,7 +1008,7 @@ router.get("/my-leaves", authenticateToken, async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("❌ Error fetching employee leaves:", error);
+    console.error("Error fetching employee leaves:", error);
     res.status(500).json({
       success: false,
       message: "Failed to fetch leaves",

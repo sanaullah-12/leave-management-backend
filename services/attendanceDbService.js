@@ -21,18 +21,18 @@ class AttendanceDbService {
   ) {
     try {
       console.log(
-        `📊 Fetching attendance from LOCAL database for employee ${employeeId} (${startDate} to ${endDate})`
+        `Fetching attendance from LOCAL database for employee ${employeeId} (${startDate} to ${endDate})`
       );
 
       // VERIFY LOCAL CONNECTION
       const dbHost = mongoose.connection.host;
       const dbName = mongoose.connection.db.databaseName;
 
-      console.log(`📍 Database host: ${dbHost}`);
-      console.log(`📍 Database name: ${dbName}`);
+      console.log(`Database host: ${dbHost}`);
+      console.log(`Database name: ${dbName}`);
 
       if (dbHost !== "127.0.0.1" && dbHost !== "localhost") {
-        console.error("⚠️  WARNING: Not connected to local database!");
+        console.error("WARNING: Not connected to local database!");
         console.error("Current host:", dbHost);
         throw new Error(
           `Connected to remote database (${dbHost}) instead of local database`
@@ -52,7 +52,7 @@ class AttendanceDbService {
         },
       };
 
-      console.log("🔍 LOCAL Database query:", JSON.stringify(query, null, 2));
+      console.log("LOCAL Database query:", JSON.stringify(query, null, 2));
 
       // Fetch attendance logs from LOCAL database
       const attendanceLogs = await attendanceCollection
@@ -61,9 +61,9 @@ class AttendanceDbService {
         .toArray();
 
       console.log(
-        `✅ Found ${attendanceLogs.length} attendance records from LOCAL database`
+        `Found ${attendanceLogs.length} attendance records from LOCAL database`
       );
-      console.log(`📍 Confirmed: Data from ${dbName} on ${dbHost}`);
+      console.log(`Confirmed: Data from ${dbName} on ${dbHost}`);
 
       // Transform the data to match expected format
       const transformedLogs = attendanceLogs.map((log) => ({
@@ -98,7 +98,7 @@ class AttendanceDbService {
         },
       };
     } catch (error) {
-      console.error(`❌ LOCAL Database attendance fetch failed:`, error);
+      console.error(`LOCAL Database attendance fetch failed:`, error);
       return {
         success: false,
         error: error.message,
@@ -125,7 +125,7 @@ class AttendanceDbService {
   ) {
     try {
       console.log(
-        `📊 Fetching attendance from database for ${employeeIds.length} employees (${startDate} to ${endDate})`
+        `Fetching attendance from database for ${employeeIds.length} employees (${startDate} to ${endDate})`
       );
 
       // Get the attendancelogs collection directly
@@ -144,7 +144,7 @@ class AttendanceDbService {
         },
       };
 
-      console.log("🔍 Database query:", JSON.stringify(query, null, 2));
+      console.log("Database query:", JSON.stringify(query, null, 2));
 
       // Fetch attendance logs
       const attendanceLogs = await attendanceCollection
@@ -152,7 +152,7 @@ class AttendanceDbService {
         .sort({ id: 1, timestamp: 1 })
         .toArray();
 
-      console.log(`✅ Found ${attendanceLogs.length} attendance records`);
+      console.log(`Found ${attendanceLogs.length} attendance records`);
 
       // Group by employee ID
       const groupedAttendance = {};
@@ -191,7 +191,7 @@ class AttendanceDbService {
         source: "database",
       };
     } catch (error) {
-      console.error(`❌ Database attendance fetch failed:`, error);
+      console.error(`Database attendance fetch failed:`, error);
       return {
         success: false,
         error: error.message,
@@ -280,7 +280,7 @@ class AttendanceDbService {
         source: "database",
       };
     } catch (error) {
-      console.error(`❌ Attendance summary failed:`, error);
+      console.error(`Attendance summary failed:`, error);
       return {
         success: false,
         error: error.message,
@@ -329,7 +329,7 @@ class AttendanceDbService {
   static async getAttendanceStats(startDate, endDate) {
     try {
       console.log(
-        `📊 Getting attendance statistics (${startDate} to ${endDate})`
+        `Getting attendance statistics (${startDate} to ${endDate})`
       );
 
       const attendanceCollection =
@@ -393,7 +393,7 @@ class AttendanceDbService {
         source: "database",
       };
     } catch (error) {
-      console.error(`❌ Attendance stats failed:`, error);
+      console.error(`Attendance stats failed:`, error);
       return {
         success: false,
         error: error.message,

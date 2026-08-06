@@ -11,7 +11,7 @@ class EnhancedAttendanceSyncService {
   initialize(zkInstances, machineConnections) {
     this.zkInstances = zkInstances;
     this.machineConnections = machineConnections;
-    console.log('🔧 Enhanced Attendance sync service initialized');
+    console.log('Enhanced Attendance sync service initialized');
   }
 
   // Enhanced sync method with better error handling
@@ -22,7 +22,7 @@ class EnhancedAttendanceSyncService {
     }
 
     try {
-      console.log(`📊 Enhanced sync for machine ${machineIp}: ${startDate} to ${endDate}`);
+      console.log(`Enhanced sync for machine ${machineIp}: ${startDate} to ${endDate}`);
 
       // For now, return a basic success response
       return {
@@ -33,7 +33,7 @@ class EnhancedAttendanceSyncService {
       };
 
     } catch (error) {
-      console.error(`❌ Enhanced sync failed for machine ${machineIp}:`, error);
+      console.error(`Enhanced sync failed for machine ${machineIp}:`, error);
       throw error;
     }
   }

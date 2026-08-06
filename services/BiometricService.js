@@ -10,30 +10,31 @@ class BiometricService {
 
   async connect() {
     try {
-      console.log(`🔌 Connecting to biometric device at ${this.ip}:${this.port}`);
+      console.log(`Connecting to biometric device at ${this.ip}:${this.port}`);
 
       if (!ZKLib) {
         throw new Error('ZKLib not available. Please install zklib package.');
       }
 
-      // Create ZK instance with IP and port using different constructor patterns
-      try {
-        // Pattern 1: Options object
-        this.zkInstance = new ZKLib({
-          ip: this.ip,
-          inport: this.port,
-          timeout: 5000
-        });
-        console.log(`✅ Using options constructor`);
-      } catch (optionsError) {
-        try {
-          // Pattern 2: Simple parameters
-          this.zkInstance = new ZKLib(this.ip, this.port, 5000);
-          console.log(`✅ Using simple constructor`);
-        } catch (simpleError) {
-          throw new Error(`Both constructor patterns failed: ${optionsError.message}, ${simpleError.message}`);
-        }
-      }
+      // Create the ZK instance.
+      //
+      // `port` and `inport` are NOT the same thing:
+      //   port   = the DEVICE's UDP port (4370) we send to
+      //   inport = the LOCAL port we bind to in order to receive the reply
+      //
+      // This previously passed `inport: this.port` and omitted `port` entirely,
+      // so the device port only worked by falling back to zklib's 4370 default
+      // while the process tried to bind locally to 4370 - an EADDRINUSE on the
+      // second connection attempt. Bind a random high local port instead.
+      const localPort = Math.floor(Math.random() * 10000) + 40000;
+
+      this.zkInstance = new ZKLib({
+        ip: this.ip,
+        port: parseInt(this.port) || 4370, // device port
+        inport: localPort,                 // local bind port
+        timeout: 5000
+      });
+      console.log(`ZK instance created (device ${this.ip}:${this.port}, local inport ${localPort})`);
 
       if (!this.zkInstance) {
         throw new Error('Failed to create ZK instance');
@@ -48,10 +49,10 @@ class BiometricService {
         this.zkInstance.connect((err) => {
           clearTimeout(timeout);
           if (err) {
-            console.error('❌ Connection failed:', err);
+            console.error('Connection failed:', err);
             reject(new Error(`Connection failed: ${err}`));
           } else {
-            console.log(`✅ Connected to biometric device at ${this.ip}:${this.port}`);
+            console.log(`Connected to biometric device at ${this.ip}:${this.port}`);
             this.isConnected = true;
             resolve();
           }
@@ -65,7 +66,7 @@ class BiometricService {
       };
 
     } catch (error) {
-      console.error(`❌ BiometricService connection failed:`, error.message);
+      console.error(`BiometricService connection failed:`, error.message);
       this.isConnected = false;
       throw error;
     }
@@ -77,7 +78,7 @@ class BiometricService {
         await new Promise((resolve) => {
           this.zkInstance.disconnect((err) => {
             if (err) {
-              console.warn('⚠️ Disconnect warning:', err);
+              console.warn('Disconnect warning:', err);
             }
             resolve();
           });
@@ -85,9 +86,9 @@ class BiometricService {
 
         this.isConnected = false;
         this.zkInstance = null;
-        console.log(`🔌 Disconnected from biometric device at ${this.ip}:${this.port}`);
+        console.log(`Disconnected from biometric device at ${this.ip}:${this.port}`);
       } catch (error) {
-        console.warn(`⚠️ Disconnect error: ${error.message}`);
+        console.warn(`Disconnect error: ${error.message}`);
         this.isConnected = false;
         this.zkInstance = null;
       }
@@ -100,13 +101,13 @@ class BiometricService {
     }
 
     try {
-      console.log(`👥 Fetching employees from biometric device...`);
+      console.log(`Fetching employees from biometric device...`);
 
       // Disable device to prevent interference
       if (typeof this.zkInstance.disableDevice === 'function') {
         await new Promise((resolve) => {
           this.zkInstance.disableDevice((err) => {
-            if (err) console.log('⚠️ Could not disable device:', err);
+            if (err) console.log('Could not disable device:', err);
             resolve();
           });
         });
@@ -132,7 +133,7 @@ class BiometricService {
       if (typeof this.zkInstance.enableDevice === 'function') {
         await new Promise((resolve) => {
           this.zkInstance.enableDevice((err) => {
-            if (err) console.log('⚠️ Could not re-enable device:', err);
+            if (err) console.log('Could not re-enable device:', err);
             resolve();
           });
         });
@@ -152,11 +153,11 @@ class BiometricService {
         rawData: user
       }));
 
-      console.log(`✅ Retrieved ${formattedEmployees.length} employees from biometric device`);
+      console.log(`Retrieved ${formattedEmployees.length} employees from biometric device`);
       return formattedEmployees;
 
     } catch (error) {
-      console.error(`❌ Failed to get employees:`, error.message);
+      console.error(`Failed to get employees:`, error.message);
       throw error;
     }
   }
@@ -167,13 +168,13 @@ class BiometricService {
     }
 
     try {
-      console.log(`📊 Fetching attendance logs from biometric device...`);
+      console.log(`Fetching attendance logs from biometric device...`);
 
       // Disable device
       if (typeof this.zkInstance.disableDevice === 'function') {
         await new Promise((resolve) => {
           this.zkInstance.disableDevice((err) => {
-            if (err) console.log('⚠️ Could not disable device:', err);
+            if (err) console.log('Could not disable device:', err);
             resolve();
           });
         });
@@ -199,7 +200,7 @@ class BiometricService {
       if (typeof this.zkInstance.enableDevice === 'function') {
         await new Promise((resolve) => {
           this.zkInstance.enableDevice((err) => {
-            if (err) console.log('⚠️ Could not re-enable device:', err);
+            if (err) console.log('Could not re-enable device:', err);
             resolve();
           });
         });
@@ -227,11 +228,11 @@ class BiometricService {
         rawData: log
       }));
 
-      console.log(`✅ Retrieved ${formattedLogs.length} attendance logs from biometric device`);
+      console.log(`Retrieved ${formattedLogs.length} attendance logs from biometric device`);
       return formattedLogs;
 
     } catch (error) {
-      console.error(`❌ Failed to get attendance logs:`, error.message);
+      console.error(`Failed to get attendance logs:`, error.message);
       throw error;
     }
   }

@@ -1,8 +1,8 @@
-/** Leave rejected notification — sent to the employee. */
+/** Leave rejected notification - sent to the employee. */
 
 const { baseLayout, button, detailsBox, greeting, p, esc, COLORS } = require("./layout");
 
-const fmt = (d) => (d ? new Date(d).toLocaleDateString() : "—");
+const fmt = (d) => (d ? new Date(d).toLocaleDateString() : "-");
 
 module.exports = ({ employee, leave, reviewedBy, dashboardUrl }) => {
   const body = `
@@ -23,12 +23,12 @@ module.exports = ({ employee, leave, reviewedBy, dashboardUrl }) => {
       COLORS.danger
     )}
     ${p(
-      "If you have questions about this decision, please speak with your manager or HR — they can explain the reasoning and discuss alternatives."
+      "If you have questions about this decision, please speak with your manager or HR - they can explain the reasoning and discuss alternatives."
     )}
     ${dashboardUrl ? button(dashboardUrl, "View My Leave", COLORS.primary) : ""}`;
 
   return {
-    subject: `Leave request declined — ${leave.leaveType} (${fmt(leave.startDate)})`,
+    subject: `Leave request declined - ${leave.leaveType} (${fmt(leave.startDate)})`,
     html: baseLayout({
       title: "Leave Request Declined",
       heading: "Leave request declined",

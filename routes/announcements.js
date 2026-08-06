@@ -97,7 +97,7 @@ router.get("/unread-count", authenticateToken, async (req, res) => {
 });
 
 /* ------------------------------------------------------------------ */
-/*  Dashboard highlight — posts from the last 24h + anything pinned    */
+/*  Dashboard highlight - posts from the last 24h + anything pinned    */
 /* ------------------------------------------------------------------ */
 router.get("/dashboard", authenticateToken, async (req, res) => {
   try {
@@ -158,7 +158,7 @@ router.post("/", authenticateToken, authorizeRoles("admin"), async (req, res) =>
       announcement: serialize(announcement, req.user),
     });
 
-    // Notify the audience in the background (fire-and-forget — never blocks the
+    // Notify the audience in the background (fire-and-forget - never blocks the
     // post, and a notification hiccup must not fail the request).
     (async () => {
       try {
