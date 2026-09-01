@@ -77,6 +77,28 @@ const sendEmail = async ({ email, subject, html, text, fromName }) => {
         const entry = getClient();
         config = entry.config;
 
+        // ---- SMTP (local development) ------------------------------------
+        if (entry.kind === "smtp") {
+          try {
+            const info = await entry.transporter.sendMail({
+              from: `"${fromName || config.fromName}" <${config.fromEmail}>`,
+              to: (Array.isArray(email) ? email : [email]).join(", "),
+              subject,
+              html,
+              text: text || htmlToText(html),
+              ...(config.replyTo ? { replyTo: config.replyTo } : {}),
+            });
+            log(`Sent - messageId ${info?.messageId}`);
+            return info;
+          } catch (error) {
+            if (!error.emailDiagnosis) {
+              error.emailDiagnosis = classifyEmailError(error, config);
+            }
+            throw error;
+          }
+        }
+
+        // ---- Brevo (production) ------------------------------------------
         const recipients = (Array.isArray(email) ? email : [email]).map((addr) => ({
           email: addr,
         }));
@@ -110,13 +132,13 @@ const sendEmail = async ({ email, subject, html, text, fromName }) => {
         }
       },
       isRetryable,
-      `deliver to ${maskEmail(email)} via Brevo`
+      `deliver to ${maskEmail(email)}`
     );
 
     return {
       success: true,
       messageId: result?.messageId,
-      provider: "Brevo",
+      provider: config?.provider === "smtp" ? "SMTP" : "Brevo",
       attempts: attemptsUsed,
     };
   } catch (error) {
@@ -241,6 +263,20 @@ const checkEmailHealth = async () => {
   try {
     const entry = getClient();
     config = entry.config;
+
+    // SMTP has no account API - verify() opens a real connection and
+    // authenticates, which is the equivalent proof that sending will work.
+    if (entry.kind === "smtp") {
+      await entry.transporter.verify();
+      return {
+        ok: true,
+        provider: "SMTP",
+        from: `${config.fromName} <${config.fromEmail}>`,
+        host: `${config.host}:${config.port}`,
+        senderVerified: null,
+        message: "SMTP connection and credentials verified.",
+      };
+    }
 
     const account = await entry.client.account.getAccount();
 

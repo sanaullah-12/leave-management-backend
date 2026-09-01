@@ -1,0 +1,6 @@
+{
+  "//": "dotenv.config() reads .env once at boot, and nodemon's default extension filter never matches a dotfile - so saving a new credential to .env changed nothing until the server was restarted by hand. The running process kept using the old value and failed in a way that looked like the NEW value was wrong. Listing .env explicitly in `watch` is what makes it picked up; `ext` alone does not.",
+  "watch": [".", ".env"],
+  "ext": "js,json,env",
+  "ignore": ["node_modules/**", "uploads/**", "scripts/**"]
+}

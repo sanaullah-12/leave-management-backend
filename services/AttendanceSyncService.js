@@ -1,6 +1,16 @@
 const BiometricService = require('./BiometricService');
 const AttendanceLog = require('../models/AttendanceLog');
 
+// ZKTeco numeric punch states mapped onto the AttendanceLog "type" strings.
+const STATE_TO_TYPE = {
+  0: 'check-in',
+  1: 'check-out',
+  2: 'break-out',
+  3: 'break-in',
+  4: 'ot-in',
+  5: 'ot-out',
+};
+
 class AttendanceSyncService {
   /**
    * Sync attendance logs from ZKTeco device to database
@@ -63,13 +73,19 @@ class AttendanceSyncService {
         const timestamp = new Date(log.timestamp);
         const date = timestamp.toISOString().split('T')[0];
 
+        // employeeId must be the enrolled User ID (log.userId), not the device
+        // record slot (log.uid) - uid is 0 on virtually every real record.
         return {
           machineIp: deviceIp,
-          employeeId: log.uid || 'unknown',
-          machineUserId: log.uid || 'unknown',
+          employeeId: String(log.userId ?? log.uid ?? 'unknown'),
+          machineUserId: String(log.uid ?? log.userId ?? 'unknown'),
           timestamp,
           date,
-          type: log.type || 'unknown',
+          // The device reports the punch kind as a numeric state. Persist it as
+          // the schema's type string, otherwise every record reads back as
+          // "Unknown" - BiometricService defaults log.type to "attendance",
+          // which carries no punch information at all.
+          type: STATE_TO_TYPE[log.state] || log.type || 'unknown',
           mode: log.mode || 'unknown',
           rawData: log.rawData || log,
           company: companyId,

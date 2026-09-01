@@ -471,9 +471,15 @@ class ZKTecoService {
         });
       }
 
-      // Transform logs to consistent format
+      // Transform logs to consistent format.
+      // zklib's legacy parser returns {uid, id, state, timestamp}, where `id` is
+      // the enrolled User ID that identifies the employee and `uid` is the
+      // device record slot. On these machines uid is 0 for virtually every
+      // record, so `userId` below - not uid - is what callers must match on.
       const formattedLogs = logsArray.map((log) => ({
-        uid: log.uid || log.userId || log.deviceUserId || "unknown",
+        uid: log.uid ?? "unknown",
+        userId: log.id ?? log.userId ?? log.deviceUserId ?? log.uid,
+        state: log.state,
         timestamp: log.timestamp || log.recordTime || new Date(),
         type: log.type || log.mode || "attendance",
         mode: log.mode || log.type || "unknown",
@@ -678,16 +684,22 @@ class ZKTecoService {
       const attendanceLogs = await zkService.getAttendanceLogs(startDate);
       await zkService.disconnect();
 
-      // Filter logs for specific employee
+      // Filter logs for specific employee.
+      // employeeId arrives from the route params as a string while the device
+      // reports numbers, so compare as strings. userId carries the enrolled
+      // User ID; uid is only a fallback for firmware that omits it.
+      const target = String(employeeId);
       const employeeLogs = attendanceLogs.filter(
-        (log) => log.uid === employeeId || log.userId === employeeId,
+        (log) => String(log.userId) === target || String(log.uid) === target,
       );
 
-      // Filter by date range
+      // Filter by date range. endDate is a plain YYYY-MM-DD, which parses to
+      // midnight, so it has to be pushed to the end of that day or every punch
+      // made on the final day is dropped.
+      const start = new Date(`${startDate}T00:00:00.000Z`);
+      const end = new Date(`${endDate}T23:59:59.999Z`);
       const filteredLogs = employeeLogs.filter((log) => {
         const logDate = new Date(log.timestamp);
-        const start = new Date(startDate);
-        const end = new Date(endDate);
         return logDate >= start && logDate <= end;
       });
 
