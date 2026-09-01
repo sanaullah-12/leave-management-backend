@@ -1,4 +1,5 @@
 const express = require("express");
+const rateLimit = require("express-rate-limit");
 const { generateToken } = require("../utils/jwt");
 const { authenticateToken } = require("../middleware/auth");
 const { validatePhoneField } = require("../middleware/phoneValidation");
@@ -8,13 +9,26 @@ const Company = require("../models/Company");
 
 const router = express.Router();
 
+// The global limiter in server.js allows 1000 requests per 15 minutes, which is
+// no obstacle to guessing a password or to using /forgot-password as an email
+// cannon. Credential endpoints get their own, much tighter budget, keyed by IP.
+const credentialLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  // Successful sign-ins should not count toward the budget, so a busy office
+  // behind one NAT address is never locked out by its own legitimate traffic.
+  skipSuccessfulRequests: true,
+  message: {
+    message: "Too many attempts. Please wait a few minutes and try again.",
+  },
+});
+
 // Register company admin
 router.post("/register-company", validatePhoneField("phone"), async (req, res) => {
-  console.log("=== REGISTRATION REQUEST ===");
-  console.log("Request body:", req.body);
-  console.log("Headers:", req.headers);
-  console.log("MongoDB status:", require("mongoose").connection.readyState);
-
+  // Never log req.body here - it carries the admin's plaintext password - and
+  // never log req.headers, which carries whatever credentials the client sent.
   try {
     const {
       companyName,
@@ -109,9 +123,7 @@ router.post("/register-company", validatePhoneField("phone"), async (req, res) =
       user: serializeAuthUser({ ...admin.toObject(), company }),
     });
   } catch (error) {
-    console.error("Registration error:", error);
-    console.error("Error stack:", error.stack);
-    console.error("Request body:", req.body);
+    console.error("Registration error:", error.message);
 
     // Handle specific validation errors
     if (error.name === "ValidationError") {
@@ -142,7 +154,7 @@ router.post("/register-company", validatePhoneField("phone"), async (req, res) =
 });
 
 // Login
-router.post("/login", async (req, res) => {
+router.post("/login", credentialLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
 
@@ -314,6 +326,11 @@ router.post("/invite-employee", authenticateToken, validatePhoneField("phone"), 
         token: invitationToken,
         inviterName: req.user.name,
         role: "employee",
+        // Surfaced by the job-status endpoint if delivery fails, so the admin
+        // can pass the invite on by hand instead of being told it was sent.
+        fallbackUrl: `${
+          process.env.FRONTEND_URL || "http://localhost:3000"
+        }/verify-invitation/${invitationToken}`,
       },
       "high"
     ); // High priority for invitations
@@ -342,7 +359,10 @@ router.post("/invite-employee", authenticateToken, validatePhoneField("phone"), 
       emailQueued: true,
       emailJobId: emailJobId,
       processingTime: totalTime,
-      note: "Email delivery is processing in background - employee will receive invitation shortly",
+      // Delivery has NOT happened yet at this point. The caller polls
+      // GET /api/auth/email-queue/job/:emailJobId for the real outcome - this
+      // response only confirms the employee record and the queued job.
+      note: "Employee saved. Email delivery is still in progress - poll email-queue/job/:id for the result.",
     });
     console.log("SUCCESS response sent to frontend");
   } catch (error) {
@@ -475,9 +495,8 @@ router.post("/invite-admin", authenticateToken, validatePhoneField("phone"), asy
           process.env.FRONTEND_URL || "http://localhost:3000"
         }/verify-invitation/${invitationToken}`,
         troubleshooting: {
-          message: "Check Railway logs for detailed email configuration issues",
-          debugEndpoint: "/api/debug/email-config",
-          testEndpoint: "/api/debug/test-email",
+          message:
+            "Email delivery failed - share the manual invite link above with the admin. Check the server logs, or run `npm run test:email` on the host, to diagnose the email provider.",
         },
       });
     }
@@ -627,7 +646,7 @@ router.get("/invitation/:token", async (req, res) => {
 });
 
 // Forgot password - Request reset link
-router.post("/forgot-password", async (req, res) => {
+router.post("/forgot-password", credentialLimiter, async (req, res) => {
   try {
     const { email } = req.body;
 
@@ -677,7 +696,7 @@ router.post("/forgot-password", async (req, res) => {
 });
 
 // Reset password with token
-router.post("/reset-password/:token", async (req, res) => {
+router.post("/reset-password/:token", credentialLimiter, async (req, res) => {
   try {
     const { token } = req.params;
     const { password } = req.body;
@@ -917,7 +936,8 @@ router.get("/email-queue/job/:jobId", authenticateToken, async (req, res) => {
 
     const { jobId } = req.params;
     const emailQueue = require("../utils/emailQueue");
-    const job = emailQueue.getJob(parseInt(jobId));
+    // Ids are opaque strings - parseInt() truncated them and never matched.
+    const job = emailQueue.getJob(jobId);
 
     if (!job) {
       return res.status(404).json({ message: "Email job not found" });
