@@ -471,9 +471,15 @@ class ZKTecoService {
         });
       }
 
-      // Transform logs to consistent format
+      // Transform logs to consistent format.
+      // zklib's legacy parser returns {uid, id, state, timestamp}, where `id` is
+      // the enrolled User ID that identifies the employee and `uid` is the
+      // device record slot. On these machines uid is 0 for virtually every
+      // record, so `userId` below - not uid - is what callers must match on.
       const formattedLogs = logsArray.map((log) => ({
-        uid: log.uid || log.userId || log.deviceUserId || "unknown",
+        uid: log.uid ?? "unknown",
+        userId: log.id ?? log.userId ?? log.deviceUserId ?? log.uid,
+        state: log.state,
         timestamp: log.timestamp || log.recordTime || new Date(),
         type: log.type || log.mode || "attendance",
         mode: log.mode || log.type || "unknown",

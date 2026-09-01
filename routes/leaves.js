@@ -294,35 +294,10 @@ router.get("/", authenticateToken, async (req, res) => {
   }
 });
 
-// Get single leave request
-router.get("/:id", authenticateToken, async (req, res) => {
-  try {
-    let query = { _id: req.params.id, company: req.user.company._id };
-
-    // If employee, only show their own leave
-    if (req.user.role === "employee") {
-      query.employee = req.user._id;
-    }
-
-    const leave = await Leave.findOne(query)
-      .populate(
-        "employee",
-        "name employeeId department position profilePicture"
-      )
-      .populate("reviewedBy", "name");
-
-    if (!leave) {
-      return res.status(404).json({ message: "Leave request not found" });
-    }
-
-    res.status(200).json({ leave });
-  } catch (error) {
-    res.status(500).json({
-      message: "Failed to get leave request",
-      error: error.message,
-    });
-  }
-});
+// GET /:id lives at the BOTTOM of this file, not here. Express matches in
+// declaration order, so a "/:id" declared above "/balance", "/policy" and
+// "/my-leaves" swallows all three - Leave.findOne({ _id: "balance" }) throws a
+// CastError and the caller gets a 500 instead of their data.
 
 // Approve/Reject leave request (Admin only)
 router.put(
@@ -379,16 +354,23 @@ router.put(
       }
 
       // Real-time: the employee's own dashboard/leave list + the admin dashboard
-      // both react instantly to the decision.
+      // both react instantly to the decision. Admins get it too, so a second
+      // reviewer's list and chip counts do not sit on a decision already made.
+      const reviewPayload = {
+        _id: leave._id,
+        status,
+        leaveType: leave.leaveType,
+        totalDays: leave.totalDays,
+      };
       SocketService.toUser(
         leave.employee._id || leave.employee,
         SocketService.events.LEAVE_REVIEWED,
-        {
-          _id: leave._id,
-          status,
-          leaveType: leave.leaveType,
-          totalDays: leave.totalDays,
-        }
+        reviewPayload
+      );
+      SocketService.toCompanyAdmins(
+        leave.company,
+        SocketService.events.LEAVE_REVIEWED,
+        reviewPayload
       );
       SocketService.statsUpdate(leave.company, "dashboard");
 

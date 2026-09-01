@@ -1,50 +1,37 @@
 const { verifyToken } = require('../utils/jwt');
 const User = require('../models/User');
 
+/**
+ * Verify the bearer token and attach the live user to the request.
+ *
+ * Nothing here logs the token, the Authorization header, or the resolved user.
+ * This middleware runs on every authenticated request, so anything it prints is
+ * duplicated into the platform's log store for the lifetime of the deployment -
+ * and a leaked JWT is a working credential for whoever reads it.
+ */
 const authenticateToken = async (req, res, next) => {
-  const startTime = Date.now();
-  console.log('AUTH MIDDLEWARE START:', req.method, req.url);
-
   try {
     const authHeader = req.headers['authorization'];
-    console.log('Auth header:', authHeader);
-    
     const token = authHeader && authHeader.split(' ')[1];
-    console.log('Extracted token:', token ? `${token.substring(0, 20)}...` : 'No token');
 
     if (!token) {
-      console.log('AUTH FAILED: No token');
       return res.status(401).json({ message: 'Access token required' });
     }
 
-    console.log('Verifying JWT token...');
     const decoded = verifyToken(token);
-    console.log('JWT verified, user ID:', decoded.id);
-
-    console.log('Querying database for user...');
-    const dbStart = Date.now();
     const user = await User.findById(decoded.id).populate('company');
-    const dbTime = Date.now() - dbStart;
-    console.log(`Database query completed in ${dbTime}ms`);
 
     if (!user || !user.isActive || user.status !== 'active') {
-      console.log('AUTH FAILED: Invalid user, inactive, or not verified');
-      return res.status(401).json({ message: 'Invalid token, user inactive, or account not verified' });
+      return res.status(401).json({
+        message: 'Invalid token, user inactive, or account not verified',
+      });
     }
 
     req.user = user;
-    console.log(`AUTH SUCCESS - User set:`, {
-      id: user._id,
-      email: user.email,
-      role: user.role,
-      company: user.company
-    });
-    const totalTime = Date.now() - startTime;
-    console.log(`AUTH SUCCESS in ${totalTime}ms, forwarding to route`);
     next();
   } catch (error) {
-    const totalTime = Date.now() - startTime;
-    console.error(`AUTH ERROR after ${totalTime}ms:`, error.message);
+    // The message only - never the token that produced it.
+    console.error(`Auth failed on ${req.method} ${req.path}:`, error.message);
     return res.status(401).json({ message: 'Invalid token' });
   }
 };
@@ -56,8 +43,8 @@ const authorizeRoles = (...roles) => {
     }
 
     if (!roles.includes(req.user.role)) {
-      return res.status(403).json({ 
-        message: `Role ${req.user.role} is not authorized to access this resource` 
+      return res.status(403).json({
+        message: `Role ${req.user.role} is not authorized to access this resource`
       });
     }
 
