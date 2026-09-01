@@ -28,7 +28,79 @@ class EmailConfigError extends Error {
   }
 }
 
+/**
+ * Which transport to use. Production is always Brevo - local development uses
+ * SMTP, because a Brevo key is a production secret that is not distributed to
+ * developer machines.
+ *
+ * The production checks come first and are not overridable by SMTP_* being
+ * present, so adding SMTP credentials to a deployed environment can never
+ * silently divert real mail away from Brevo. EMAIL_PROVIDER is the explicit
+ * override for anything else.
+ *
+ * @returns {"smtp"|"brevo"}
+ */
+const resolveProvider = () => {
+  // Production is decided FIRST and cannot be overridden. EMAIL_PROVIDER lives
+  // in the local .env, so if that file (or the variable) ever reaches a
+  // deployed environment, checking it first would silently divert real customer
+  // mail through a developer's personal Gmail account.
+  const isProduction =
+    process.env.NODE_ENV === "production" ||
+    !!process.env.RAILWAY_ENVIRONMENT ||
+    !!process.env.RAILWAY_ENVIRONMENT_NAME ||
+    !!process.env.RAILWAY_PROJECT_ID;
+
+  if (isProduction) return "brevo";
+
+  const explicit = (process.env.EMAIL_PROVIDER || "").trim().toLowerCase();
+  if (explicit === "smtp" || explicit === "brevo") return explicit;
+
+  const hasSmtp =
+    !!process.env.SMTP_HOST && !!process.env.SMTP_EMAIL && !!process.env.SMTP_PASSWORD;
+
+  return hasSmtp ? "smtp" : "brevo";
+};
+
+/** SMTP (local development) configuration. */
+const loadSmtpConfig = () => {
+  const required = ["SMTP_HOST", "SMTP_EMAIL", "SMTP_PASSWORD"];
+  const missing = required.filter((name) => !process.env[name]);
+
+  if (missing.length > 0) {
+    throw new EmailConfigError(
+      `Email is not configured for SMTP - missing environment variable(s): ${missing.join(", ")}. ` +
+        `Set them in backend/.env, or set EMAIL_PROVIDER=brevo to use the Brevo API instead.`
+    );
+  }
+
+  const port = parseInt(process.env.SMTP_PORT || "587", 10);
+  const fromEmail = process.env.FROM_EMAIL || process.env.EMAIL_FROM || process.env.SMTP_EMAIL;
+
+  // Google shows an App Password as four space-separated groups ("abcd efgh
+  // ijkl mnop"), and it is normally pasted in verbatim - 19 characters. Gmail
+  // only accepts the 16-character form, so the spaces produce an EAUTH that
+  // reads exactly like a wrong password. Strip them rather than make every
+  // developer rediscover this.
+  const pass = (process.env.SMTP_PASSWORD || "").replace(/\s+/g, "");
+
+  return {
+    provider: "smtp",
+    host: process.env.SMTP_HOST,
+    port,
+    // 465 is implicit TLS; 587 upgrades via STARTTLS.
+    secure: port === 465,
+    user: process.env.SMTP_EMAIL,
+    pass,
+    fromEmail,
+    fromName: process.env.FROM_NAME || process.env.EMAIL_FROM_NAME || DEFAULT_FROM_NAME,
+    replyTo: process.env.EMAIL_REPLY_TO || undefined,
+  };
+};
+
 const loadEmailConfig = () => {
+  if (resolveProvider() === "smtp") return loadSmtpConfig();
+
   const missing = REQUIRED_VARS.filter((name) => !process.env[name]);
   if (missing.length > 0) {
     throw new EmailConfigError(
@@ -60,6 +132,7 @@ const loadEmailConfig = () => {
   }
 
   return {
+    provider: "brevo",
     apiKey,
     fromEmail,
     fromName: process.env.EMAIL_FROM_NAME || DEFAULT_FROM_NAME,
@@ -67,11 +140,20 @@ const loadEmailConfig = () => {
   };
 };
 
-/** Log resolved config. The API key is described, never printed. */
+/** Log resolved config. Secrets are described, never printed. */
 const logEmailConfig = (config) => {
   log("Email configuration:");
-  log(`   Provider: Brevo (HTTPS API)`);
-  log(`   API key:  ${describeSecret(config.apiKey)}`);
+
+  if (config.provider === "smtp") {
+    log(`   Provider: SMTP (local development)`);
+    log(`   Host:     ${config.host}:${config.port} ${config.secure ? "(TLS)" : "(STARTTLS)"}`);
+    log(`   User:     ${maskEmail(config.user)}`);
+    log(`   Password: ${describeSecret(config.pass)}`);
+  } else {
+    log(`   Provider: Brevo (HTTPS API)`);
+    log(`   API key:  ${describeSecret(config.apiKey)}`);
+  }
+
   log(`   From:     ${config.fromName} <${maskEmail(config.fromEmail)}>`);
   if (config.replyTo) log(`   Reply-To: ${maskEmail(config.replyTo)}`);
 };
@@ -97,6 +179,7 @@ module.exports = {
   loadEmailConfig,
   logEmailConfig,
   getFrontendUrl,
+  resolveProvider,
   EmailConfigError,
   REQUIRED_VARS,
 };

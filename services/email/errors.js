@@ -27,6 +27,23 @@ const classifyEmailError = (error, config = {}) => {
     statusCode: status,
   };
 
+  // ---- Local configuration - never retried --------------------------------
+  // A missing/invalid variable never reaches Brevo, so without this branch it
+  // fell through to "Unclassified Brevo error" and the actionable message
+  // naming the missing variable was hidden from the caller.
+  if (error?.isConfigError || error?.name === "EmailConfigError") {
+    return {
+      ...base,
+      code: "EMAIL_CONFIG",
+      title: "Email is not configured",
+      cause: rawMessage,
+      solution:
+        "Set the variable(s) named above. Locally that means backend/.env; on Railway, " +
+        "service -> Variables. Nothing was sent to Brevo.",
+      retryable: false,
+    };
+  }
+
   // ---- Network / transport (thrown before any HTTP response) --------------
   // Brevo needs only outbound HTTPS (443), so these are genuine connectivity
   // faults rather than the port-blocking that affects SMTP.
@@ -60,6 +77,25 @@ const classifyEmailError = (error, config = {}) => {
         "Confirm the host allows outbound HTTPS on port 443. Usually transient - the " +
         "retry logic will attempt again.",
       retryable: true,
+    };
+  }
+
+  // ---- SMTP authentication (local development) - never retried ------------
+  // Gmail rejects normal account passwords outright; only an App Password
+  // works, and that is by far the most common local setup mistake.
+  if (nodeCode === "EAUTH" || status === 535 || message.includes("invalid login")) {
+    return {
+      ...base,
+      title: "SMTP server rejected the credentials",
+      cause:
+        "SMTP_EMAIL / SMTP_PASSWORD were refused. For Gmail this normally means a regular " +
+        "account password was used instead of a 16-character App Password, or 2-Step " +
+        "Verification is not enabled on the account.",
+      solution:
+        "Enable 2-Step Verification, then create an App Password at " +
+        "https://myaccount.google.com/apppasswords and set it as SMTP_PASSWORD in " +
+        "backend/.env (no spaces).",
+      retryable: false,
     };
   }
 

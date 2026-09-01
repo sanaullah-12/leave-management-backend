@@ -565,16 +565,11 @@ router.get(
 
       console.log(`Fetching real employees from ZKTeco machine at ${ip}`);
 
-      // Get ZKTeco instance
-      const zkInstance = zkInstances.get(ip);
-      if (!zkInstance) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "ZKTeco SDK not initialized. Please reconnect to the machine.",
-        });
-      }
-
+      // No zkInstances lookup here on purpose. Only /force-reconnect ever
+      // populates that map, so gating on it made a plain /connect followed by
+      // this call fail with "SDK not initialized" even though the device was
+      // reachable. The machineConnections check above is the real guard, and
+      // the fetch below opens its own ZKTecoService connection regardless.
       try {
         console.log(
           `Connected to ZKTeco machine at ${ip} - fetching employees...`
@@ -827,16 +822,8 @@ router.get(
         console.log(`Using days fallback: ${days} days`);
       }
 
-      // Get ZKTeco instance
-      const zkInstance = zkInstances.get(ip);
-      if (!zkInstance) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "ZKTeco SDK not initialized. Please reconnect to the machine.",
-        });
-      }
-
+      // No zkInstances gate here: only /force-reconnect populates that map, and
+      // the fetch below opens its own ZKTecoService connection.
       try {
         // Calculate date range - prefer startDate/endDate parameters over days
         let startDateStr, endDateStr;
@@ -1848,16 +1835,8 @@ router.get(
         });
       }
 
-      // Get ZKTeco instance
-      const zkInstance = zkInstances.get(ip);
-      if (!zkInstance) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "ZKTeco SDK not initialized. Please reconnect to the machine.",
-        });
-      }
-
+      // No zkInstances gate here: only /force-reconnect populates that map, and
+      // the fetch below opens its own ZKTecoService connection.
       try {
         // Calculate date range for last N days (3 months)
         const endDate = new Date();
@@ -2101,16 +2080,8 @@ router.post(
         });
       }
 
-      // Get ZKTeco instance
-      const zkInstance = zkInstances.get(ip);
-      if (!zkInstance) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "ZKTeco SDK not initialized. Please reconnect to the machine.",
-        });
-      }
-
+      // No zkInstances gate here: only /force-reconnect populates that map, and
+      // the fetch below opens its own ZKTecoService connection.
       console.log(
         `Fetching attendance data from ${ip} for period: ${startDate} to ${endDate}`
       );

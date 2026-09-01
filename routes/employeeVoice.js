@@ -338,6 +338,22 @@ router.post("/:id/reply", authenticateToken, async (req, res) => {
     );
     await voice.populate("replies.author", "name profilePicture role");
 
+    // Real-time: both sides of the thread refresh. A reply can also flip the
+    // status (pending -> under_review), so admins need the signal too - their
+    // list, open drawer and counters would otherwise sit stale until a refocus.
+    const replyPayload = { _id: voice._id, status: voice.status };
+    SocketService.toUser(
+      voice.employee._id || voice.employee,
+      SocketService.events.VOICE_UPDATED,
+      replyPayload
+    );
+    SocketService.toCompanyAdmins(
+      voice.company,
+      SocketService.events.VOICE_UPDATED,
+      replyPayload
+    );
+    SocketService.statsUpdate(voice.company, "voice");
+
     // Notify the other party.
     setImmediate(async () => {
       try {
@@ -407,11 +423,18 @@ router.put(
       }
 
       // Real-time: the submitting employee sees the status change instantly,
-      // and admins' widgets/counters refresh.
+      // and every admin (including the actor's other tabs) refreshes the list,
+      // the status filter counts and the stat chips.
+      const statusPayload = { _id: voice._id, status: voice.status };
       SocketService.toUser(
         voice.employee._id || voice.employee,
         SocketService.events.VOICE_UPDATED,
-        { _id: voice._id, status: voice.status }
+        statusPayload
+      );
+      SocketService.toCompanyAdmins(
+        voice.company,
+        SocketService.events.VOICE_UPDATED,
+        statusPayload
       );
       SocketService.statsUpdate(voice.company, "voice");
 
@@ -452,6 +475,22 @@ router.delete(
       if (!voice) {
         return res.status(404).json({ message: "Voice not found" });
       }
+
+      // Real-time: drop the removed item from every other client's list and
+      // counters instead of leaving a ghost row behind.
+      const deletedPayload = { _id: voice._id, deleted: true };
+      SocketService.toUser(
+        voice.employee._id || voice.employee,
+        SocketService.events.VOICE_UPDATED,
+        deletedPayload
+      );
+      SocketService.toCompanyAdmins(
+        voice.company,
+        SocketService.events.VOICE_UPDATED,
+        deletedPayload
+      );
+      SocketService.statsUpdate(voice.company, "voice");
+
       res.status(200).json({ message: "Voice deleted successfully" });
     } catch (error) {
       res.status(500).json({

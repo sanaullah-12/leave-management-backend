@@ -77,6 +77,25 @@ const attendanceLogSchema = new mongoose.Schema({
   timestamps: true
 });
 
+// One punch is uniquely identified by machine + employee + instant. Without
+// this, every re-sync re-inserted the device's entire log, because
+// bulkInsertLogs relies on duplicate-key errors to skip records it already has.
+//
+// The filter is partial on purpose: the legacy CSV-imported documents carry
+// none of these three fields, so an unconditional unique index would see them
+// all as (null, null, null) duplicates and fail to build.
+attendanceLogSchema.index(
+  { machineIp: 1, employeeId: 1, timestamp: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      machineIp: { $exists: true },
+      employeeId: { $exists: true },
+      timestamp: { $exists: true }
+    }
+  }
+);
+
 // Compound indexes for efficient querying
 attendanceLogSchema.index({ machineIp: 1, employeeId: 1, date: 1 });
 attendanceLogSchema.index({ company: 1, date: 1 });
@@ -124,33 +143,47 @@ attendanceLogSchema.statics.getLastSyncTime = async function(machineIp, companyI
 };
 
 attendanceLogSchema.statics.bulkInsertLogs = async function(logs) {
-  if (!logs || logs.length === 0) return { inserted: 0, errors: [] };
+  if (!logs || logs.length === 0) {
+    return { inserted: 0, skipped: 0, total: 0, errors: [] };
+  }
+
+  const total = logs.length;
 
   try {
-    // Use ordered: false to continue on duplicates
+    // ordered: false so one duplicate does not abort the remaining inserts
     const result = await this.insertMany(logs, {
       ordered: false,
       rawResult: true
     });
 
-    return {
-      inserted: result.insertedCount || logs.length,
-      errors: []
-    };
+    const inserted = result.insertedCount ?? total;
+    return { inserted, skipped: total - inserted, total, errors: [] };
   } catch (error) {
-    if (error.code === 11000) {
-      // Handle duplicate key errors
-      const inserted = error.result?.nInserted || 0;
+    // With ordered:false, duplicates surface as a bulk write error that still
+    // reports how many documents made it in. Read the count from whichever
+    // shape the driver used rather than assuming one.
+    const isDuplicate =
+      error.code === 11000 ||
+      (Array.isArray(error.writeErrors) &&
+        error.writeErrors.some((e) => e.code === 11000));
+
+    if (isDuplicate) {
+      const inserted =
+        error.result?.insertedCount ??
+        error.result?.nInserted ??
+        error.insertedDocs?.length ??
+        0;
+      const skipped = total - inserted;
+
       return {
         inserted,
-        errors: [`Skipped ${logs.length - inserted} duplicate records`]
+        skipped,
+        total,
+        errors: skipped ? [`Skipped ${skipped} duplicate records`] : []
       };
     }
 
-    return {
-      inserted: 0,
-      errors: [error.message]
-    };
+    return { inserted: 0, skipped: 0, total, errors: [error.message] };
   }
 };
 
