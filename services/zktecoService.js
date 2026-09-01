@@ -23,6 +23,12 @@ try {
 // used anywhere in this file, so it stays null.
 JSZKLib = null;
 
+// Per-transport connect budget. connect() tries UDP then TCP, so the worst case
+// is twice this. A healthy device on the LAN answers the CMD_CONNECT handshake
+// in well under a second - the old 20s was generous enough that probing two
+// transports made a dead device take 30s to report.
+const CONNECT_TIMEOUT_MS = 10000;
+
 class ZKTecoService {
   constructor(ip, port = 4370) {
     this.ip = ip;
@@ -36,9 +42,19 @@ class ZKTecoService {
     return Math.floor(Math.random() * 10000) + 40000; // Random port between 40000-50000
   }
 
-  async connect() {
+  /**
+   * Single connection attempt over one transport.
+   *
+   * ZKTeco units answer on 4370 over UDP and/or TCP depending on model and
+   * firmware; the October 2025 logs show this device answering on both. Which
+   * one works is a property of the device, not of the network, so the caller
+   * (connect()) tries each rather than assuming UDP.
+   */
+  async attemptConnect(connectionType = "udp") {
     try {
-      console.log(`Connecting to ZKTeco device at ${this.ip}:${this.port}`);
+      console.log(
+        `Connecting to ZKTeco device at ${this.ip}:${this.port} over ${connectionType.toUpperCase()}`,
+      );
 
       if (!ZKLib) {
         throw new Error(
@@ -57,6 +73,7 @@ class ZKTecoService {
           ip: this.ip,
           port: parseInt(this.port), // Device port (4370)
           timeout: 10000,
+          connectionType,
         });
         console.log(
           `Options object constructor success (inport: ${randomInport})`,
@@ -74,6 +91,7 @@ class ZKTecoService {
             inport: fallbackInport, // Different random port for fallback
             port: parseInt(this.port), // Device port (4370)
             timeout: 10000,
+            connectionType,
           });
           console.log(
             `Alternative options constructor success (inport: ${fallbackInport})`,
@@ -176,10 +194,10 @@ class ZKTecoService {
           () =>
             reject(
               new Error(
-                "Connection timeout (20s) - Device may be unreachable or network issue",
+                `Connection timeout (${CONNECT_TIMEOUT_MS / 1000}s) - Device may be unreachable or network issue`,
               ),
             ),
-          20000,
+          CONNECT_TIMEOUT_MS,
         ),
       );
 
@@ -248,6 +266,38 @@ class ZKTecoService {
         );
       }
     }
+  }
+
+  /**
+   * Connect to the device, trying each transport it may be speaking.
+   *
+   * UDP first because that is what this fleet has historically used, then TCP.
+   * The TCP attempt is a full ZK CMD_CONNECT handshake via zklib, NOT the bare
+   * socket probe this route used in 2025 - a plain TCP connect only proves
+   * something is listening on 4370 and reported "Connected" for boxes that
+   * never answered a command.
+   */
+  async connect() {
+    const transports = ["udp", "tcp"];
+    const failures = [];
+
+    for (const transport of transports) {
+      try {
+        const result = await this.attemptConnect(transport);
+        this.connectionType = transport;
+        return { ...result, transport };
+      } catch (error) {
+        failures.push(`${transport.toUpperCase()}: ${error.message}`);
+        // Leave nothing half-open before trying the next transport.
+        try {
+          await this.disconnect();
+        } catch (_) {
+          /* best-effort */
+        }
+      }
+    }
+
+    throw new Error(failures.join(" | "));
   }
 
   async disconnect() {

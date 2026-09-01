@@ -88,6 +88,28 @@ process.on("uncaughtException", (error) => {
 let machineConnections = new Map();
 let zkInstances = new Map(); // Store ZKTeco SDK instances
 
+/**
+ * Allow admins through, and let an employee read their OWN attendance only.
+ *
+ * The "View My Attendance" control on the attendance page renders exclusively
+ * for role === "employee", but the endpoint behind it was authorizeRoles("admin"),
+ * so the one audience the feature exists for always received 403 and saw an
+ * empty modal. Employees are still blocked from every other employee's records:
+ * the id in the URL must match their own.
+ */
+const allowSelfOrAdmin = (req, res, next) => {
+  if (req.user.role === "admin") return next();
+
+  const requested = String(req.params.employeeId || "");
+  const own = String(req.user.employeeId || "");
+  if (own && requested === own) return next();
+
+  return res.status(403).json({
+    success: false,
+    message: "You can only view your own attendance records.",
+  });
+};
+
 // Helper function to test basic TCP connectivity
 const testBasicTCPConnection = (ip, port) => {
   return new Promise((resolve, reject) => {
@@ -1162,7 +1184,7 @@ router.get(
 router.get(
   "/db/frontend/:employeeId",
   authenticateToken,
-  authorizeRoles("admin"),
+  allowSelfOrAdmin,
   async (req, res) => {
     try {
       const { employeeId } = req.params;
@@ -1628,11 +1650,12 @@ router.put(
   }
 );
 
-// Get late time calculation settings
+// Get late time calculation settings. Readable by any signed-in user - the
+// cutoff is what renders the "late" badge on a person's own records. Changing
+// it stays admin-only (see the PUT above).
 router.get(
   "/settings/late-time",
   authenticateToken,
-  authorizeRoles("admin"),
   async (req, res) => {
     try {
       let machineSettings = null;
