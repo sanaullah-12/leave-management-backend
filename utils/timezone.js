@@ -114,6 +114,39 @@ function localDayRange(startDate, endDate) {
   };
 }
 
+/**
+ * Formatters for the values rendered directly in the UI.
+ *
+ * Locale is pinned as well as the zone. Bare toLocaleDateString() and
+ * toLocaleTimeString() take BOTH from the host process, so the same record
+ * rendered "9/2/2026, 3:16:56 AM" on a UTC server and "02/09/2026, 08:16:56" on
+ * a developer laptop - a value that changed with the machine that served it.
+ */
+const displayDateFormatter = new Intl.DateTimeFormat("en-US", {
+  timeZone: APP_TIMEZONE,
+  year: "numeric",
+  month: "numeric",
+  day: "numeric",
+});
+
+const displayTimeFormatter = new Intl.DateTimeFormat("en-US", {
+  timeZone: APP_TIMEZONE,
+  hour: "numeric",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: true,
+});
+
+/** Calendar date for display, in the office timezone. e.g. 9/2/2026 */
+function displayDate(date) {
+  return displayDateFormatter.format(date);
+}
+
+/** Clock time for display, in the office timezone. e.g. 8:16:56 AM */
+function displayTime(date) {
+  return displayTimeFormatter.format(date);
+}
+
 /** Today's calendar date in the office timezone. YYYY-MM-DD. */
 function today() {
   return localDateString(new Date());
@@ -125,6 +158,8 @@ module.exports = {
   localDateString,
   localTimeString,
   localDayRange,
+  displayDate,
+  displayTime,
   zonedTimeToInstant,
   offsetMsAt,
   today,
