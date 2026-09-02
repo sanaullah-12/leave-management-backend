@@ -1,6 +1,7 @@
 const express = require("express");
 const net = require("net");
-const mongoose = require("mongoose");const router = express.Router();
+const mongoose = require("mongoose");
+const { zonedParts, today: officeToday } = require("../utils/timezone");const router = express.Router();
 const { authenticateToken, authorizeRoles } = require("../middleware/auth");
 // Import ZKTeco libraries with fallback patterns
 let ZKLib, JSZKLib;
@@ -921,12 +922,14 @@ router.get(
         endDateStr = endDate;
       } else {
         // Fallback to days-based logic
-        const endDateObj = new Date();
-        const startDateObj = new Date();
-        startDateObj.setDate(endDateObj.getDate() - parseInt(days));
-
+        // Anchored on the office's current day. Before the zone offset each
+        // morning the UTC date is still yesterday, which silently dropped
+        // today from the default range.
+        endDateStr = officeToday();
+        const [ty, tm, td] = endDateStr.split("-").map(Number);
+        const startDateObj = new Date(Date.UTC(ty, tm - 1, td));
+        startDateObj.setUTCDate(startDateObj.getUTCDate() - parseInt(days));
         startDateStr = startDateObj.toISOString().split("T")[0];
-        endDateStr = endDateObj.toISOString().split("T")[0];
       }
 
       console.log(
@@ -1343,8 +1346,8 @@ function calculateWorkingDays(startDate, endDate) {
  */
 function filterWorkingDayRecords(attendanceRecords) {
   return attendanceRecords.filter((record) => {
-    const recordDate = new Date(record.date);
-    const dayOfWeek = recordDate.getDay();
+    const [wy, wm, wd] = record.date.split("-").map(Number);
+    const dayOfWeek = new Date(Date.UTC(wy, wm - 1, wd)).getUTCDay();
     // 0 = Sunday, 6 = Saturday - exclude these
     return dayOfWeek !== 0 && dayOfWeek !== 6;
   });
@@ -1406,18 +1409,17 @@ function transformToFrontendFormat(
 
   // Helper function to calculate late time
   const calculateLateTime = (timestamp, cutoffTime) => {
-    const recordTime = new Date(timestamp);
     const [cutoffHour, cutoffMinute] = cutoffTime.split(":").map(Number);
 
-    // Create cutoff time for the same date
-    const cutoffDateTime = new Date(recordTime);
-    cutoffDateTime.setHours(cutoffHour, cutoffMinute, 0, 0);
+    // Compare wall clock to wall clock in the office timezone. Date.setHours()
+    // applies the SERVER's zone, which is UTC on a deployed host - a 09:00
+    // cutoff then meant 14:00 in the office and nobody was ever late.
+    const { hour, minute } = zonedParts(new Date(timestamp));
+    const minutesIntoDay = Number(hour) * 60 + Number(minute);
+    const cutoffMinutes = cutoffHour * 60 + cutoffMinute;
 
-    // Calculate if late and by how many minutes
-    if (recordTime > cutoffDateTime) {
-      const lateMinutes = Math.floor(
-        (recordTime - cutoffDateTime) / (1000 * 60)
-      );
+    if (minutesIntoDay > cutoffMinutes) {
+      const lateMinutes = minutesIntoDay - cutoffMinutes;
       return {
         isLate: true,
         lateMinutes: lateMinutes,
