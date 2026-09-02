@@ -128,9 +128,27 @@ const limiter = rateLimit({
   max: 1000,
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (req) => RATE_LIMIT_EXEMPT_PATHS.has(req.path),
+  // The Local Agent is a machine, not a browser: it holds a long-poll open
+  // continuously and pushes attendance in batches, so a catch-up sync after the
+  // office PC has been off is legitimately hundreds of requests in minutes. It
+  // also shares the office's public IP with every employee using the app, so
+  // the shared budget here throttled the agent and stalled attendance sync.
+  // It gets its own, larger budget below instead of being exempted outright.
+  skip: (req) =>
+    RATE_LIMIT_EXEMPT_PATHS.has(req.path) || req.path.startsWith("/api/agent"),
 });
 app.use(limiter);
+
+// Agent traffic still needs a ceiling: these endpoints are reachable before
+// authentication runs, so an unauthenticated caller must not be able to hammer
+// them without limit.
+const agentLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5000,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use("/api/agent", agentLimiter);
 
 // Body parser middleware
 app.use(express.json({ limit: "10mb" }));
