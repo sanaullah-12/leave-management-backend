@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { localDateString, localTimeString, localDayRange } = require("../utils/timezone");
 
 /**
  * Service for fetching attendance data from MongoDB instead of polling the ZK
@@ -88,8 +89,11 @@ class AttendanceDbService {
   static async fetchNormalizedLogs({ employeeIds = null, startDate, endDate }) {
     const collection = mongoose.connection.db.collection("attendancelogs");
 
-    const start = new Date(startDate + "T00:00:00.000Z");
-    const end = new Date(endDate + "T23:59:59.999Z");
+    // The requested days are the office's calendar days, not UTC days of the
+    // same name. Building the window in UTC shifts it by the zone offset, which
+    // drops punches made before the offset each morning and pulls in the same
+    // slice of the following day.
+    const { start, end } = localDayRange(startDate, endDate);
 
     const query = employeeIds ? this.buildEmployeeQuery(employeeIds) : {};
     const docs = await collection.find(query).toArray();
@@ -106,8 +110,6 @@ class AttendanceDbService {
    * @returns {Object} Presentation record
    */
   static toAttendanceRecord(log) {
-    const iso = log.timestamp.toISOString();
-
     return {
       uid: log.uid,
       userId: log.id,
@@ -116,8 +118,11 @@ class AttendanceDbService {
       state: log.state,
       stateText: this.getStateText(log.state),
       type: this.getAttendanceType(log.state),
-      date: iso.split("T")[0],
-      time: iso.split("T")[1].substr(0, 8),
+      // Shown to people, so both are the office's wall clock. toISOString()
+      // here reported an 08:42 arrival as 03:42 and filed anything before
+      // 05:00 local under the previous day.
+      date: localDateString(log.timestamp),
+      time: localTimeString(log.timestamp),
       rawData: {
         uid: log.uid,
         id: log.id,
@@ -397,7 +402,7 @@ class AttendanceDbService {
       logs.forEach((log) => {
         stateCounts.set(log.state, (stateCounts.get(log.state) || 0) + 1);
 
-        const date = log.timestamp.toISOString().split("T")[0];
+        const date = localDateString(log.timestamp);
         if (!dailyCounts.has(date)) {
           dailyCounts.set(date, { count: 0, employees: new Set() });
         }
