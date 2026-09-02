@@ -1,7 +1,12 @@
 const express = require("express");
 const net = require("net");
 const mongoose = require("mongoose");
-const { zonedParts, today: officeToday } = require("../utils/timezone");const router = express.Router();
+const {
+  zonedParts,
+  displayDate,
+  displayTime,
+  today: officeToday,
+} = require("../utils/timezone");const router = express.Router();
 const { authenticateToken, authorizeRoles } = require("../middleware/auth");
 // Import ZKTeco libraries with fallback patterns
 let ZKLib, JSZKLib;
@@ -1450,8 +1455,11 @@ function transformToFrontendFormat(
       status: record.stateText,
       timestamp: record.timestamp,
       fullTimestamp: record.timestamp.toISOString(), // Full ISO timestamp
-      dateDisplay: record.timestamp.toLocaleDateString(), // Formatted date
-      timeDisplay: record.timestamp.toLocaleTimeString(), // Formatted time
+      // The UI renders these in preference to date/time, so they must carry the
+      // office's wall clock. Bare toLocale*String() uses the server's zone and
+      // locale, which showed an 08:16 arrival as "3:16:56 AM" on Railway.
+      dateDisplay: displayDate(record.timestamp),
+      timeDisplay: displayTime(record.timestamp),
       rawState: record.state, // Raw state number from database
       machineData: record.rawData,
       recordId: `${record.employeeId}-${
