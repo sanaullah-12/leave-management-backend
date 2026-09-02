@@ -42,6 +42,16 @@ const attendanceLogSchema = new mongoose.Schema({
     default: 'unknown'
   },
 
+  // Raw verification byte as the device reports it (1 fingerprint, 2 face,
+  // 3 password, 4 card). The legacy CSV-imported documents store this same
+  // value as "State", and attendanceDbService.normalizeLog() reads
+  // `doc.state ?? doc.State` before falling back to deriving one from `type`.
+  // Persisting it keeps newly synced records reading back identically to the
+  // 82,668 historical ones instead of round-tripping through a lossy mapping.
+  state: {
+    type: Number
+  },
+
   // Status tracking
   processed: {
     type: Boolean,

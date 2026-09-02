@@ -64,6 +64,7 @@ const employeePerformanceRoutes = require("./routes/employeePerformance");
 const machinePerformanceRoutes = require("./routes/machinePerformance");
 const notificationRoutes = require("./routes/notifications");
 const employeeVoiceRoutes = require("./routes/employeeVoice");
+const agentRoutes = require("./routes/agent");
 
 const app = express();
 
@@ -352,6 +353,10 @@ app.use(
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/employee-voice", employeeVoiceRoutes);
 app.use("/api/announcements", require("./routes/announcements"));
+// Local ZKTeco Agent link. The device sits on a private office LAN that this
+// host cannot route to, so an agent on an office PC connects outbound to these
+// endpoints and relays every device operation.
+app.use("/api/agent", agentRoutes);
 
 // Health check. Railway polls this, so it must stay reachable and cheap. It
 // reports liveness only - no environment, no host, no collection names. The

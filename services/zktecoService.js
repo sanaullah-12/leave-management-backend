@@ -27,6 +27,8 @@ JSZKLib = null;
 // is twice this. A healthy device on the LAN answers the CMD_CONNECT handshake
 // in well under a second - the old 20s was generous enough that probing two
 // transports made a dead device take 30s to report.
+const { probe } = require("./zkProbe");
+
 const CONNECT_TIMEOUT_MS = 10000;
 
 class ZKTecoService {
@@ -283,6 +285,22 @@ class ZKTecoService {
 
     for (const transport of transports) {
       try {
+        // Require the device to actually answer a CMD_CONNECT before handing
+        // over to zklib. zklib's callback reports success for a UDP send that
+        // nobody received, which is how an absent device produced "Connected"
+        // - and, through unlockDoor(), a "Door unlocked" confirmation.
+        const answered = await probe(
+          this.ip,
+          parseInt(this.port) || 4370,
+          transport,
+          CONNECT_TIMEOUT_MS
+        );
+        if (!answered) {
+          throw new Error(
+            `Device at ${this.ip}:${this.port} did not answer over ${transport.toUpperCase()}`
+          );
+        }
+
         const result = await this.attemptConnect(transport);
         this.connectionType = transport;
         return { ...result, transport };
