@@ -9,6 +9,32 @@ const attendanceSettingsSchema = new mongoose.Schema(
   {
     // Late time calculation settings
     lateTimeSettings: {
+      // Which rule decides "late". The two named presets are the office's
+      // agreed arrival times; "custom" defers to cutoffTime below, which is
+      // what installations configured before the presets existed still use.
+      //   flexible - the grace arrival time
+      //   strict   - the hard deadline
+      policy: {
+        type: String,
+        enum: ["flexible", "strict", "custom"],
+        default: "flexible",
+      },
+      flexibleCutoff: {
+        type: String,
+        default: "09:15",
+        validate: {
+          validator: (v) => /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(v),
+          message: "Flexible cutoff must be in HH:MM format",
+        },
+      },
+      strictCutoff: {
+        type: String,
+        default: "09:30",
+        validate: {
+          validator: (v) => /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(v),
+          message: "Strict cutoff must be in HH:MM format",
+        },
+      },
       useCustomCutoff: {
         type: Boolean,
         default: false,
@@ -116,14 +142,25 @@ attendanceSettingsSchema.statics.updateLateTimeSettings = async function (
 ) {
   let settings = await this.getSettings();
 
-  // Update late time settings
-  settings.lateTimeSettings = {
-    ...settings.lateTimeSettings,
+  // Merge onto the stored values so a caller that sends only the policy does
+  // not blank out the configured preset times.
+  const merged = {
+    ...(settings.lateTimeSettings?.toObject
+      ? settings.lateTimeSettings.toObject()
+      : settings.lateTimeSettings),
     ...newSettings,
-    description: newSettings.useCustomCutoff
-      ? `Custom cutoff time: ${newSettings.cutoffTime}`
-      : "Using machine default time rules",
   };
+
+  const describe = () => {
+    if (merged.policy === "custom" || merged.useCustomCutoff) {
+      return `Custom cutoff time: ${merged.cutoffTime}`;
+    }
+    return merged.policy === "strict"
+      ? `Strict arrival deadline: ${merged.strictCutoff}`
+      : `Flexible arrival time: ${merged.flexibleCutoff}`;
+  };
+
+  settings.lateTimeSettings = { ...merged, description: describe() };
 
   settings.updatedBy = userId;
   settings.updatedAt = new Date();

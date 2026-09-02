@@ -5,6 +5,7 @@ const {
   zonedParts,
   displayDate,
   displayTime,
+  localDateString,
   today: officeToday,
 } = require("../utils/timezone");const router = express.Router();
 const { authenticateToken, authorizeRoles } = require("../middleware/auth");
@@ -1181,6 +1182,104 @@ router.get(
   }
 );
 
+
+/**
+ * GET /api/attendance/db/status-summary?startDate&endDate[&policy]
+ *
+ * Workforce attendance for a range, split into on-time, late and absent
+ * employee-days.
+ *
+ * One read, computed here. The alternative was the dashboard walking every
+ * employee through /db/frontend, which is one request per person on every page
+ * load; that is fine for a page an admin opens deliberately and far too heavy
+ * for the home screen.
+ *
+ * "Absent" means no punch on a day the device recorded somebody, so a day the
+ * office was closed does not count against anyone. It is still a statement
+ * about missing data, not about leave - the device cannot tell those apart.
+ */
+router.get("/db/status-summary", authenticateToken, async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    if (!startDate || !endDate) {
+      return res.status(400).json({
+        success: false,
+        message: "startDate and endDate are required",
+      });
+    }
+
+    const cutoff = await AttendanceSettingsService.resolveCutoff(null, {
+      previewPolicy: req.query.policy,
+    });
+    const [cutoffHour, cutoffMinute] = cutoff.cutoffTime.split(":").map(Number);
+    const cutoffSeconds = cutoffHour * 3600 + cutoffMinute * 60;
+
+    const logs = await AttendanceDbService.fetchNormalizedLogs({
+      employeeIds: null,
+      startDate,
+      endDate,
+    });
+
+    // First punch per employee per day: the arrival is what the rule judges.
+    const firstByEmployeeDay = new Map();
+    for (const log of logs) {
+      if (log.id === undefined) continue;
+      const day = localDateString(log.timestamp);
+      const key = `${log.id}|${day}`;
+      const existing = firstByEmployeeDay.get(key);
+      if (!existing || log.timestamp < existing.timestamp) {
+        firstByEmployeeDay.set(key, { timestamp: log.timestamp, day, id: log.id });
+      }
+    }
+
+    const activeDays = new Set();
+    const employees = new Set();
+    const attendedByEmployee = new Map();
+    let onTime = 0;
+    let late = 0;
+
+    for (const entry of firstByEmployeeDay.values()) {
+      activeDays.add(entry.day);
+      employees.add(String(entry.id));
+
+      const parts = zonedParts(entry.timestamp);
+      const seconds =
+        Number(parts.hour) * 3600 + Number(parts.minute) * 60 + Number(parts.second);
+
+      if (seconds > cutoffSeconds) late += 1;
+      else onTime += 1;
+
+      attendedByEmployee.set(
+        String(entry.id),
+        (attendedByEmployee.get(String(entry.id)) || 0) + 1
+      );
+    }
+
+    const dayCount = activeDays.size;
+    const expected = employees.size * dayCount;
+    const absent = Math.max(0, expected - (onTime + late));
+
+    res.json({
+      success: true,
+      dateRange: { startDate, endDate },
+      cutoffTime: cutoff.cutoffTime,
+      policy: cutoff.policy,
+      totalEmployees: employees.size,
+      activeDays: dayCount,
+      onTime,
+      late,
+      absent,
+    });
+  } catch (error) {
+    console.error("Status summary failed:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to build the attendance status summary",
+      error: error.message,
+    });
+  }
+});
+
 // NEW: Get attendance data formatted for frontend compatibility
 router.get(
   "/db/frontend/:employeeId",
@@ -1223,6 +1322,7 @@ router.get(
 
       // Get effective cutoff time for late detection using settings service
       let cutoffTime = "09:00"; // fallback default
+      let cutoffResolution = null;
       try {
         // First try to get machine work time
         let machineWorkTime = null;
@@ -1243,10 +1343,15 @@ router.get(
           }
         }
 
-        // Get effective cutoff time (Custom > Machine > Default)
-        cutoffTime = await AttendanceSettingsService.getEffectiveCutoffTime(
-          machineWorkTime
+          // ?policy=flexible|strict (or a bare HH:MM) recalculates this response
+        // against the other office time WITHOUT changing what is stored. It is
+        // how either role compares the two arrival rules; the admin's saved
+        // policy remains the official one and is reported alongside.
+        cutoffResolution = await AttendanceSettingsService.resolveCutoff(
+          machineWorkTime,
+          { previewPolicy: req.query.policy }
         );
+        cutoffTime = cutoffResolution.cutoffTime;
       } catch (err) {
         console.log(
           `Could not fetch late time settings, using default: ${cutoffTime}`
@@ -1297,6 +1402,18 @@ router.get(
       res.json({
         success: true,
         ...transformedData,
+        // Which rule produced the isLate flags in this response.
+        lateTimePolicy: cutoffResolution
+          ? {
+              cutoffTime: cutoffResolution.cutoffTime,
+              policy: cutoffResolution.policy,
+              officialCutoffTime: cutoffResolution.officialCutoffTime,
+              officialPolicy: cutoffResolution.officialPolicy,
+              isPreview: cutoffResolution.isPreview,
+              flexibleCutoff: cutoffResolution.flexibleCutoff,
+              strictCutoff: cutoffResolution.strictCutoff,
+            }
+          : { cutoffTime, policy: "fallback", isPreview: false },
         databaseInfo: {
           host: mongoose.connection.host,
           database: mongoose.connection.db.databaseName,
@@ -1419,19 +1536,26 @@ function transformToFrontendFormat(
     // Compare wall clock to wall clock in the office timezone. Date.setHours()
     // applies the SERVER's zone, which is UTC on a deployed host - a 09:00
     // cutoff then meant 14:00 in the office and nobody was ever late.
-    const { hour, minute } = zonedParts(new Date(timestamp));
-    const minutesIntoDay = Number(hour) * 60 + Number(minute);
-    const cutoffMinutes = cutoffHour * 60 + cutoffMinute;
+    // Seconds matter: with minute precision an arrival at 09:30:45 counted as
+    // on time against a 09:30 deadline, which is not what a strict cutoff means.
+    const { hour, minute, second } = zonedParts(new Date(timestamp));
+    const secondsIntoDay =
+      Number(hour) * 3600 + Number(minute) * 60 + Number(second);
+    const cutoffSeconds = cutoffHour * 3600 + cutoffMinute * 60;
 
-    if (minutesIntoDay > cutoffMinutes) {
-      const lateMinutes = minutesIntoDay - cutoffMinutes;
+    if (secondsIntoDay > cutoffSeconds) {
+      const lateMinutes = Math.floor((secondsIntoDay - cutoffSeconds) / 60);
       return {
         isLate: true,
         lateMinutes: lateMinutes,
+        // Under a minute still counts as late; reporting it as "0m" reads like
+        // a bug rather than a near miss.
         lateDisplay:
           lateMinutes >= 60
             ? `${Math.floor(lateMinutes / 60)}h ${lateMinutes % 60}m`
-            : `${lateMinutes}m`,
+            : lateMinutes >= 1
+            ? `${lateMinutes}m`
+            : "<1m",
       };
     }
 
@@ -1610,12 +1734,22 @@ router.put(
   authorizeRoles("admin"),
   async (req, res) => {
     try {
-      const { cutoffTime, useCustomCutoff = false } = req.body;
+      const { cutoffTime, useCustomCutoff, policy, flexibleCutoff, strictCutoff } =
+        req.body;
       const userId = req.user._id;
 
-      // Use the settings service to update and persist settings
+      // Only forward what the caller actually sent. Passing undefined through
+      // would let a request that changes just the policy blank out the preset
+      // times it never mentioned.
+      const patch = {};
+      if (policy !== undefined) patch.policy = policy;
+      if (useCustomCutoff !== undefined) patch.useCustomCutoff = useCustomCutoff;
+      if (cutoffTime !== undefined) patch.cutoffTime = cutoffTime;
+      if (flexibleCutoff !== undefined) patch.flexibleCutoff = flexibleCutoff;
+      if (strictCutoff !== undefined) patch.strictCutoff = strictCutoff;
+
       const result = await AttendanceSettingsService.updateLateTimeSettings(
-        { cutoffTime, useCustomCutoff },
+        patch,
         userId
       );
 
@@ -1705,15 +1839,32 @@ router.get(
       );
 
       if (result.success) {
+        // The resolved rule is what the UI needs to show which preset is active
+        // and what each one is set to. Readable by every signed-in user: an
+        // employee has to know the time their own records are judged against.
+        const resolved = await AttendanceSettingsService.resolveCutoff(
+          machineSettings?.workTime || null
+        );
+
         res.json({
           success: true,
-          settings: result.settings,
+          settings: {
+            ...result.settings,
+            policy: resolved.officialPolicy,
+            flexibleCutoff: resolved.flexibleCutoff,
+            strictCutoff: resolved.strictCutoff,
+            effectiveCutoffTime: resolved.cutoffTime,
+          },
         });
       } else {
         // Fallback to basic defaults if database fails
         res.json({
           success: true,
           settings: {
+            policy: "flexible",
+            flexibleCutoff: "09:15",
+            strictCutoff: "09:30",
+            effectiveCutoffTime: machineDefaultTime,
             useCustomCutoff: false,
             cutoffTime: machineDefaultTime,
             machineDefault: true,
