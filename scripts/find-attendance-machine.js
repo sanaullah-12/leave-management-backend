@@ -23,31 +23,14 @@
 const dgram = require("dgram");
 const os = require("os");
 
+// Packet construction and reply validation live in services/zkProbe.js so this
+// script and the app agree byte for byte. They were duplicated once, and the
+// copies drifted: this one still sent reply_id = 0 and only accepted ACK_OK,
+// which real hardware ignores and answers with ACK_OK_2 respectively.
+const { connectPacket, isAck, unframe } = require("../services/zkProbe");
+
 const PORT = 4370;
-const USHRT_MAX = 65535;
-const CMD_CONNECT = 1000;
-const CMD_ACK_OK = 2000;
 const WAIT_MS = 6000;
-
-/** zklib's checksum - must match byte for byte or the device ignores us. */
-const chksum = (buf) => {
-  let sum = 0;
-  for (let i = 0; i < buf.length; i += 2) {
-    sum += i === buf.length - 1 ? buf[i] : buf.readUInt16LE(i);
-    sum %= USHRT_MAX;
-  }
-  return USHRT_MAX - sum - 1;
-};
-
-const connectPacket = () => {
-  const buf = Buffer.alloc(8);
-  buf.writeUInt16LE(CMD_CONNECT, 0);
-  buf.writeUInt16LE(0, 2);
-  buf.writeUInt16LE(0, 4);
-  buf.writeUInt16LE(0, 6);
-  buf.writeUInt16LE(chksum(buf), 2);
-  return buf;
-};
 
 /** Local IPv4 /24 prefixes, skipping loopback and link-local (169.254.x). */
 const localSubnets = () =>
@@ -99,13 +82,8 @@ const scanTcp = (prefixes) => {
           socket.on("error", done);
           socket.on("connect", () => socket.write(framed));
           socket.on("data", (buf) => {
-            const payload =
-              buf.length > 8 && buf.readUInt32LE(0) === 0x7d825050
-                ? buf.slice(8)
-                : buf;
-            if (payload.length >= 8 && payload.readUInt16LE(0) === CMD_ACK_OK) {
-              found.push(ip);
-            }
+            const payload = unframe(buf);
+            if (isAck(payload)) found.push(ip);
             done();
           });
           socket.connect(PORT, ip);
@@ -121,8 +99,8 @@ const scan = (prefixes) =>
 
     socket.on("error", () => {});
     socket.on("message", (msg, rinfo) => {
-      if (msg.length >= 8 && msg.readUInt16LE(0) === CMD_ACK_OK) {
-        if (!found.includes(rinfo.address)) found.push(rinfo.address);
+      if (isAck(msg) && !found.includes(rinfo.address)) {
+        found.push(rinfo.address);
       }
     });
 

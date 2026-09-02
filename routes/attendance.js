@@ -181,31 +181,15 @@ router.post(
       // answered, not that a UDP socket bound locally (which always
       // "succeeds" and produced the old false-positive).
       // ============================================================
-      const ZKTecoService = require("../services/zktecoService");
-      const probeService = new ZKTecoService(ip, parseInt(port) || 4370);
+      // deviceGateway owns HOW the device is reached: this process opens the
+      // connection when it shares a LAN with the device, and relays through the
+      // Local Agent on the office PC when it does not. The handshake itself is
+      // unchanged either way, so "connected" keeps meaning the device answered.
+      const deviceGateway = require("../services/deviceGateway");
 
       try {
-        // Real handshake - throws/times out if the device does not reply.
-        await probeService.connect();
-
-        // Confirm the device answers a real data command, not just the
-        // handshake, so we never report "Connected" for an unresponsive box.
-        let deviceInfo = { connection: "verified" };
-        try {
-          const users = await probeService.getUsers();
-          deviceInfo = {
-            connection: "verified",
-            library: "ZKLib",
-            enrolledUsers: Array.isArray(users) ? users.length : 0,
-          };
-        } catch (probeErr) {
-          // Handshake worked but data read failed - still a real connection.
-          deviceInfo = {
-            connection: "verified",
-            library: "ZKLib",
-            note: `handshake ok; data probe failed: ${probeErr.message}`,
-          };
-        }
+        const probeResult = await deviceGateway.ping(ip, parseInt(port) || 4370);
+        const deviceInfo = probeResult.deviceInfo || { connection: "verified" };
 
         // Record the live connection for status + sync services.
         machineConnections.set(ip, {
@@ -216,20 +200,15 @@ router.post(
           lastPing: new Date(),
           deviceInfo,
           sdkType: "ZKLib",
-          connectionMethod: "zklib-handshake",
+          connectionMethod: deviceGateway.isAgentMode()
+            ? "local-agent-relay"
+            : "zklib-handshake",
           libraryWarnings: [],
         });
 
         console.log(
           `Verified ZKTeco connection to ${ip}:${port} (device replied to protocol)`
         );
-
-        // Release the probe connection; sync/door open their own as needed.
-        try {
-          await probeService.disconnect();
-        } catch (_) {
-          /* best-effort */
-        }
 
         return res.json({
           success: true,
@@ -241,7 +220,9 @@ router.post(
             connectedAt: new Date(),
             deviceInfo,
             sdkType: "ZKLib",
-            connectionMethod: "zklib-handshake",
+            connectionMethod: deviceGateway.isAgentMode()
+              ? "local-agent-relay"
+              : "zklib-handshake",
             warnings: [],
           },
         });
@@ -254,10 +235,18 @@ router.post(
         // Clear any stale "connected" record for this IP.
         machineConnections.delete(ip);
 
-        try {
-          await probeService.disconnect();
-        } catch (_) {
-          /* best-effort */
+        // The office PC is off, so nothing can reach the device. This is a
+        // known-unavailable upstream, not a fault in this server or the device.
+        if (connectError.code === "DEVICE_OFFLINE" || connectError.code === "AGENT_BUSY") {
+          return res.status(503).json({
+            success: false,
+            code: connectError.code,
+            message:
+              "The Local Agent on the office PC is not connected, so the ZKTeco device cannot be reached. " +
+              "Turn the office PC on and the agent will reconnect by itself.",
+            error: connectError.message,
+            machine: { ip, port: parseInt(port) || 4370, status: "agent_offline" },
+          });
         }
 
         // A missing/broken zklib install throws from inside connect() too, and
@@ -598,17 +587,13 @@ router.get(
         );
 
         // Use the working ZKTecoService directly
-        const ZKTecoService = require("../services/zktecoService");
-
-        const zkService = new ZKTecoService(ip, 4370);
+        const deviceGateway = require("../services/deviceGateway");
 
         try {
-          // Connect to device
-          await zkService.connect();
-          console.log(`ZKTeco service connected successfully to ${ip}`);
-
-          // Get employees directly from service
-          const employees = await zkService.getUsers();
+          // One gateway call covers connect, read and release, whether the read
+          // happens here on the LAN or on the office PC running the Local Agent.
+          const { users } = await deviceGateway.getUsers(ip, 4370);
+          const employees = Array.isArray(users) ? users : [];
           console.log(
             `Retrieved ${employees.length} employees from ZKTeco device`
           );
@@ -644,10 +629,6 @@ router.get(
             rawData: user,
           }));
 
-          // Disconnect
-          await zkService.disconnect();
-
-          // Send successful response
           res.json({
             success: true,
             employees: formattedEmployees,
@@ -656,6 +637,7 @@ router.get(
             fetchedAt: new Date(),
             method: "zktecoService_getUsers",
             source: "device",
+            via: deviceGateway.isAgentMode() ? "local-agent" : "direct",
           });
         } catch (serviceError) {
           console.error(`ZKTeco service failed: ${serviceError.message}`);
@@ -666,6 +648,17 @@ router.get(
           `Failed to fetch employees from ZKTeco machine:`,
           error
         );
+
+        if (error.code === "DEVICE_OFFLINE" || error.code === "AGENT_BUSY") {
+          return res.status(503).json({
+            success: false,
+            code: error.code,
+            message:
+              "The Local Agent on the office PC is not connected, so employees cannot be read from the device.",
+            error: error.message,
+            machineIp: ip,
+          });
+        }
 
         // Provide specific error messages based on the error type
         let errorResponse;
@@ -1191,25 +1184,14 @@ router.get(
       const { startDate, endDate, days = 7 } = req.query;
 
       console.log(
-        `Fetching attendance from LOCAL DATABASE for frontend compatibility - employee ${employeeId}`
+        `Fetching attendance for employee ${employeeId} from ${mongoose.connection.db.databaseName}`
       );
-      console.log(`Database host: ${mongoose.connection.host}`);
-      console.log(`Database name: ${mongoose.connection.db.databaseName}`);
 
-      // VERIFY LOCAL CONNECTION
-      if (
-        mongoose.connection.host !== "127.0.0.1" &&
-        mongoose.connection.host !== "localhost"
-      ) {
-        console.error("WARNING: Not connected to local database!");
-        console.error("Current host:", mongoose.connection.host);
-        return res.status(500).json({
-          success: false,
-          message: "Error: Connected to remote database instead of local",
-          currentHost: mongoose.connection.host,
-          expectedHost: "127.0.0.1 or localhost",
-        });
-      }
+      // No host assertion here. Attendance is read from whichever database the
+      // server is configured to use, which is Atlas on any deployed host - the
+      // records this route serves live there, not on a local mongod. Requiring
+      // a localhost connection made this endpoint fail on every production
+      // request, which is the whole employee attendance screen.
 
       // Calculate date range
       let startDateStr, endDateStr;
@@ -2265,13 +2247,13 @@ router.post(
       ` [DOOR-UNLOCK] Requested by ${actor.email || actor.id} at ${requestedAt} → device ${ip}:${port}`
     );
 
-    // Reuse the existing, working connection service - no new integration.
-    const ZKTecoService = require("../services/zktecoService");
-    const zkService = new ZKTecoService(ip, port);
+    // Same ZKTeco unlock command either way. deviceGateway only decides which
+    // machine issues it: this server on the LAN, or the office PC running the
+    // Local Agent when the server is hosted off-site.
+    const deviceGateway = require("../services/deviceGateway");
 
     try {
-      await zkService.connect();
-      const result = await zkService.unlockDoor(DURATION_SECONDS);
+      const result = await deviceGateway.unlockDoor(ip, port, DURATION_SECONDS);
 
       console.log(
         ` [DOOR-UNLOCK] SUCCESS - ${actor.email || actor.id} opened door ${ip} for ${DURATION_SECONDS}s at ${requestedAt}`
@@ -2280,8 +2262,9 @@ router.post(
       return res.status(200).json({
         success: true,
         message: `Door unlocked for ${DURATION_SECONDS} seconds. It will lock automatically.`,
-        durationSeconds: result.durationSeconds,
+        durationSeconds: result.durationSeconds || DURATION_SECONDS,
         device: { ip, port },
+        via: deviceGateway.isAgentMode() ? "local-agent" : "direct",
         unlockedBy: actor.email || actor.name || actor.id,
         timestamp: requestedAt,
       });
@@ -2290,20 +2273,78 @@ router.post(
         ` [DOOR-UNLOCK] FAILED - requested by ${actor.email || actor.id} for device ${ip} at ${requestedAt}: ${error.message}`
       );
 
+      // Classify the failure the same way /connect does. Returning a blanket
+      // 500 "please try again" for an unreachable device is wrong twice over:
+      // it reports a server fault for what is an upstream one, and it invites a
+      // retry that cannot succeed. This matters most in production, where the
+      // device sits on a private LAN the cloud host has no route to at all.
+      const reason = (error.message || "").toLowerCase();
+
+      if (error.code === "DEVICE_OFFLINE" || error.code === "AGENT_BUSY") {
+        return res.status(503).json({
+          success: false,
+          code: error.code,
+          message:
+            "The door was NOT unlocked. The Local Agent on the office PC is not connected, " +
+            "so the command could not reach the door controller. Turn the office PC on and try again.",
+          error: error.message,
+          device: { ip, port, status: "agent_offline" },
+          timestamp: requestedAt,
+        });
+      }
+
+      if (error.code === "AGENT_TIMEOUT") {
+        return res.status(504).json({
+          success: false,
+          code: "AGENT_TIMEOUT",
+          message:
+            "The door unlock could not be confirmed. The Local Agent did not report a result in time, " +
+            "so treat the door as still locked.",
+          error: error.message,
+          device: { ip, port, status: "unconfirmed" },
+          timestamp: requestedAt,
+        });
+      }
+
+      if (/librar(y|ies) not available|cannot find module/i.test(error.message)) {
+        return res.status(500).json({
+          success: false,
+          message:
+            "Server misconfiguration: the ZKTeco driver library is not installed on the backend. " +
+            "This is not a network problem - run `npm install` in the backend directory.",
+          error: error.message,
+          device: { ip, port, status: "driver_missing" },
+          timestamp: requestedAt,
+        });
+      }
+
+      if (
+        reason.includes("did not answer") ||
+        reason.includes("not responding") ||
+        reason.includes("timeout") ||
+        reason.includes("refused") ||
+        reason.includes("ehostunreach") ||
+        reason.includes("enetunreach")
+      ) {
+        return res.status(502).json({
+          success: false,
+          message:
+            `Unable to reach the door controller at ${ip}:${port}. It did not respond. ` +
+            "Check that the device is powered on and that this server is on the same network as it - " +
+            "a device on a private LAN is not reachable from a cloud-hosted backend.",
+          error: error.message,
+          device: { ip, port, status: "unreachable" },
+          timestamp: requestedAt,
+        });
+      }
+
       return res.status(500).json({
         success: false,
-        message: "Failed to unlock door. Please try again.",
+        message: "Failed to unlock door.",
         error: error.message,
         device: { ip, port },
         timestamp: requestedAt,
       });
-    } finally {
-      // Always release the connection.
-      try {
-        await zkService.disconnect();
-      } catch (_) {
-        /* best-effort cleanup */
-      }
     }
   }
 );
