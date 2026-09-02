@@ -95,8 +95,38 @@ class AttendanceDbService {
     // slice of the following day.
     const { start, end } = localDayRange(startDate, endDate);
 
-    const query = employeeIds ? this.buildEmployeeQuery(employeeIds) : {};
-    const docs = await collection.find(query).toArray();
+    // Push the range into the query for documents that can answer it, and pull
+    // back only the fields normalizeLog reads.
+    const rangeQuery = {
+      $or: [
+        { timestamp: { $gte: start, $lte: end } },
+        // Legacy CSV rows keep their time as a string, which sorts lexically -
+        // a range query on it silently returns the wrong set, so they are
+        // carried through and filtered below.
+        { timestamp: { $exists: false } },
+      ],
+    };
+
+    const query = employeeIds
+      ? { $and: [this.buildEmployeeQuery(employeeIds), rangeQuery] }
+      : rangeQuery;
+
+    const docs = await collection
+      .find(query)
+      .project({
+        timestamp: 1,
+        Timestamp: 1,
+        id: 1,
+        "User ID": 1,
+        employeeId: 1,
+        uid: 1,
+        UID: 1,
+        machineUserId: 1,
+        state: 1,
+        State: 1,
+        type: 1,
+      })
+      .toArray();
 
     return docs
       .map((doc) => this.normalizeLog(doc))
