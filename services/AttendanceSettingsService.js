@@ -5,6 +5,29 @@
 
 const AttendanceSettings = require("../models/AttendanceSettings");
 
+/** Falls back to these when no settings document has been saved yet. */
+const DEFAULTS = {
+  policy: "flexible",
+  flexibleCutoff: "09:15",
+  strictCutoff: "09:30",
+  cutoffTime: "09:00",
+};
+
+const TIME_PATTERN = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+
+/**
+ * Turn a policy name into the time it stands for.
+ * Returns null for anything unrecognised so the caller can fall through to the
+ * stored configuration rather than silently judging people against a guess.
+ */
+function cutoffForPolicy(policy, settings = {}) {
+  if (policy === "flexible") return settings.flexibleCutoff || DEFAULTS.flexibleCutoff;
+  if (policy === "strict") return settings.strictCutoff || DEFAULTS.strictCutoff;
+  // A bare HH:MM is accepted so a caller can preview an arbitrary time.
+  if (typeof policy === "string" && TIME_PATTERN.test(policy)) return policy;
+  return null;
+}
+
 class AttendanceSettingsService {
   /**
    * Get current attendance settings with proper fallbacks
@@ -42,37 +65,62 @@ class AttendanceSettingsService {
    */
   static async updateLateTimeSettings(newSettings, userId) {
     try {
-      // Validate required fields
-      if (newSettings.useCustomCutoff && !newSettings.cutoffTime) {
-        return {
-          success: false,
-          message: "Cutoff time is required when using custom cutoff",
-        };
-      }
+      const patch = {};
 
-      // Validate time format
-      if (newSettings.useCustomCutoff) {
-        const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
-        if (!timeRegex.test(newSettings.cutoffTime)) {
+      if (newSettings.policy !== undefined) {
+        if (!["flexible", "strict", "custom"].includes(newSettings.policy)) {
           return {
             success: false,
-            message: "Invalid time format. Use HH:MM format (e.g., 09:00)",
+            message: 'policy must be one of "flexible", "strict" or "custom"',
+          };
+        }
+        patch.policy = newSettings.policy;
+        // Keep the legacy flag consistent with the policy so anything still
+        // reading useCustomCutoff agrees with anything reading policy.
+        patch.useCustomCutoff = newSettings.policy === "custom";
+      }
+
+      // Each preset time is optional on update: an admin switching policy sends
+      // only the policy, and blanking the other preset would be wrong.
+      for (const field of ["flexibleCutoff", "strictCutoff", "cutoffTime"]) {
+        if (newSettings[field] === undefined) continue;
+        if (!TIME_PATTERN.test(newSettings[field])) {
+          return {
+            success: false,
+            message: `Invalid ${field}. Use HH:MM format (e.g., 09:15)`,
+          };
+        }
+        patch[field] = newSettings[field];
+      }
+
+      // Legacy callers send useCustomCutoff without a policy.
+      if (newSettings.policy === undefined && newSettings.useCustomCutoff !== undefined) {
+        patch.useCustomCutoff = newSettings.useCustomCutoff;
+        patch.policy = newSettings.useCustomCutoff ? "custom" : "flexible";
+      }
+
+      const effectivelyCustom =
+        patch.policy === "custom" || patch.useCustomCutoff === true;
+      if (effectivelyCustom && !patch.cutoffTime) {
+        const current = await this.getSettings();
+        if (!current.settings?.cutoffTime) {
+          return {
+            success: false,
+            message: "Cutoff time is required when using a custom cutoff",
           };
         }
       }
 
       // Update settings in database
       const updatedSettings = await AttendanceSettings.updateLateTimeSettings(
-        {
-          useCustomCutoff: newSettings.useCustomCutoff,
-          cutoffTime: newSettings.useCustomCutoff
-            ? newSettings.cutoffTime
-            : "09:00",
-        },
+        patch,
         userId
       );
 
       console.log("Late time settings updated in database:", {
+        policy: updatedSettings.lateTimeSettings.policy,
+        flexibleCutoff: updatedSettings.lateTimeSettings.flexibleCutoff,
+        strictCutoff: updatedSettings.lateTimeSettings.strictCutoff,
         useCustomCutoff: updatedSettings.lateTimeSettings.useCustomCutoff,
         cutoffTime: updatedSettings.lateTimeSettings.cutoffTime,
         updatedBy: updatedSettings.updatedBy,
@@ -97,27 +145,76 @@ class AttendanceSettingsService {
    * Get effective cutoff time for late calculation
    * Priority: Custom Settings > Machine Settings > Default (09:00)
    */
-  static async getEffectiveCutoffTime(machineWorkTime = null) {
+  static async getEffectiveCutoffTime(machineWorkTime = null, options = {}) {
+    const resolved = await this.resolveCutoff(machineWorkTime, options);
+    return resolved.cutoffTime;
+  }
+
+  /**
+   * Work out which time decides "late", and say where it came from.
+   *
+   * Order of precedence:
+   *   1. previewPolicy - a caller asking "how would this look under 09:30?".
+   *      It never changes what is stored, so an employee can compare the two
+   *      office times without being able to move their own bar.
+   *   2. the saved policy - flexible or strict, the admin's decision, which is
+   *      the official rule for everyone.
+   *   3. a custom cutoff configured before the presets existed.
+   *   4. the machine's own work time, then a hard default.
+   *
+   * @param {string|null} machineWorkTime
+   * @param {{previewPolicy?: string}} options
+   */
+  static async resolveCutoff(machineWorkTime = null, options = {}) {
     try {
       const result = await this.getSettings();
-      const settings = result.settings;
+      const settings = { ...DEFAULTS, ...(result.settings || {}) };
 
-      if (settings.useCustomCutoff) {
-        console.log(`⏰ Using CUSTOM cutoff time: ${settings.cutoffTime}`);
-        return settings.cutoffTime;
+      const official =
+        settings.policy === "custom" || settings.useCustomCutoff
+          ? settings.cutoffTime
+          : cutoffForPolicy(settings.policy, settings) ||
+            machineWorkTime ||
+            settings.cutoffTime;
+
+      const officialPolicy =
+        settings.policy === "custom" || settings.useCustomCutoff
+          ? "custom"
+          : settings.policy;
+
+      const preview = cutoffForPolicy(options.previewPolicy, settings);
+      if (preview && preview !== official) {
+        return {
+          cutoffTime: preview,
+          policy: options.previewPolicy,
+          officialCutoffTime: official,
+          officialPolicy,
+          isPreview: true,
+          flexibleCutoff: settings.flexibleCutoff,
+          strictCutoff: settings.strictCutoff,
+        };
       }
 
-      if (machineWorkTime) {
-        console.log(`⏰ Using MACHINE cutoff time: ${machineWorkTime}`);
-        return machineWorkTime;
-      }
-
-      console.log(`⏰ Using DEFAULT cutoff time: ${settings.cutoffTime}`);
-      return settings.cutoffTime;
+      return {
+        cutoffTime: official,
+        policy: officialPolicy,
+        officialCutoffTime: official,
+        officialPolicy,
+        isPreview: false,
+        flexibleCutoff: settings.flexibleCutoff,
+        strictCutoff: settings.strictCutoff,
+      };
     } catch (error) {
-      console.error("Error getting effective cutoff time:", error);
-      console.log(`⏰ Using FALLBACK cutoff time: 09:00`);
-      return "09:00";
+      console.error("Error resolving cutoff time:", error);
+      return {
+        cutoffTime: DEFAULTS.flexibleCutoff,
+        policy: "flexible",
+        officialCutoffTime: DEFAULTS.flexibleCutoff,
+        officialPolicy: "flexible",
+        isPreview: false,
+        flexibleCutoff: DEFAULTS.flexibleCutoff,
+        strictCutoff: DEFAULTS.strictCutoff,
+      };
     }
   }
 

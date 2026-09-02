@@ -19,10 +19,36 @@ const isDeployedProduction =
   !!process.env.RAILWAY_ENVIRONMENT_NAME ||
   !!process.env.RAILWAY_ENVIRONMENT;
 if (isDeployedProduction) {
-  require("dotenv").config({ path: path.join(__dirname, ".env.production") });
+  require("dotenv").config({
+    path: path.join(__dirname, ".env.production"),
+    quiet: true,
+  });
   process.env.NODE_ENV = "production";
 } else {
-  require("dotenv").config();
+  require("dotenv").config({ quiet: true });
+}
+
+/**
+ * Production console policy.
+ *
+ * Chatty logs are useful while developing and are noise in a deployed service:
+ * they cost I/O on every request and bury the entries that matter. In
+ * production everything below error is muted, so what reaches the log is what
+ * actually went wrong.
+ *
+ * Installed here, before the first require of application code, because several
+ * modules log at import time and would otherwise slip past it.
+ *
+ * VERBOSE_LOGS=true restores everything, so an incident can be traced without
+ * deploying different code.
+ */
+const VERBOSE_LOGS = process.env.VERBOSE_LOGS === "true";
+if (isDeployedProduction && !VERBOSE_LOGS) {
+  const noop = () => {};
+  console.log = noop;
+  console.info = noop;
+  console.debug = noop;
+  console.warn = noop;
 }
 
 // Report only what is MISSING. Echoing configuration back to the log tells an
@@ -48,10 +74,14 @@ if (!process.env.JWT_SECRET) {
   console.error("FATAL: JWT_SECRET is not set. Refusing to start.");
   process.exit(1);
 }
-console.log(
-  `Startup (${process.env.NODE_ENV || "development"}):`,
-  missingEnv.length ? `MISSING ENV -> ${missingEnv.join(", ")}` : "env OK"
-);
+if (missingEnv.length) {
+  // The one startup line that must survive the mute above.
+  console.error(
+    `Startup (${process.env.NODE_ENV || "development"}): MISSING ENV -> ${missingEnv.join(", ")}`
+  );
+} else {
+  console.log(`Startup (${process.env.NODE_ENV || "development"}): env OK`);
+}
 
 const authRoutes = require("./routes/auth");
 const leaveRoutes = require("./routes/leaves");
@@ -116,7 +146,16 @@ app.use(
     crossOriginResourcePolicy: { policy: "cross-origin" },
   })
 );
-app.use(morgan("combined"));
+// Log requests that failed. A line per successful request is thousands of
+// entries an hour that nobody reads; a 4xx/5xx is worth keeping.
+app.use(
+  morgan(isDeployedProduction && !VERBOSE_LOGS ? "tiny" : "combined", {
+    skip: (req, res) =>
+      isDeployedProduction && !VERBOSE_LOGS && res.statusCode < 400,
+    // console.log is muted above, so write straight to the real stream.
+    stream: { write: (line) => process.stdout.write(line) },
+  })
+);
 
 // Rate limiting. The exemption matches req.PATH against an exact allowlist, not
 // req.url against substrings: req.url carries the query string, so the old
