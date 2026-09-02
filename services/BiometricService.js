@@ -162,7 +162,23 @@ class BiometricService {
     }
   }
 
+  /**
+   * Read the device's attendance log.
+   *
+   * Delegated to attendanceReader rather than this class's own zklib instance:
+   * zklib's ATTLOG parser throws out of the socket handler on this firmware,
+   * which kills the process instead of failing the call. attendanceReader uses
+   * the driver that reads this hardware correctly and returns the same shape.
+   */
   async getAttendanceLogs(startDate = null) {
+    const { readAttendanceLogs } = require('./attendanceReader');
+    console.log(`Fetching attendance logs from biometric device at ${this.ip}...`);
+    const logs = await readAttendanceLogs(this.ip, this.port, startDate);
+    console.log(`Retrieved ${logs.length} attendance logs from biometric device`);
+    return logs;
+  }
+
+  async getAttendanceLogsViaZklib(startDate = null) {
     if (!this.isConnected || !this.zkInstance) {
       await this.connect();
     }

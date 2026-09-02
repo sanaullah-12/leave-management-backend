@@ -13,6 +13,76 @@ const STATE_TO_TYPE = {
 
 class AttendanceSyncService {
   /**
+   * Normalise device log records and write them to the database.
+   *
+   * Split out from syncAttendanceLogs so that logs collected somewhere other
+   * than this process - specifically a Local Agent on the office LAN, which is
+   * the only machine that can reach the device in production - land in exactly
+   * the same shape as a direct sync. Both paths must produce identical
+   * documents or the deduplication index cannot recognise a repeat punch.
+   *
+   * Deduplication is the partial unique index on
+   * {machineIp, employeeId, timestamp}: bulkInsertLogs relies on the resulting
+   * duplicate-key errors to skip records already stored, so re-sending the
+   * whole device log is safe and inserts nothing new.
+   *
+   * @param {string} deviceIp   Device the logs came from.
+   * @param {string} companyId  Owning company.
+   * @param {Array}  deviceLogs Records as BiometricService formats them.
+   */
+  static async persistDeviceLogs(deviceIp, companyId, deviceLogs) {
+    if (!Array.isArray(deviceLogs) || deviceLogs.length === 0) {
+      return { inserted: 0, skipped: 0, total: 0, errors: [] };
+    }
+
+    const transformedLogs = [];
+    const rejected = [];
+
+    for (const log of deviceLogs) {
+      const timestamp = new Date(log.timestamp);
+
+      // A record with an unparseable timestamp cannot be deduplicated and
+      // would corrupt date-range queries, so drop it rather than store it.
+      if (Number.isNaN(timestamp.getTime())) {
+        rejected.push(`Invalid timestamp: ${JSON.stringify(log.timestamp)}`);
+        continue;
+      }
+
+      // employeeId must be the enrolled User ID (log.userId), not the device
+      // record slot (log.uid) - uid is 0 on virtually every real record.
+      transformedLogs.push({
+        machineIp: deviceIp,
+        employeeId: String(log.userId ?? log.uid ?? 'unknown'),
+        machineUserId: String(log.uid ?? log.userId ?? 'unknown'),
+        timestamp,
+        date: timestamp.toISOString().split('T')[0],
+        // The device reports the punch kind as a numeric state. Persist it as
+        // the schema's type string, otherwise every record reads back as
+        // "Unknown" - BiometricService defaults log.type to "attendance",
+        // which carries no punch information at all.
+        type: STATE_TO_TYPE[log.state] || log.type || 'unknown',
+        mode: log.mode || 'unknown',
+        // Keep the device's own verification byte. The read path prefers it
+        // over deriving a state from `type`, which is what makes a synced
+        // record indistinguishable from a historically imported one.
+        state: typeof log.state === 'number' ? log.state : undefined,
+        rawData: log.rawData || log,
+        company: companyId,
+        syncedAt: new Date()
+      });
+    }
+
+    const result = await AttendanceLog.bulkInsertLogs(transformedLogs);
+
+    return {
+      ...result,
+      total: deviceLogs.length,
+      rejected: rejected.length,
+      errors: [...(result.errors || []), ...rejected]
+    };
+  }
+
+  /**
    * Sync attendance logs from ZKTeco device to database
    * @param {string} deviceIp - Device IP address
    * @param {string} companyId - Company MongoDB ID
@@ -67,37 +137,8 @@ class AttendanceSyncService {
         };
       }
 
-      // Step 4: Transform logs for database
-      console.log('Step 3: Transforming logs for database...');
-      const transformedLogs = deviceLogs.map(log => {
-        const timestamp = new Date(log.timestamp);
-        const date = timestamp.toISOString().split('T')[0];
-
-        // employeeId must be the enrolled User ID (log.userId), not the device
-        // record slot (log.uid) - uid is 0 on virtually every real record.
-        return {
-          machineIp: deviceIp,
-          employeeId: String(log.userId ?? log.uid ?? 'unknown'),
-          machineUserId: String(log.uid ?? log.userId ?? 'unknown'),
-          timestamp,
-          date,
-          // The device reports the punch kind as a numeric state. Persist it as
-          // the schema's type string, otherwise every record reads back as
-          // "Unknown" - BiometricService defaults log.type to "attendance",
-          // which carries no punch information at all.
-          type: STATE_TO_TYPE[log.state] || log.type || 'unknown',
-          mode: log.mode || 'unknown',
-          rawData: log.rawData || log,
-          company: companyId,
-          syncedAt: new Date()
-        };
-      });
-
-      console.log(`Transformed ${transformedLogs.length} logs\n`);
-
-      // Step 5: Bulk insert into database
-      console.log('Step 4: Inserting logs into database...');
-      const result = await AttendanceLog.bulkInsertLogs(transformedLogs);
+      // Step 4 and 5: Transform and insert.
+      const result = await this.persistDeviceLogs(deviceIp, companyId, deviceLogs);
 
       const duration = ((Date.now() - syncStartTime) / 1000).toFixed(2);
 
