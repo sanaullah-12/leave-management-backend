@@ -94,6 +94,8 @@ const employeePerformanceRoutes = require("./routes/employeePerformance");
 const machinePerformanceRoutes = require("./routes/machinePerformance");
 const notificationRoutes = require("./routes/notifications");
 const employeeVoiceRoutes = require("./routes/employeeVoice");
+const workFromHomeRoutes = require("./routes/workFromHome");
+const unreportedAbsenceRoutes = require("./routes/unreportedAbsence");
 const agentRoutes = require("./routes/agent");
 
 const app = express();
@@ -409,6 +411,8 @@ app.use(
 );
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/employee-voice", employeeVoiceRoutes);
+app.use("/api/work-from-home", workFromHomeRoutes);
+app.use("/api/unreported-absence", unreportedAbsenceRoutes);
 app.use("/api/announcements", require("./routes/announcements"));
 // Local ZKTeco Agent link. The device sits on a private office LAN that this
 // host cannot route to, so an agent on an office PC connects outbound to these
@@ -470,4 +474,9 @@ require("./notifications").NotificationService.init();
 server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
   console.log(`Real-time (Socket.IO) ready on the same port`);
+
+  // The office rule that converts an unexplained day into leave after the
+  // cutoff. Idempotent and started after the listener, so a boot at any hour
+  // catches up without double-charging anyone.
+  require("./services/unreportedAbsenceScheduler").start();
 });

@@ -38,7 +38,7 @@ class SocketNotificationService {
    * @param {string} message.body
    * @param {string} message.company
    * @param {string=} message.sender
-   * @param {object=} message.refs     { leaveId, voiceId, announcementId }
+   * @param {object=} message.refs     { leaveId, voiceId, announcementId, wfhId }
    * @returns {Promise<object>} The persisted notification document.
    */
   async send(recipient, message) {
@@ -54,6 +54,7 @@ class SocketNotificationService {
       leaveId: refs.leaveId || null,
       voiceId: refs.voiceId || null,
       announcementId: refs.announcementId || null,
+      wfhId: refs.wfhId || null,
     });
 
     await notification.save();
@@ -68,6 +69,7 @@ class SocketNotificationService {
       leaveId: notification.leaveId,
       voiceId: notification.voiceId,
       announcementId: notification.announcementId,
+      wfhId: notification.wfhId,
       read: false,
       createdAt: notification.createdAt,
     });

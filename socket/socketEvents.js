@@ -19,6 +19,13 @@ const EVENTS = Object.freeze({
   LEAVE_NEW: "leave:new", // employee submitted → admins
   LEAVE_REVIEWED: "leave:reviewed", // admin approved/rejected → employee
 
+  // An unreported absence was converted to leave, or that was reversed
+  LEAVE_AUTO_MARKED: "leave:auto_marked",
+
+  // Work From Home
+  WFH_NEW: "wfh:new", // employee submitted -> admins
+  WFH_REVIEWED: "wfh:reviewed", // admin approved/rejected -> employee
+
   // Employee Voice
   VOICE_NEW: "voice:new", // employee submitted → admins
   VOICE_UPDATED: "voice:updated", // reply / status change → both parties
