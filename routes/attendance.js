@@ -32,6 +32,8 @@ const enhancedAttendanceSyncService = require("../services/enhancedAttendanceSyn
 const zktecoRealDataService = require("../services/zktecoRealDataService");
 const AttendanceDbService = require("../services/attendanceDbService");
 const AttendanceSettingsService = require("../services/AttendanceSettingsService");
+const workModeService = require("../services/workModeService");
+const User = require("../models/User");
 
 // Global handler for unhandled promise rejections (especially js-zklib buffer issues)
 process.on("unhandledRejection", (reason, promise) => {
@@ -1256,8 +1258,55 @@ router.get("/db/status-summary", authenticateToken, async (req, res) => {
     }
 
     const dayCount = activeDays.size;
+
+    // Split what used to be one lump of "absent" into the four work modes the
+    // dashboard distinguishes. Only the days the device was actually active
+    // count, so a day the office was shut never counts against anyone - and an
+    // employee-day approved as WFH or leave is no longer an absence.
+    let schedule = {};
+    try {
+      schedule = await workModeService.getScheduleByEmployeeCode({
+        companyId: req.user.company._id,
+        startDate,
+        endDate,
+      });
+    } catch (workModeError) {
+      console.error(
+        "Work mode split unavailable for status summary:",
+        workModeError.message
+      );
+    }
+
+    // Someone who worked from home all week never punched, so the device alone
+    // does not know they exist. Anyone with an approved schedule counts as part
+    // of the workforce for this range.
+    for (const employeeCode of Object.keys(schedule)) {
+      employees.add(employeeCode);
+    }
+
     const expected = employees.size * dayCount;
-    const absent = Math.max(0, expected - (onTime + late));
+
+    let workFromHome = 0;
+    let onLeave = 0;
+    for (const employeeCode of employees) {
+      const days = schedule[employeeCode];
+      if (!days) continue;
+      for (const day of activeDays) {
+        // A day the device already saw them is theirs; only a day with no
+        // punch can be explained by an approved schedule.
+        if (firstByEmployeeDay.has(`${employeeCode}|${day}`)) continue;
+        if (days[day] === workModeService.WORK_MODES.WORK_FROM_HOME) {
+          workFromHome += 1;
+        } else if (days[day] === workModeService.WORK_MODES.ON_LEAVE) {
+          onLeave += 1;
+        }
+      }
+    }
+
+    const absent = Math.max(
+      0,
+      expected - (onTime + late + workFromHome + onLeave)
+    );
 
     res.json({
       success: true,
@@ -1268,6 +1317,10 @@ router.get("/db/status-summary", authenticateToken, async (req, res) => {
       activeDays: dayCount,
       onTime,
       late,
+      // On-site attendance is on-time plus late; these two are the days that
+      // were worked or approved away from the device.
+      workFromHome,
+      onLeave,
       absent,
     });
   } catch (error) {
@@ -1392,6 +1445,80 @@ router.get(
         cutoffTime
       );
 
+      // Work mode: an approved WFH day is a working day, and an approved
+      // leave day is not an absence either. Resolved through workModeService so
+      // this route never re-derives the precedence rule.
+      let workModes = {};
+      let workModeCounts = null;
+      try {
+        const employeeRecord = await User.findOne({
+          company: req.user.company._id,
+          employeeId: String(employeeId),
+        })
+          .select("_id")
+          .lean();
+
+        if (employeeRecord) {
+          const schedule = await workModeService.getSchedule({
+            companyId: req.user.company._id,
+            startDate: startDateStr,
+            endDate: endDateStr,
+            employeeIds: [employeeRecord._id],
+          });
+          workModes = schedule[String(employeeRecord._id)] || {};
+        }
+
+        const punchDays = new Set(
+          (transformedData.records || []).map((record) => record.date)
+        );
+        workModeCounts = workModeService.summariseRange({
+          days: workModes,
+          punchDays,
+          startDate: startDateStr,
+          endDate: endDateStr,
+        });
+
+        // Each record says how its day was worked, so the UI never has to join
+        // two collections to label a row.
+        transformedData.records = (transformedData.records || []).map(
+          (record) => ({
+            ...record,
+            workMode: workModeService.resolveDayMode(
+              workModes[record.date],
+              true
+            ),
+          })
+        );
+
+        // Additive only: presentDays keeps meaning "seen by the device", and
+        // absentDays now excludes days that were approved as WFH or leave -
+        // counting an approved WFH day as absent is the bug this fixes.
+        if (transformedData.summary) {
+          transformedData.summary.wfhDays =
+            workModeCounts[workModeService.WORK_MODES.WORK_FROM_HOME];
+          transformedData.summary.onLeaveDays =
+            workModeCounts[workModeService.WORK_MODES.ON_LEAVE];
+          transformedData.summary.officeDays =
+            workModeCounts[workModeService.WORK_MODES.OFFICE];
+          transformedData.summary.absentDays =
+            workModeCounts[workModeService.WORK_MODES.ABSENT];
+          transformedData.summary.attendedDays =
+            workModeCounts[workModeService.WORK_MODES.OFFICE] +
+            workModeCounts[workModeService.WORK_MODES.WORK_FROM_HOME];
+          transformedData.summary.attendanceRate =
+            transformedData.summary.totalDays > 0
+              ? Math.round(
+                  (transformedData.summary.attendedDays /
+                    transformedData.summary.totalDays) *
+                    100
+                )
+              : 0;
+        }
+      } catch (workModeError) {
+        // A work-mode lookup must never take the attendance read down with it.
+        console.error("Work mode resolution failed:", workModeError.message);
+      }
+
       console.log(
         `Successfully transformed ${result.totalRecords} records from LOCAL database`
       );
@@ -1402,6 +1529,10 @@ router.get(
       res.json({
         success: true,
         ...transformedData,
+        // Day -> "work_from_home" | "on_leave" for every scheduled day in the
+        // range, and the four-way count behind it.
+        workModes,
+        workModeCounts,
         // Which rule produced the isLate flags in this response.
         lateTimePolicy: cutoffResolution
           ? {

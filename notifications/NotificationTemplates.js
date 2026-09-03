@@ -216,6 +216,167 @@ const TEMPLATES = {
     }),
   },
 
+  // ---------------------------------------------------- Unreported absence
+  [NOTIFICATION_EVENTS.LEAVE_AUTO_MARKED]: {
+    inApp: ({ leaveType, startDate, cutoffTime, isFallback }) => ({
+      title: "Absence recorded as leave",
+      message: `No attendance and no work from home or leave request was received for ${formatDate(
+        startDate
+      )} by ${cutoffTime}, so the day has been recorded as ${leaveTypeLabel(
+        leaveType
+      ).toLowerCase()}.${
+        isFallback
+          ? " Your annual balance was exhausted, so it was charged as unpaid."
+          : ""
+      } If you were working from home, submit a request for that day and ask your administrator to approve it - approving it returns the day.`,
+    }),
+    whatsapp: ({ leaveType, startDate, cutoffTime }) => ({
+      body: compose(
+        `\u{26A0} ${brand()}\n\nAn absence has been recorded as leave.`,
+        [
+          ["Date", formatDate(startDate)],
+          ["Recorded As", leaveTypeLabel(leaveType)],
+          ["Reason", `No notification received before ${cutoffTime}`],
+        ],
+        "If you were working from home, submit a request for that day in Nexora."
+      ),
+      approvedTemplate: {
+        name: "leave_auto_marked",
+        params: [formatDate(startDate), leaveTypeLabel(leaveType), cutoffTime],
+      },
+    }),
+  },
+
+  [NOTIFICATION_EVENTS.LEAVE_AUTO_REVERSED]: {
+    inApp: ({ leaveType, startDate, endDate, totalDays }) => ({
+      title: "Leave returned",
+      message: `The ${leaveTypeLabel(leaveType).toLowerCase()} recorded for ${formatRange(
+        startDate,
+        endDate
+      )} has been reversed and the ${formatDays(
+        totalDays
+      ).toLowerCase()} returned to your balance, because your work from home request for those days was approved.`,
+    }),
+    whatsapp: ({ leaveType, startDate, endDate, totalDays }) => ({
+      body: compose(
+        `\u{2705} ${brand()}\n\nLeave returned to your balance.`,
+        [
+          ["Dates", formatRange(startDate, endDate)],
+          ["Returned", formatDays(totalDays)],
+          ["Recorded As", leaveTypeLabel(leaveType)],
+        ],
+        "Your work from home request for those days was approved."
+      ),
+      approvedTemplate: {
+        name: "leave_auto_reversed",
+        params: [formatRange(startDate, endDate), formatDays(totalDays)],
+      },
+    }),
+  },
+
+  // -------------------------------------------------------- Work From Home
+  [NOTIFICATION_EVENTS.WFH_REQUESTED]: {
+    inApp: ({ employeeName, totalDays, startDate, endDate, isBackdated }) => ({
+      title: isBackdated
+        ? "Backdated Work From Home Request"
+        : "New Work From Home Request",
+      message: `${employeeName} has ${
+        isBackdated ? "recorded" : "requested"
+      } work from home for ${totalDays} day(s) from ${formatDate(
+        startDate
+      )} to ${formatDate(endDate)}.${
+        isBackdated
+          ? " These days have already passed and are currently recorded as absent."
+          : ""
+      }`,
+    }),
+    whatsapp: ({
+      employeeName,
+      totalDays,
+      startDate,
+      endDate,
+      reason,
+      isBackdated,
+    }) => ({
+      body: compose(
+        `\u{1F3E0} ${brand()}\n\n${
+          isBackdated
+            ? "Backdated Work From Home Request"
+            : "New Work From Home Request"
+        }`,
+        [
+          ["Employee", employeeName],
+          ["Duration", formatDays(totalDays)],
+          ["Dates", formatRange(startDate, endDate)],
+          ["Reason", truncate(reason, 200)],
+        ],
+        isBackdated
+          ? "These days have already passed. Approving corrects the attendance record."
+          : REVIEW_IN_APP
+      ),
+      approvedTemplate: {
+        name: "wfh_request_submitted",
+        params: [
+          employeeName,
+          formatDays(totalDays),
+          formatRange(startDate, endDate),
+        ],
+      },
+    }),
+  },
+
+  [NOTIFICATION_EVENTS.WFH_APPROVED]: {
+    inApp: ({ totalDays, startDate, endDate }) => ({
+      title: "Work From Home Approved",
+      message: `Your request to work from home for ${totalDays} day(s) from ${formatDate(
+        startDate
+      )} to ${formatDate(
+        endDate
+      )} has been approved. These days count as working days and do not use your leave balance.`,
+    }),
+    whatsapp: ({ totalDays, startDate, endDate, reviewerName }) => ({
+      body: compose(
+        `\u{2705} ${brand()}\n\nYour work from home request has been approved.`,
+        [
+          ["Duration", formatDays(totalDays)],
+          ["Dates", formatRange(startDate, endDate)],
+          ["Approved By", reviewerName],
+        ],
+        "These days do not use your leave balance."
+      ),
+      approvedTemplate: {
+        name: "wfh_request_approved",
+        params: [formatDays(totalDays), formatRange(startDate, endDate)],
+      },
+    }),
+  },
+
+  [NOTIFICATION_EVENTS.WFH_REJECTED]: {
+    inApp: ({ totalDays, startDate, endDate, reviewComments }) => ({
+      title: "Work From Home Rejected",
+      message: `Your request to work from home for ${totalDays} day(s) from ${formatDate(
+        startDate
+      )} to ${formatDate(endDate)} has been rejected.${
+        reviewComments ? ` Reason: ${reviewComments}` : ""
+      }`,
+    }),
+    whatsapp: ({ totalDays, startDate, endDate, reviewComments }) => ({
+      body: compose(
+        `\u{274C} ${brand()}\n\nYour work from home request has been rejected.`,
+        [
+          ["Duration", formatDays(totalDays)],
+          ["Dates", formatRange(startDate, endDate)],
+          ["Reason", truncate(reviewComments, 200)],
+        ],
+        "Please contact HR for additional information."
+      ),
+      approvedTemplate: {
+        name: "wfh_request_rejected",
+        params: [formatRange(startDate, endDate)],
+      },
+    }),
+  },
+
   // -------------------------------------------------------- Employee Voice
   [NOTIFICATION_EVENTS.VOICE_SUBMITTED]: {
     inApp: ({ category, submitterName, voiceTitle }) => ({

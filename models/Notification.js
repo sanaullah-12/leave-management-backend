@@ -24,7 +24,12 @@ const notificationSchema = new mongoose.Schema({
       'voice_submitted',
       'voice_reply',
       'voice_status',
-      'announcement'
+      'announcement',
+      'wfh_request',
+      'wfh_approved',
+      'wfh_rejected',
+      'leave_auto_marked',
+      'leave_auto_reversed'
     ],
     required: [true, 'Notification type is required']
   },
@@ -51,6 +56,11 @@ const notificationSchema = new mongoose.Schema({
   announcementId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Announcement'
+  },
+  // Polymorphic reference for the Work From Home module.
+  wfhId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'WorkFromHome'
   },
   read: {
     type: Boolean,
