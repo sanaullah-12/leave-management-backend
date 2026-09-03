@@ -18,6 +18,15 @@ const NOTIFICATION_EVENTS = Object.freeze({
   LEAVE_REJECTED: "leave.rejected",
   LEAVE_CANCELLED: "leave.cancelled",
 
+  // -- Unreported absence ------------------------------------------------
+  LEAVE_AUTO_MARKED: "leave.auto_marked",
+  LEAVE_AUTO_REVERSED: "leave.auto_reversed",
+
+  // -- Work From Home ----------------------------------------------------
+  WFH_REQUESTED: "wfh.requested",
+  WFH_APPROVED: "wfh.approved",
+  WFH_REJECTED: "wfh.rejected",
+
   // -- Employee Voice ----------------------------------------------------
   VOICE_SUBMITTED: "voice.submitted",
   VOICE_REPLIED: "voice.replied",
@@ -66,6 +75,26 @@ const EVENT_METADATA = Object.freeze({
   [NOTIFICATION_EVENTS.LEAVE_CANCELLED]: {
     audience: AUDIENCE.USER,
     inAppType: "leave_rejected",
+  },
+  [NOTIFICATION_EVENTS.LEAVE_AUTO_MARKED]: {
+    audience: AUDIENCE.USER,
+    inAppType: "leave_auto_marked",
+  },
+  [NOTIFICATION_EVENTS.LEAVE_AUTO_REVERSED]: {
+    audience: AUDIENCE.USER,
+    inAppType: "leave_auto_reversed",
+  },
+  [NOTIFICATION_EVENTS.WFH_REQUESTED]: {
+    audience: AUDIENCE.COMPANY_ADMINS,
+    inAppType: "wfh_request",
+  },
+  [NOTIFICATION_EVENTS.WFH_APPROVED]: {
+    audience: AUDIENCE.USER,
+    inAppType: "wfh_approved",
+  },
+  [NOTIFICATION_EVENTS.WFH_REJECTED]: {
+    audience: AUDIENCE.USER,
+    inAppType: "wfh_rejected",
   },
   [NOTIFICATION_EVENTS.VOICE_SUBMITTED]: {
     audience: AUDIENCE.COMPANY_ADMINS,

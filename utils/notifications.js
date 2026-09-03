@@ -82,6 +82,7 @@ const createNotification = async ({
   leaveId = null,
   voiceId = null,
   announcementId = null,
+  wfhId = null,
   event = null,
   payload = {},
 }) => {
@@ -99,7 +100,7 @@ const createNotification = async ({
       recipients: [
         event ? await targetUser(recipient) : { _id: recipient, preferences: {} },
       ],
-      refs: { leaveId, voiceId, announcementId },
+      refs: { leaveId, voiceId, announcementId, wfhId },
       inApp: { title, message },
       inAppType: type,
       // Without a payload there is nothing to render a WhatsApp message from,
@@ -312,8 +313,110 @@ const notifyLeaveRejection = async (leave, employee, rejectionReason = "") => {
   });
 };
 
+// -- Work From Home --------------------------------------------------------
+// Same three-step shape as leave: admins hear about a request, the employee
+// hears the decision. The copy states that WFH does not touch the leave
+// balance, because that is the question it otherwise prompts.
+
+const notifyWfhRequest = async (request, admin) => {
+  const employeeName =
+    typeof request.employee === "object" ? request.employee.name : "Employee";
+
+  return dispatchAndUnwrap({
+    event: NOTIFICATION_EVENTS.WFH_REQUESTED,
+    companyId: request.company,
+    senderId: request.employee._id || request.employee,
+    userId: admin._id,
+    refs: { wfhId: request._id },
+    payload: {
+      employeeName,
+      totalDays: request.totalDays,
+      startDate: request.startDate,
+      endDate: request.endDate,
+      reason: request.reason,
+      isBackdated: request.isBackdated,
+    },
+    inApp: {
+      title: request.isBackdated
+        ? "Backdated Work From Home Request"
+        : "New Work From Home Request",
+      message: `${employeeName} has ${
+        request.isBackdated ? "recorded" : "requested"
+      } work from home for ${request.totalDays} day(s) from ${new Date(
+        request.startDate
+      ).toLocaleDateString()} to ${new Date(
+        request.endDate
+      ).toLocaleDateString()}.${
+        request.isBackdated
+          ? " These days have already passed and are currently recorded as absent."
+          : ""
+      }`,
+    },
+  });
+};
+
+const notifyWfhApproval = async (request, employee) => {
+  return dispatchAndUnwrap({
+    event: NOTIFICATION_EVENTS.WFH_APPROVED,
+    companyId: request.company,
+    senderId: request.reviewedBy,
+    userId: employee._id,
+    refs: { wfhId: request._id },
+    payload: {
+      totalDays: request.totalDays,
+      startDate: request.startDate,
+      endDate: request.endDate,
+      reviewerName:
+        request.reviewedBy && request.reviewedBy.name
+          ? request.reviewedBy.name
+          : "",
+    },
+    inApp: {
+      title: "Work From Home Approved",
+      message: `Your request to work from home for ${
+        request.totalDays
+      } day(s) from ${new Date(
+        request.startDate
+      ).toLocaleDateString()} to ${new Date(
+        request.endDate
+      ).toLocaleDateString()} has been approved. These days count as working days and do not use your leave balance.`,
+    },
+  });
+};
+
+const notifyWfhRejection = async (request, employee, rejectionReason = "") => {
+  const reasonText = rejectionReason ? ` Reason: ${rejectionReason}` : "";
+
+  return dispatchAndUnwrap({
+    event: NOTIFICATION_EVENTS.WFH_REJECTED,
+    companyId: request.company,
+    senderId: request.reviewedBy,
+    userId: employee._id,
+    refs: { wfhId: request._id },
+    payload: {
+      totalDays: request.totalDays,
+      startDate: request.startDate,
+      endDate: request.endDate,
+      reviewComments: rejectionReason,
+    },
+    inApp: {
+      title: "Work From Home Rejected",
+      message: `Your request to work from home for ${
+        request.totalDays
+      } day(s) from ${new Date(
+        request.startDate
+      ).toLocaleDateString()} to ${new Date(
+        request.endDate
+      ).toLocaleDateString()} has been rejected.${reasonText}`,
+    },
+  });
+};
+
 module.exports = {
   createNotification,
+  notifyWfhRequest,
+  notifyWfhApproval,
+  notifyWfhRejection,
   notifyLeaveRequest,
   notifyLeaveApproval,
   notifyLeaveRejection,
