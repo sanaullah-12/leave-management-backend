@@ -58,6 +58,27 @@ const leaveSchema = new mongoose.Schema({
     trim: true,
     maxlength: [500, 'Review comments cannot exceed 500 characters']
   },
+  /**
+   * True when the system raised this leave rather than the employee.
+   *
+   * An unreported absence becomes annual leave after the office cutoff. Such a
+   * record has to be distinguishable from one a person actually applied for:
+   * it is reversible (an approved backdated work-from-home request revokes it
+   * and returns the day), it is never counted as a request anybody reviewed,
+   * and an employee reading their history deserves to know which is which.
+   */
+  isAutoMarked: {
+    type: Boolean,
+    default: false
+  },
+  /** What produced it, e.g. "unreported_absence". */
+  autoMarkSource: {
+    type: String,
+    trim: true
+  },
+  autoMarkedAt: {
+    type: Date
+  },
   attachments: [{
     filename: String,
     originalName: String,

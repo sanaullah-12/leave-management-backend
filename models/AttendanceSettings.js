@@ -58,6 +58,42 @@ const attendanceSettingsSchema = new mongoose.Schema(
       },
     },
 
+    /**
+     * What happens when someone is neither at the office nor accounted for.
+     *
+     * After the cutoff on a working day, an employee with no punch, no leave
+     * and no work-from-home request has not told anyone anything - so the day
+     * is recorded as annual leave with a reason saying exactly that. It stays
+     * reversible: an approved backdated WFH request revokes it.
+     */
+    unreportedAbsenceSettings: {
+      enabled: {
+        type: Boolean,
+        default: true,
+      },
+      /** Office time after which an unexplained day is converted. */
+      cutoffTime: {
+        type: String,
+        default: "14:00",
+        validate: {
+          validator: (v) => /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(v),
+          message: "Cutoff time must be in HH:MM format",
+        },
+      },
+      /** The leave type an unreported day is charged to. */
+      leaveType: {
+        type: String,
+        enum: ["annual", "casual", "sick", "unpaid"],
+        default: "annual",
+      },
+      /** Used instead when the primary type has no balance left. */
+      fallbackLeaveType: {
+        type: String,
+        enum: ["unpaid", "annual", "casual"],
+        default: "unpaid",
+      },
+    },
+
     // Machine configuration settings
     machineSettings: {
       defaultIP: {
