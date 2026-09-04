@@ -2,7 +2,6 @@ const express = require("express");
 const net = require("net");
 const mongoose = require("mongoose");
 const {
-  zonedParts,
   displayDate,
   displayTime,
   localDateString,
@@ -33,6 +32,11 @@ const zktecoRealDataService = require("../services/zktecoRealDataService");
 const AttendanceDbService = require("../services/attendanceDbService");
 const AttendanceSettingsService = require("../services/AttendanceSettingsService");
 const workModeService = require("../services/workModeService");
+const {
+  judgeArrival,
+  cutoffToMinutes,
+  arrivalMinutes,
+} = require("../utils/lateness");
 const User = require("../models/User");
 
 // Global handler for unhandled promise rejections (especially js-zklib buffer issues)
@@ -1213,8 +1217,7 @@ router.get("/db/status-summary", authenticateToken, async (req, res) => {
     const cutoff = await AttendanceSettingsService.resolveCutoff(null, {
       previewPolicy: req.query.policy,
     });
-    const [cutoffHour, cutoffMinute] = cutoff.cutoffTime.split(":").map(Number);
-    const cutoffSeconds = cutoffHour * 3600 + cutoffMinute * 60;
+    const cutoffMinutes = cutoffToMinutes(cutoff.cutoffTime);
 
     const logs = await AttendanceDbService.fetchNormalizedLogs({
       employeeIds: null,
@@ -1244,11 +1247,8 @@ router.get("/db/status-summary", authenticateToken, async (req, res) => {
       activeDays.add(entry.day);
       employees.add(String(entry.id));
 
-      const parts = zonedParts(entry.timestamp);
-      const seconds =
-        Number(parts.hour) * 3600 + Number(parts.minute) * 60 + Number(parts.second);
-
-      if (seconds > cutoffSeconds) late += 1;
+      // Same minute-granular rule the per-employee read applies.
+      if (arrivalMinutes(entry.timestamp) > cutoffMinutes) late += 1;
       else onTime += 1;
 
       attendedByEmployee.set(
@@ -1662,39 +1662,10 @@ function transformToFrontendFormat(
 
   // Helper function to calculate late time
   const calculateLateTime = (timestamp, cutoffTime) => {
-    const [cutoffHour, cutoffMinute] = cutoffTime.split(":").map(Number);
-
-    // Compare wall clock to wall clock in the office timezone. Date.setHours()
-    // applies the SERVER's zone, which is UTC on a deployed host - a 09:00
-    // cutoff then meant 14:00 in the office and nobody was ever late.
-    // Seconds matter: with minute precision an arrival at 09:30:45 counted as
-    // on time against a 09:30 deadline, which is not what a strict cutoff means.
-    const { hour, minute, second } = zonedParts(new Date(timestamp));
-    const secondsIntoDay =
-      Number(hour) * 3600 + Number(minute) * 60 + Number(second);
-    const cutoffSeconds = cutoffHour * 3600 + cutoffMinute * 60;
-
-    if (secondsIntoDay > cutoffSeconds) {
-      const lateMinutes = Math.floor((secondsIntoDay - cutoffSeconds) / 60);
-      return {
-        isLate: true,
-        lateMinutes: lateMinutes,
-        // Under a minute still counts as late; reporting it as "0m" reads like
-        // a bug rather than a near miss.
-        lateDisplay:
-          lateMinutes >= 60
-            ? `${Math.floor(lateMinutes / 60)}h ${lateMinutes % 60}m`
-            : lateMinutes >= 1
-            ? `${lateMinutes}m`
-            : "<1m",
-      };
-    }
-
-    return {
-      isLate: false,
-      lateMinutes: 0,
-      lateDisplay: null,
-    };
+    // Judged to the minute, in the office timezone, by utils/lateness.js -
+    // the one place the rule lives, so a punch cannot be late here and on time
+    // in the workforce summary.
+    return judgeArrival(timestamp, cutoffTime);
   };
 
   // Transform records to frontend format - showing raw timestamp data
