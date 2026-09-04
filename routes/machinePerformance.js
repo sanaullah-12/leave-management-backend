@@ -2,6 +2,17 @@ const express = require("express");
 const router = express.Router();
 const mongoose = require("mongoose");
 const { authenticateToken, authorizeRoles } = require("../middleware/auth");
+const { judgeArrival } = require("../utils/lateness");
+
+/**
+ * The arrival time these reports measure against.
+ *
+ * Still hardcoded, unlike the attendance module which reads the
+ * configured policy. Left as it was so this change is only about
+ * minute-vs-second granularity; wiring it to AttendanceSettingsService
+ * is worthwhile follow-up.
+ */
+const PERFORMANCE_CUTOFF = "09:00";
 
 /**
  * MACHINE-BASED EMPLOYEE PERFORMANCE DASHBOARD
@@ -103,16 +114,11 @@ router.get(
               }
               logsByDate[date].push(log);
 
-              // Calculate late time (assuming 9:00 AM cutoff)
-              const logTime = new Date(log.timestamp);
-              const cutoffTime = new Date(logTime);
-              cutoffTime.setHours(9, 0, 0, 0);
-
-              if (logTime > cutoffTime) {
-                const lateMinutes = Math.floor(
-                  (logTime - cutoffTime) / (1000 * 60)
-                );
-                totalLateMinutes += lateMinutes;
+              // Judged to the minute in the office timezone by
+              // utils/lateness.js, so this agrees with the attendance page.
+              const verdict = judgeArrival(log.timestamp, PERFORMANCE_CUTOFF);
+              if (verdict.isLate) {
+                totalLateMinutes += verdict.lateMinutes;
                 if (!logsByDate[date].hasLateMarked) {
                   lateDays++;
                   logsByDate[date].hasLateMarked = true;
