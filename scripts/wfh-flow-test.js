@@ -183,13 +183,19 @@ async function main() {
   await sweepTestData();
 
   // A throwaway employee, so nothing this test does lands on a real record.
+  //
+  // The device code is NUMERIC on purpose. AttendanceDbService.normalizeLog()
+  // parseInts it, so a code like "WFH123456" becomes NaN and the workforce
+  // summary silently skips that person - the per-employee read still works,
+  // which makes it an easy trap to write a passing-but-meaningless assertion.
   const suffix = Date.now().toString().slice(-6);
+  const deviceCode = String(900000 + (Date.now() % 90000));
   const employee = await User.create({
     name: TEST_EMPLOYEE_NAME,
     email: `wfh.test.${suffix}@example.com`,
     password: "TestPassword123!",
     role: "employee",
-    employeeId: `WFH${suffix}`,
+    employeeId: deviceCode,
     department: "Engineering",
     position: "Tester",
     joinDate: new Date(),
@@ -913,6 +919,97 @@ async function main() {
         /working day/i.test(weekendRun.body?.reason || ""),
       JSON.stringify(weekendRun.body?.reason)
     );
+
+    // -- 16. Lateness is judged to the minute, never the second ------------
+    section("16. A punch inside the cutoff minute is on time");
+
+    // The office cutoff for this range, so the assertions use the same rule
+    // the server does rather than a guessed one.
+    const ruleRes = await request(
+      "GET",
+      `/api/attendance/db/frontend/${employee.employeeId}?startDate=${officeDay}&endDate=${officeDay}`,
+      adminToken
+    );
+    const cutoff = ruleRes.body?.lateTimePolicy?.cutoffTime || "09:00";
+    const [cutH, cutM] = cutoff.split(":").map(Number);
+
+    // Asia/Karachi is UTC+5, so an office time maps back by subtracting five
+    // hours. Built from the resolved cutoff so this holds if the rule changes.
+    const officeInstant = (day, h, m, sec) => {
+      const utcHour = h - 5;
+      const d = new Date(Date.UTC(
+        Number(day.slice(0, 4)),
+        Number(day.slice(5, 7)) - 1,
+        Number(day.slice(8, 10)),
+        utcHour,
+        m,
+        sec
+      ));
+      return d;
+    };
+
+    const lateCases = [
+      { label: "one minute before the cutoff", h: cutH, m: cutM - 1, s: 0, late: false },
+      { label: "exactly on the cutoff", h: cutH, m: cutM, s: 0, late: false },
+      { label: "ten seconds into the cutoff minute", h: cutH, m: cutM, s: 10, late: false },
+      { label: "the last second of the cutoff minute", h: cutH, m: cutM, s: 59, late: false },
+      { label: "the minute after the cutoff", h: cutH, m: cutM + 1, s: 0, late: true },
+      { label: "well after the cutoff", h: cutH + 1, m: cutM, s: 0, late: true },
+    ];
+
+    for (const testCase of lateCases) {
+      const day = weekdaysAgo(4);
+      await AttendanceLog.deleteMany({ employeeId: employee.employeeId, date: day });
+      await AttendanceLog.create({
+        machineIp: "127.0.0.1",
+        company: company._id,
+        employeeId: employee.employeeId,
+        machineUserId: employee.employeeId,
+        timestamp: officeInstant(day, testCase.h, testCase.m, testCase.s),
+        date: day,
+        type: "check-in",
+        state: 1,
+      });
+
+      const read = await request(
+        "GET",
+        `/api/attendance/db/frontend/${employee.employeeId}?startDate=${day}&endDate=${day}`,
+        adminToken
+      );
+      const record = (read.body?.records || [])[0];
+      const clock = `${String(testCase.h).padStart(2, "0")}:${String(
+        testCase.m
+      ).padStart(2, "0")}:${String(testCase.s).padStart(2, "0")}`;
+
+      check(
+        `${clock} (${testCase.label}) is ${testCase.late ? "late" : "on time"}`,
+        record?.isLate === testCase.late,
+        `cutoff ${cutoff}, got isLate=${record?.isLate}, time=${record?.timeDisplay}`
+      );
+
+      if (testCase.late) {
+        check(
+          `  and its late figure is a whole minute, never "<1m"`,
+          record?.lateMinutes >= 1 && record?.lateDisplay !== "<1m",
+          `${record?.lateMinutes} / ${record?.lateDisplay}`
+        );
+      }
+
+      // The workforce summary has to agree with the per-employee read.
+      const summary = await request(
+        "GET",
+        `/api/attendance/db/status-summary?startDate=${day}&endDate=${day}`,
+        adminToken
+      );
+      const countedLate = (summary.body?.late || 0) >= 1;
+      check(
+        `  the workforce summary agrees for ${clock}`,
+        countedLate === testCase.late,
+        JSON.stringify({ late: summary.body?.late, onTime: summary.body?.onTime })
+      );
+
+      await AttendanceLog.deleteMany({ employeeId: employee.employeeId, date: day });
+    }
 
     socket.disconnect();
   } finally {

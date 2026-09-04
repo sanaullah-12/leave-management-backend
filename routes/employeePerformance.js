@@ -3,6 +3,17 @@ const router = express.Router();
 const mongoose = require("mongoose");
 const { authenticateToken, authorizeRoles } = require("../middleware/auth");
 const User = require("../models/User");
+const { judgeArrival } = require("../utils/lateness");
+
+/**
+ * The arrival time these reports measure against.
+ *
+ * Still hardcoded, unlike the attendance module which reads the
+ * configured policy. Left as it was so this change is only about
+ * minute-vs-second granularity; wiring it to AttendanceSettingsService
+ * is worthwhile follow-up.
+ */
+const PERFORMANCE_CUTOFF = "09:00";
 
 /**
  * EMPLOYEE PERFORMANCE DASHBOARD API
@@ -96,16 +107,13 @@ router.get(
             }
             logsByDate[date].push(log);
 
-            // Calculate late time (assuming 9:00 AM cutoff)
-            const logTime = new Date(log.timestamp);
-            const cutoffTime = new Date(logTime);
-            cutoffTime.setHours(9, 0, 0, 0);
-
-            if (logTime > cutoffTime) {
-              const lateMinutes = Math.floor(
-                (logTime - cutoffTime) / (1000 * 60)
-              );
-              totalLateMinutes += lateMinutes;
+            // Judged to the minute in the office timezone by utils/lateness.js.
+            // setHours() applied the SERVER's zone, and comparing timestamps
+            // counted seconds - so 09:00:10 read as late here while the
+            // attendance page called it on time.
+            const verdict = judgeArrival(log.timestamp, PERFORMANCE_CUTOFF);
+            if (verdict.isLate) {
+              totalLateMinutes += verdict.lateMinutes;
               if (!logsByDate[date].hasLateMarked) {
                 lateDays++;
                 logsByDate[date].hasLateMarked = true;
@@ -324,13 +332,11 @@ router.get(
                 logsByDate[date] = true;
               }
 
-              // Calculate late time
-              const logTime = new Date(log.timestamp);
-              const cutoffTime = new Date(logTime);
-              cutoffTime.setHours(9, 0, 0, 0);
-              if (logTime > cutoffTime) {
-                lateMinutes += Math.floor((logTime - cutoffTime) / (1000 * 60));
-              }
+              // Same minute-granular rule as everywhere else.
+              lateMinutes += judgeArrival(
+                log.timestamp,
+                PERFORMANCE_CUTOFF
+              ).lateMinutes;
             });
 
             const presentDays = Object.keys(logsByDate).length;
