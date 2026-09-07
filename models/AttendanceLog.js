@@ -152,6 +152,23 @@ attendanceLogSchema.statics.getLastSyncTime = async function(machineIp, companyI
   return lastLog ? lastLog.timestamp : null;
 };
 
+/**
+ * Whether one entry in a bulk write failed because the record already existed.
+ *
+ * The code is read from three places on purpose. Mongoose does not hand back
+ * the driver's WriteError unchanged, and `error.code` came back undefined on
+ * every duplicate - so a re-sync of already-stored punches was counted as 95
+ * failed writes rather than 95 duplicates, which held the agent's sync
+ * watermark still and stopped attendance collection outright.
+ */
+const isDuplicateWriteError = (writeError) => {
+  if (!writeError) return false;
+  if (writeError.code === 11000) return true;
+  if (writeError.err && writeError.err.code === 11000) return true;
+  const text = writeError.errmsg || writeError.message || '';
+  return /E11000|duplicate key/i.test(text);
+};
+
 attendanceLogSchema.statics.bulkInsertLogs = async function(logs) {
   if (!logs || logs.length === 0) {
     return { inserted: 0, skipped: 0, total: 0, errors: [] };
@@ -175,7 +192,7 @@ attendanceLogSchema.statics.bulkInsertLogs = async function(logs) {
     const isDuplicate =
       error.code === 11000 ||
       (Array.isArray(error.writeErrors) &&
-        error.writeErrors.some((e) => e.code === 11000));
+        error.writeErrors.some(isDuplicateWriteError));
 
     if (isDuplicate) {
       const inserted =
@@ -190,7 +207,7 @@ attendanceLogSchema.statics.bulkInsertLogs = async function(logs) {
       // missing - which is what let a refused record advance the agent's sync
       // watermark past three days of real attendance.
       const writeErrors = Array.isArray(error.writeErrors) ? error.writeErrors : [];
-      const failures = writeErrors.filter((e) => e.code !== 11000);
+      const failures = writeErrors.filter((e) => !isDuplicateWriteError(e));
       const skipped = Math.max(0, total - inserted - failures.length);
 
       return {
@@ -199,7 +216,9 @@ attendanceLogSchema.statics.bulkInsertLogs = async function(logs) {
         failed: failures.length,
         total,
         errors: failures.length
-          ? failures.slice(0, 5).map((e) => e.errmsg || e.message || `write error ${e.code}`)
+          ? failures
+              .slice(0, 5)
+              .map((e) => e.errmsg || e.message || `write error ${e.code ?? 'unknown'}`)
           : skipped
             ? [`Skipped ${skipped} duplicate records`]
             : []

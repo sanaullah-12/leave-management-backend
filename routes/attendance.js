@@ -1227,11 +1227,49 @@ router.get("/db/status-summary", authenticateToken, async (req, res) => {
       endDate,
     });
 
+    /**
+     * Who the company actually employs.
+     *
+     * The device is not the roster. It holds an enrolment for every finger
+     * ever registered on it - test enrolments, people who have left, and a
+     * slot 0 that is a device artefact rather than a person. Counting those
+     * as employees inflated the workforce, and since absences are derived as
+     * `expected - accounted for`, every phantom employee invented one absence
+     * per working day. That is what made this figure disagree with the
+     * attendance screen.
+     *
+     * A device code with no account is therefore not counted at all - neither
+     * its punches nor its silences. It is not a person this system knows.
+     */
+    const roster = await User.find({
+      company: req.user.company._id,
+      employeeId: { $exists: true, $ne: null },
+      isActive: { $ne: false },
+      status: "active",
+    })
+      .select("employeeId")
+      .lean();
+
+    const workforce = new Set(roster.map((person) => String(person.employeeId)));
+    const unlinkedDeviceCodes = new Set();
+
     // First punch per employee per day: the arrival is what the rule judges.
     const firstByEmployeeDay = new Map();
     for (const log of logs) {
       if (log.id === undefined) continue;
+
+      const code = String(log.id);
+      if (!workforce.has(code)) {
+        unlinkedDeviceCodes.add(code);
+        continue;
+      }
+
       const day = localDateString(log.timestamp);
+      // Weekends are not judged, exactly as lateHoursService does not judge
+      // them. A Saturday with two people catching up made the whole roster
+      // absent that day, because one punch is enough to call a day active.
+      if (lateHoursService.isWeekend(day)) continue;
+
       const key = `${log.id}|${day}`;
       const existing = firstByEmployeeDay.get(key);
       if (!existing || log.timestamp < existing.timestamp) {
@@ -1281,9 +1319,9 @@ router.get("/db/status-summary", authenticateToken, async (req, res) => {
 
     // Someone who worked from home all week never punched, so the device alone
     // does not know they exist. Anyone with an approved schedule counts as part
-    // of the workforce for this range.
+    // of the workforce for this range - provided they are one of ours.
     for (const employeeCode of Object.keys(schedule)) {
-      employees.add(employeeCode);
+      if (workforce.has(employeeCode)) employees.add(employeeCode);
     }
 
     const expected = employees.size * dayCount;
@@ -1317,6 +1355,10 @@ router.get("/db/status-summary", authenticateToken, async (req, res) => {
       policy: cutoff.policy,
       totalEmployees: employees.size,
       activeDays: dayCount,
+      // Device enrolments with no employee account. Reported rather than
+      // silently dropped: it is the number an admin has to act on to make
+      // this figure describe the whole office.
+      unlinkedDeviceCodes: unlinkedDeviceCodes.size,
       onTime,
       late,
       // On-site attendance is on-time plus late; these two are the days that
