@@ -29,7 +29,8 @@ const notificationSchema = new mongoose.Schema({
       'wfh_approved',
       'wfh_rejected',
       'leave_auto_marked',
-      'leave_auto_reversed'
+      'leave_auto_reversed',
+      'attendance_late'
     ],
     required: [true, 'Notification type is required']
   },
@@ -62,6 +63,19 @@ const notificationSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'WorkFromHome'
   },
+  /**
+   * Optional idempotency key for notifications that must exist at most once.
+   *
+   * A late arrival is derived from attendance records on every sync, so the
+   * same punch is seen again on the next pass. The key ("late:<user>:<date>")
+   * lets a caller ask "has this already been sent?" and lets the unique index
+   * settle the race if two syncs overlap. Sparse: every existing notification,
+   * and every event that legitimately repeats, simply has no key.
+   */
+  dedupeKey: {
+    type: String,
+    default: undefined
+  },
   read: {
     type: Boolean,
     default: false
@@ -76,5 +90,15 @@ const notificationSchema = new mongoose.Schema({
 // Index for efficient queries
 notificationSchema.index({ recipient: 1, read: 1, createdAt: -1 });
 notificationSchema.index({ company: 1, createdAt: -1 });
+
+// Partial rather than sparse: it must constrain only the documents that carry a
+// key, and leave every keyless notification entirely outside the index.
+notificationSchema.index(
+  { dedupeKey: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { dedupeKey: { $type: 'string' } }
+  }
+);
 
 module.exports = mongoose.model('Notification', notificationSchema);

@@ -73,6 +73,23 @@ const formatRange = (start, end) => {
   return `${from} to ${to}`;
 };
 
+/**
+ * A number of minutes as a person would say it: "4 minutes", "1 hour 5
+ * minutes". Distinct from formatDuration() in utils/lateHours.js, which writes
+ * "1h 5m" for a table cell - a notification is read as a sentence, so the units
+ * are spelled out.
+ */
+const humanDuration = (totalMinutes) => {
+  const total = Math.max(0, Math.round(Number(totalMinutes) || 0));
+  const hours = Math.floor(total / 60);
+  const minutes = total % 60;
+
+  const parts = [];
+  if (hours) parts.push(`${hours} ${hours === 1 ? "hour" : "hours"}`);
+  if (minutes || !hours) parts.push(`${minutes} ${minutes === 1 ? "minute" : "minutes"}`);
+  return parts.join(" ");
+};
+
 const truncate = (text, max = 300) => {
   const value = String(text || "").trim();
   if (value.length <= max) return value;
@@ -103,6 +120,47 @@ const VIEW_IN_APP = "Open Nexora to view the details.";
 // -- Template registry -----------------------------------------------------
 
 const TEMPLATES = {
+  // ----------------------------------------------------------- Attendance
+  /**
+   * Two facts, in the order they are asked for: what happened today, and what
+   * it adds up to. The running total is what makes the message worth pushing -
+   * "you are 4 minutes late" is noise on its own, "and that is now 9 minutes"
+   * is something an employee can act on.
+   */
+  [NOTIFICATION_EVENTS.ATTENDANCE_LATE_ARRIVAL]: {
+    inApp: ({ lateMinutes, totalLateMinutes, expected, punchIn }) => ({
+      title: "Late Arrival",
+      message:
+        `You are ${humanDuration(lateMinutes)} late today. ` +
+        `Your total accumulated late time is now ${humanDuration(totalLateMinutes)}.` +
+        (expected && punchIn ? ` (Expected ${expected}, punched in ${punchIn}.)` : ""),
+    }),
+    push: ({ lateMinutes, totalLateMinutes }) => ({
+      title: "Late Arrival",
+      // The OS shows two lines: the second is the whole message, so it carries
+      // both figures rather than repeating the title.
+      body:
+        `You are ${humanDuration(lateMinutes)} late today. ` +
+        `Your total accumulated late time is now ${humanDuration(totalLateMinutes)}.`,
+    }),
+    whatsapp: ({ employeeName, lateMinutes, totalLateMinutes, expected, punchIn, date }) => ({
+      body: compose(
+        `${brand()}
+
+Late Arrival`,
+        [
+          ["Employee", employeeName],
+          ["Date", formatDate(date)],
+          ["Expected", expected],
+          ["Punched in", punchIn],
+          ["Late today", humanDuration(lateMinutes)],
+          ["Accumulated late time", humanDuration(totalLateMinutes)],
+        ],
+        VIEW_IN_APP
+      ),
+    }),
+  },
+
   // ---------------------------------------------------------------- Leave
   [NOTIFICATION_EVENTS.LEAVE_REQUESTED]: {
     inApp: ({ employeeName, leaveType, totalDays, startDate, endDate }) => ({
@@ -584,12 +642,64 @@ const render = (event, channel, payload = {}) => {
 const hasTemplate = (event, channel) =>
   Boolean(TEMPLATES[event] && typeof TEMPLATES[event][channel] === "function");
 
+/**
+ * Where tapping a push notification should land in the app.
+ *
+ * Matched longest-prefix-first, so a family of events shares a destination
+ * without every one of them needing an entry. An event with no match opens the
+ * notification centre, which is never wrong - it is where the notification is
+ * anyway.
+ */
+const PUSH_ROUTES = [
+  ["attendance.", "/attendance/late-time"],
+  ["leave.", "/leaves"],
+  ["wfh.", "/work-from-home"],
+  ["voice.", "/employee-voice"],
+  ["announcement.", "/announcements"],
+  ["payroll.", "/payroll/payslips"],
+  ["document.", "/document-studio"],
+];
+
+const routeFor = (event) => {
+  const match = PUSH_ROUTES.find(([prefix]) => String(event).startsWith(prefix));
+  return match ? match[1] : "/notifications";
+};
+
+/**
+ * The push copy for an event, falling back to its in-app copy.
+ *
+ * The fallback is the point. Push is a way of delivering a notification the
+ * product already writes, not a separate message with its own voice, so every
+ * event that has in-app copy is pushable the day it is added - Leave Applied,
+ * WFH Approved, Payroll Updates and anything else - with no renderer here and
+ * no change to the route that raised it. A dedicated `push` renderer is only
+ * needed when the OS wording should differ from the in-app wording.
+ */
+const renderPush = (event, payload = {}) => {
+  const direct = render(event, "push", payload);
+  if (direct && direct.title && direct.body) {
+    return { ...direct, url: direct.url || routeFor(event) };
+  }
+
+  const inApp = render(event, "inApp", payload);
+  if (!inApp || !inApp.title || !inApp.message) return null;
+
+  return {
+    title: inApp.title,
+    body: inApp.message,
+    url: routeFor(event),
+  };
+};
+
 module.exports = {
   render,
+  renderPush,
+  routeFor,
   hasTemplate,
   // Exported for reuse by callers that build their own copy (the compatibility
   // layer in utils/notifications.js) and by tests.
   helpers: {
+    humanDuration,
     leaveTypeLabel,
     voiceCategoryLabel,
     formatDate,

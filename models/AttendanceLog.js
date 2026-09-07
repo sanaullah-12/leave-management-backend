@@ -183,17 +183,32 @@ attendanceLogSchema.statics.bulkInsertLogs = async function(logs) {
         error.result?.nInserted ??
         error.insertedDocs?.length ??
         0;
-      const skipped = total - inserted;
+
+      // Only a duplicate key means the database already holds the record. Any
+      // other write error means it was not stored at all, and counting it as a
+      // skipped duplicate would tell the caller a punch is safe when it is
+      // missing - which is what let a refused record advance the agent's sync
+      // watermark past three days of real attendance.
+      const writeErrors = Array.isArray(error.writeErrors) ? error.writeErrors : [];
+      const failures = writeErrors.filter((e) => e.code !== 11000);
+      const skipped = Math.max(0, total - inserted - failures.length);
 
       return {
         inserted,
         skipped,
+        failed: failures.length,
         total,
-        errors: skipped ? [`Skipped ${skipped} duplicate records`] : []
+        errors: failures.length
+          ? failures.slice(0, 5).map((e) => e.errmsg || e.message || `write error ${e.code}`)
+          : skipped
+            ? [`Skipped ${skipped} duplicate records`]
+            : []
       };
     }
 
-    return { inserted: 0, skipped: 0, total, errors: [error.message] };
+    // Nothing is known to have been written, so the whole batch is a failure
+    // rather than a set of skips.
+    return { inserted: 0, skipped: 0, failed: total, total, errors: [error.message] };
   }
 };
 

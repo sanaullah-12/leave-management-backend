@@ -27,6 +27,9 @@ const NOTIFICATION_EVENTS = Object.freeze({
   WFH_APPROVED: "wfh.approved",
   WFH_REJECTED: "wfh.rejected",
 
+  // -- Attendance --------------------------------------------------------
+  ATTENDANCE_LATE_ARRIVAL: "attendance.late_arrival",
+
   // -- Employee Voice ----------------------------------------------------
   VOICE_SUBMITTED: "voice.submitted",
   VOICE_REPLIED: "voice.replied",
@@ -95,6 +98,10 @@ const EVENT_METADATA = Object.freeze({
   [NOTIFICATION_EVENTS.WFH_REJECTED]: {
     audience: AUDIENCE.USER,
     inAppType: "wfh_rejected",
+  },
+  [NOTIFICATION_EVENTS.ATTENDANCE_LATE_ARRIVAL]: {
+    audience: AUDIENCE.USER,
+    inAppType: "attendance_late",
   },
   [NOTIFICATION_EVENTS.VOICE_SUBMITTED]: {
     audience: AUDIENCE.COMPANY_ADMINS,

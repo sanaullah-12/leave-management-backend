@@ -36,6 +36,26 @@ const config = {
     whatsapp: {
       enabled: bool(process.env.WHATSAPP_ENABLED, false),
     },
+    // Browser/OS push. Off unless VAPID keys are present, because a push
+    // channel without them cannot encrypt anything and would fail per message.
+    push: {
+      enabled: bool(process.env.PUSH_ENABLED, true),
+    },
+  },
+
+  // -- Web Push ------------------------------------------------------------
+  webPush: {
+    // Identifies this server to the push services. Must be a mailto: or https:
+    // URL they can reach a human at if we start misbehaving.
+    subject: process.env.VAPID_SUBJECT || "mailto:support@nexora.app",
+    // The public half is handed to the browser at subscribe time. The private
+    // half signs push requests and must never leave the server.
+    publicKey: process.env.VAPID_PUBLIC_KEY || "",
+    privateKey: process.env.VAPID_PRIVATE_KEY || "",
+    // How long a push service should hold a message for a device that is
+    // offline. A day: an attendance or leave notification is still worth
+    // reading tomorrow morning, and stale beyond that.
+    ttlSeconds: int(process.env.PUSH_TTL_SECONDS, 86400),
   },
 
   // -- WhatsApp ------------------------------------------------------------
@@ -127,8 +147,20 @@ const config = {
 config.validate = () => {
   const problems = [];
 
+  // Push is opt-in by configuration, so a missing key pair is only a problem
+  // when someone has actually asked for the channel.
+  if (config.channels.push.enabled) {
+    if (!config.webPush.publicKey || !config.webPush.privateKey) {
+      problems.push(
+        "PUSH_ENABLED is on but VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY are not set - " +
+          "browser notifications will be skipped. Generate a pair with: " +
+          "node -e \"console.log(require('web-push').generateVAPIDKeys())\""
+      );
+    }
+  }
+
   if (!config.channels.whatsapp.enabled) {
-    return problems; // Nothing to validate for a disabled channel.
+    return problems; // Nothing further to validate for a disabled channel.
   }
 
   const { provider, meta, twilio } = config.whatsapp;

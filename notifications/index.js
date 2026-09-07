@@ -22,6 +22,7 @@
 const NotificationService = require("./NotificationService");
 const SocketNotificationService = require("./SocketNotificationService");
 const WhatsAppNotificationService = require("./WhatsAppNotificationService");
+const WebPushNotificationService = require("./WebPushNotificationService");
 const NotificationQueue = require("./NotificationQueue");
 const NotificationTemplates = require("./NotificationTemplates");
 const NotificationLogger = require("./NotificationLogger");
@@ -45,6 +46,7 @@ module.exports = {
   // Channels
   SocketNotificationService,
   WhatsAppNotificationService,
+  WebPushNotificationService,
 
   // Infrastructure
   NotificationQueue,
