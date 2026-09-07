@@ -53,10 +53,21 @@ const newCorrelationId = () =>
  */
 const CHANNEL_ADAPTERS = new Map();
 
+/**
+ * The at-most-once key for one recipient.
+ *
+ * A dedupe key is unique across the whole Notification collection, so a key
+ * shared by every recipient of a company-wide dispatch would let exactly one
+ * person be notified and reject the rest as duplicates. An audience of one can
+ * pass a plain string; anything wider passes a function of the recipient.
+ */
+const resolveDedupeKey = (dedupeKey, recipient) =>
+  typeof dedupeKey === "function" ? dedupeKey(recipient) : dedupeKey;
+
 CHANNEL_ADAPTERS.set("socket", {
   service: socketService,
   isEnabled: () => config.channels.socket.enabled,
-  build: (event, payload, context) => {
+  build: (event, payload, context, recipient) => {
     const meta = metadataFor(event);
     // The in-app notification type is a required, enum-constrained column.
     // An event without one is simply not an in-app notification.
@@ -76,7 +87,7 @@ CHANNEL_ADAPTERS.set("socket", {
       company: context.companyId,
       sender: context.senderId,
       refs: context.refs || {},
-      dedupeKey: context.dedupeKey,
+      dedupeKey: resolveDedupeKey(context.dedupeKey, recipient),
     };
   },
 });
@@ -97,7 +108,7 @@ CHANNEL_ADAPTERS.set("socket", {
 CHANNEL_ADAPTERS.set("push", {
   service: webPushService,
   isEnabled: () => webPushService.isEnabled(),
-  build: (event, payload, context) => {
+  build: (event, payload, context, recipient) => {
     // Falls back to the in-app copy, so every event that is worth an in-app
     // notification is pushable without a renderer of its own.
     const rendered = templates.renderPush(event, payload);
@@ -110,7 +121,7 @@ CHANNEL_ADAPTERS.set("push", {
       // Collapse key: a second push about the same thing replaces the first on
       // the lock screen instead of stacking. Falls back to the event name so
       // unrelated notifications never collapse into each other.
-      tag: context.dedupeKey || event,
+      tag: resolveDedupeKey(context.dedupeKey, recipient) || event,
       data: {
         event,
         notificationId: null,
@@ -153,6 +164,9 @@ class NotificationService {
    * @param {string[]=} options.channels    Restrict to a subset of channels.
    * @param {object=}  options.inApp        { title, message } copy override.
    * @param {string=}  options.inAppType    Notification.type override.
+   * @param {(string|Function)=} options.dedupeKey At-most-once key. A string for
+   *          a single-recipient audience; a (recipient) => string for anything
+   *          wider, since the key is unique across the whole collection.
    *
    * @returns {Promise<object>} A per-channel summary. Resolves even when
    *          everything failed; inspect `result.socket.failed` to react.
@@ -243,7 +257,7 @@ class NotificationService {
       recipients.flatMap((recipient) =>
         adapters.map(async ([name, adapter]) => {
           try {
-            const message = adapter.build(event, payload, context);
+            const message = adapter.build(event, payload, context, recipient);
             if (!message) return;
 
             const result = await adapter.service.send(recipient, message);

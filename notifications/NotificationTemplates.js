@@ -120,6 +120,37 @@ const VIEW_IN_APP = "Open Nexora to view the details.";
 // -- Template registry -----------------------------------------------------
 
 const TEMPLATES = {
+  // -------------------------------------------------------- The product
+  /**
+   * A release announcement. Deliberately short: the version is the fact, the
+   * notes are the interesting part when there are any, and nobody wants a
+   * changelog on a lock screen.
+   */
+  [NOTIFICATION_EVENTS.APP_UPDATE_RELEASED]: {
+    inApp: ({ version, notes }) => ({
+      title: `${brand()} has been updated`,
+      message: notes
+        ? `Version ${version} is now live. ${truncate(notes, 240)}`
+        : `Version ${version} is now live. Reload Nexora to pick up the latest changes.`,
+    }),
+    push: ({ version, notes }) => ({
+      title: `${brand()} has been updated`,
+      body: notes ? truncate(notes, 180) : `Version ${version} is now live.`,
+    }),
+    whatsapp: ({ version, notes }) => ({
+      body: compose(
+        `${brand()}
+
+A new version is live`,
+        [
+          ["Version", version],
+          ["What changed", truncate(notes, 300)],
+        ],
+        VIEW_IN_APP
+      ),
+    }),
+  },
+
   // ----------------------------------------------------------- Attendance
   /**
    * Two facts, in the order they are asked for: what happened today, and what
@@ -651,6 +682,8 @@ const hasTemplate = (event, channel) =>
  * anyway.
  */
 const PUSH_ROUTES = [
+  // A release announcement is about the app as a whole, so it opens the app.
+  ["app.", "/"],
   ["attendance.", "/attendance/late-time"],
   ["leave.", "/leaves"],
   ["wfh.", "/work-from-home"],
