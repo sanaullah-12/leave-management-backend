@@ -98,6 +98,7 @@ const workFromHomeRoutes = require("./routes/workFromHome");
 const unreportedAbsenceRoutes = require("./routes/unreportedAbsence");
 const agentRoutes = require("./routes/agent");
 const pushSubscriptionRoutes = require("./routes/pushSubscriptions");
+const appReleaseRoutes = require("./routes/appRelease");
 
 const app = express();
 
@@ -414,6 +415,8 @@ app.use("/api/notifications", notificationRoutes);
 // Push transport only - who may be pushed to, from which browser. The
 // notification itself is still created by the notification layer.
 app.use("/api/push", pushSubscriptionRoutes);
+// What version is running, and announcing it to everyone when it changes.
+app.use("/api/app-release", appReleaseRoutes);
 app.use("/api/employee-voice", employeeVoiceRoutes);
 app.use("/api/work-from-home", workFromHomeRoutes);
 app.use("/api/unreported-absence", unreportedAbsenceRoutes);
@@ -483,4 +486,17 @@ server.listen(PORT, () => {
   // cutoff. Idempotent and started after the listener, so a boot at any hour
   // catches up without double-charging anyone.
   require("./services/unreportedAbsenceScheduler").start();
+
+  // Tell everyone when the version they are using has changed. Once per
+  // release rather than once per restart - the claim is made against a
+  // unique index in the database, so restarts, redeploys and a second
+  // instance booting alongside this one all stay silent.
+  //
+  // Not awaited and never fatal: a server that cannot announce a release
+  // must still serve attendance, leave and everything else.
+  require("./services/appReleaseNotifier")
+    .announceOnBoot()
+    .catch((error) =>
+      console.error("Release announcement failed:", error.message)
+    );
 });

@@ -38,6 +38,9 @@ const NOTIFICATION_EVENTS = Object.freeze({
   // -- Announcements -----------------------------------------------------
   ANNOUNCEMENT_PUBLISHED: "announcement.published",
 
+  // -- The product itself ------------------------------------------------
+  APP_UPDATE_RELEASED: "app.update_released",
+
   // -- Reserved for modules that will emit once they land. Declaring them
   //    here keeps the vocabulary in one place; a template can be added
   //    without touching this file again.
@@ -118,6 +121,12 @@ const EVENT_METADATA = Object.freeze({
   [NOTIFICATION_EVENTS.ANNOUNCEMENT_PUBLISHED]: {
     audience: AUDIENCE.COMPANY,
     inAppType: "announcement",
+  },
+  // Everyone, employees and admins alike - a release changes the app under
+  // both of them equally.
+  [NOTIFICATION_EVENTS.APP_UPDATE_RELEASED]: {
+    audience: AUDIENCE.COMPANY,
+    inAppType: "app_update",
   },
   [NOTIFICATION_EVENTS.EMPLOYEE_CREATED]: {
     audience: AUDIENCE.COMPANY_ADMINS,
