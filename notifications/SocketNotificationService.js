@@ -42,7 +42,7 @@ class SocketNotificationService {
    * @returns {Promise<object>} The persisted notification document.
    */
   async send(recipient, message) {
-    const { type, title, body, company, sender, refs = {} } = message;
+    const { type, title, body, company, sender, refs = {}, dedupeKey } = message;
 
     const notification = new Notification({
       recipient: recipient._id,
@@ -55,6 +55,9 @@ class SocketNotificationService {
       voiceId: refs.voiceId || null,
       announcementId: refs.announcementId || null,
       wfhId: refs.wfhId || null,
+      // Only set when the caller asked for at-most-once delivery. Undefined
+      // keeps the document outside the partial unique index entirely.
+      dedupeKey: dedupeKey || undefined,
     });
 
     await notification.save();
