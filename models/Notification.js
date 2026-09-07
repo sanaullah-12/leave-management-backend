@@ -30,7 +30,8 @@ const notificationSchema = new mongoose.Schema({
       'wfh_rejected',
       'leave_auto_marked',
       'leave_auto_reversed',
-      'attendance_late'
+      'attendance_late',
+      'app_update'
     ],
     required: [true, 'Notification type is required']
   },
