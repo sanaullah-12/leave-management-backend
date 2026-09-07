@@ -32,11 +32,13 @@ const zktecoRealDataService = require("../services/zktecoRealDataService");
 const AttendanceDbService = require("../services/attendanceDbService");
 const AttendanceSettingsService = require("../services/AttendanceSettingsService");
 const workModeService = require("../services/workModeService");
+const lateHoursService = require("../services/lateHoursService");
 const {
   judgeArrival,
   cutoffToMinutes,
   arrivalMinutes,
 } = require("../utils/lateness");
+const { formatDuration } = require("../utils/lateHours");
 const User = require("../models/User");
 
 // Global handler for unhandled promise rejections (especially js-zklib buffer issues)
@@ -1333,6 +1335,123 @@ router.get("/db/status-summary", authenticateToken, async (req, res) => {
   }
 });
 
+/** A calendar day either side of another, in office days. YYYY-MM-DD. */
+const shiftOfficeDay = (isoDate, delta) => {
+  const day = new Date(`${isoDate}T00:00:00Z`);
+  day.setUTCDate(day.getUTCDate() + delta);
+  return day.toISOString().split("T")[0];
+};
+
+/**
+ * Late hours for one employee.
+ *
+ * An employee reads their own; an admin reads anyone's - the same rule
+ * allowSelfOrAdmin already applies to the attendance record itself, because
+ * this is that record counted up rather than a new kind of data.
+ *
+ * Nothing is stored by this route. Every figure is derived from the punches on
+ * each request, so there is no total to edit and none to keep in step.
+ */
+router.get(
+  "/db/late-hours/:employeeId",
+  authenticateToken,
+  allowSelfOrAdmin,
+  async (req, res) => {
+    try {
+      const { employeeId } = req.params;
+      const { startDate, endDate, days = 30 } = req.query;
+
+      const endDateStr = endDate || officeToday();
+      const startDateStr =
+        startDate ||
+        shiftOfficeDay(endDateStr, -Math.max(1, parseInt(days, 10) || 30));
+
+      // Department and name come from the employee record so a per-department
+      // schedule has something to resolve against later; they are also what
+      // the admin views label the summary with.
+      const employee = await User.findOne({
+        company: req.user.company._id,
+        employeeId: String(employeeId),
+      })
+        .select("employeeId name department")
+        .lean();
+
+      const result = await lateHoursService.getEmployeeLateHours({
+        employeeId,
+        startDate: startDateStr,
+        endDate: endDateStr,
+        previewPolicy: req.query.policy,
+        employee,
+      });
+
+      res.json({
+        success: true,
+        employee: employee
+          ? {
+              employeeId: employee.employeeId,
+              name: employee.name,
+              department: employee.department,
+            }
+          : null,
+        ...result,
+      });
+    } catch (error) {
+      console.error("Late hours read failed:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to calculate late hours",
+        error: error.message,
+      });
+    }
+  }
+);
+
+/**
+ * Late hours across the roster, for an admin.
+ *
+ * One pass over the range for everyone rather than a request per employee: the
+ * view is opened on months at a time.
+ */
+router.get(
+  "/db/late-hours",
+  authenticateToken,
+  authorizeRoles("admin"),
+  async (req, res) => {
+    try {
+      const { startDate, endDate, days = 30 } = req.query;
+
+      const endDateStr = endDate || officeToday();
+      const startDateStr =
+        startDate ||
+        shiftOfficeDay(endDateStr, -Math.max(1, parseInt(days, 10) || 30));
+
+      const employees = await User.find({
+        company: req.user.company._id,
+        employeeId: { $exists: true, $ne: null },
+      })
+        .select("employeeId name department")
+        .lean();
+
+      const result = await lateHoursService.getRosterLateHours({
+        startDate: startDateStr,
+        endDate: endDateStr,
+        previewPolicy: req.query.policy,
+        employees,
+        recentLimit: Math.min(100, parseInt(req.query.limit, 10) || 20),
+      });
+
+      res.json({ success: true, ...result });
+    } catch (error) {
+      console.error("Roster late hours read failed:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to calculate late hours for the roster",
+        error: error.message,
+      });
+    }
+  }
+);
+
 // NEW: Get attendance data formatted for frontend compatibility
 router.get(
   "/db/frontend/:employeeId",
@@ -1753,6 +1872,15 @@ function transformToFrontendFormat(
     (record) => record.isLate
   ).length;
 
+  // The running late total for the range, added up from the same per-day
+  // minutes the rows carry. Derived on every read rather than stored, so it
+  // can never drift from the punches, and it is only ever an attendance
+  // figure - nothing deducts it from a leave balance.
+  const totalLateMinutes = filteredRecords.reduce(
+    (sum, record) => sum + (record.lateMinutes || 0),
+    0
+  );
+
   // Sort filtered records by timestamp (newest first for display)
   filteredRecords.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
@@ -1771,6 +1899,12 @@ function transformToFrontendFormat(
       presentDays: presentWorkingDays, // Present working days only
       absentDays: absentWorkingDays, // Absent working days only
       lateDays: lateDaysCount, // Now calculated based on late detection
+      // Late hours for the range. Same figures the late-hours endpoint
+      // reports, so a card reading either source agrees with the other.
+      totalLateMinutes,
+      lateHours: Math.floor(totalLateMinutes / 60),
+      lateRemainderMinutes: totalLateMinutes % 60,
+      totalLateDisplay: formatDuration(totalLateMinutes),
       attendanceRate, // Now based on working days (much more accurate)
       avgWorkingHours: 0, // Removed working hours calculation
 

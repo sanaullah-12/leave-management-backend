@@ -1,5 +1,25 @@
 const BiometricService = require('./BiometricService');
 const AttendanceLog = require('../models/AttendanceLog');
+const lateArrivalNotifier = require('./lateArrivalNotifier');
+
+/**
+ * The window a device punch must fall in to be believed.
+ *
+ * A misframed chunk read off the device decodes neighbouring bytes into a
+ * record whose timestamp is arbitrary but still a valid Date, so it survives
+ * every parse check. One stored decades ahead of now would sit permanently at
+ * the top of every "latest record" query and pin the agent's own sync window
+ * somewhere the device can never reach.
+ */
+const DEVICE_EPOCH_MS = Date.UTC(2000, 0, 1);
+
+/** Allows for a device clock running a little ahead of the server's. */
+const CLOCK_SKEW_MS = 24 * 60 * 60 * 1000;
+
+function isPlausiblePunch(timestamp) {
+  const time = timestamp.getTime();
+  return time >= DEVICE_EPOCH_MS && time <= Date.now() + CLOCK_SKEW_MS;
+}
 
 // ZKTeco numeric punch states mapped onto the AttendanceLog "type" strings.
 const STATE_TO_TYPE = {
@@ -48,6 +68,14 @@ class AttendanceSyncService {
         continue;
       }
 
+      // A parseable date is not yet a believable one. Refusing these here means
+      // a caller that reads a corrupt record still cannot poison the database,
+      // whichever collection path it came in on.
+      if (!isPlausiblePunch(timestamp)) {
+        rejected.push(`Implausible timestamp: ${timestamp.toISOString()}`);
+        continue;
+      }
+
       // employeeId must be the enrolled User ID (log.userId), not the device
       // record slot (log.uid) - uid is 0 on virtually every real record.
       transformedLogs.push({
@@ -73,6 +101,20 @@ class AttendanceSyncService {
     }
 
     const result = await AttendanceLog.bulkInsertLogs(transformedLogs);
+
+    // Both collection paths land here - the Local Agent's push and a direct
+    // machine sync - so this is the one place a new punch becomes known to the
+    // product, and therefore the one place lateness is worth announcing.
+    //
+    // Not awaited into the response on purpose. The punches are stored by the
+    // time this starts, the notifier swallows its own failures, and making the
+    // agent wait on a notification pass would put attendance ingestion behind
+    // a Socket.IO emit and a web push round trip.
+    lateArrivalNotifier
+      .notifyForLogs(transformedLogs, { companyId })
+      .catch((error) =>
+        console.error('Late-arrival notification pass failed:', error.message)
+      );
 
     return {
       ...result,

@@ -97,6 +97,7 @@ const employeeVoiceRoutes = require("./routes/employeeVoice");
 const workFromHomeRoutes = require("./routes/workFromHome");
 const unreportedAbsenceRoutes = require("./routes/unreportedAbsence");
 const agentRoutes = require("./routes/agent");
+const pushSubscriptionRoutes = require("./routes/pushSubscriptions");
 
 const app = express();
 
@@ -410,6 +411,9 @@ app.use(
   require("./routes/realMachinePerformance")
 );
 app.use("/api/notifications", notificationRoutes);
+// Push transport only - who may be pushed to, from which browser. The
+// notification itself is still created by the notification layer.
+app.use("/api/push", pushSubscriptionRoutes);
 app.use("/api/employee-voice", employeeVoiceRoutes);
 app.use("/api/work-from-home", workFromHomeRoutes);
 app.use("/api/unreported-absence", unreportedAbsenceRoutes);
