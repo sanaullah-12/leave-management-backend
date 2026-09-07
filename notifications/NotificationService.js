@@ -5,11 +5,17 @@
  *
  *   Application event -> NotificationService.dispatch()
  *                          |
- *              +-----------+-----------+
- *              |                       |
- *      SocketNotificationService   WhatsAppNotificationService
- *              |                       |
- *      in-app notification       WhatsApp message
+ *          +---------------+---------------+
+ *          |               |               |
+ *   Socket           WebPush         WhatsApp
+ *   Notification     Notification    Notification
+ *   Service          Service         Service
+ *          |               |               |
+ *   in-app + bell    browser/OS      WhatsApp
+ *   (the record)     notification    message
+ *
+ * The in-app channel is the record that something happened; the others mirror
+ * it outward. That is why only the in-app one is unconditional.
  *
  * Two rules define the design:
  *
@@ -31,6 +37,7 @@ const logger = require("./NotificationLogger");
 const recipientResolver = require("./RecipientResolver");
 const socketService = require("./SocketNotificationService");
 const whatsappService = require("./WhatsAppNotificationService");
+const webPushService = require("./WebPushNotificationService");
 const { metadataFor, isKnownEvent } = require("./NotificationEvents");
 const config = require("./config");
 
@@ -69,6 +76,46 @@ CHANNEL_ADAPTERS.set("socket", {
       company: context.companyId,
       sender: context.senderId,
       refs: context.refs || {},
+      dedupeKey: context.dedupeKey,
+    };
+  },
+});
+
+/**
+ * Browser/OS push.
+ *
+ * Deliberately the last adapter and deliberately independent: the in-app
+ * notification above is the record that something happened, and this only
+ * mirrors it onto the employee's device. A push that fails leaves the
+ * notification intact in the bell and the notification centre.
+ *
+ * There is no duplicate to avoid. The two channels are different surfaces of
+ * one dispatch - the socket event updates an open tab, the push reaches a
+ * closed one - and the service worker suppresses its own notification when a
+ * tab is already focused, which is where the overlap actually gets resolved.
+ */
+CHANNEL_ADAPTERS.set("push", {
+  service: webPushService,
+  isEnabled: () => webPushService.isEnabled(),
+  build: (event, payload, context) => {
+    // Falls back to the in-app copy, so every event that is worth an in-app
+    // notification is pushable without a renderer of its own.
+    const rendered = templates.renderPush(event, payload);
+    if (!rendered) return null;
+
+    return {
+      title: rendered.title,
+      body: rendered.body,
+      url: rendered.url,
+      // Collapse key: a second push about the same thing replaces the first on
+      // the lock screen instead of stacking. Falls back to the event name so
+      // unrelated notifications never collapse into each other.
+      tag: context.dedupeKey || event,
+      data: {
+        event,
+        notificationId: null,
+        refs: context.refs || {},
+      },
     };
   },
 });
@@ -134,6 +181,7 @@ class NotificationService {
       recipientCount: 0,
       socket: { sent: [], failed: [] },
       whatsapp: { queued: 0, skipped: [], failed: [] },
+      push: { sent: 0, skipped: 0, failed: 0, removed: 0 },
     };
 
     if (!isKnownEvent(event)) {
@@ -185,6 +233,7 @@ class NotificationService {
       correlationId,
       inApp,
       inAppType,
+      dedupeKey: options.dedupeKey,
     };
 
     // Every (recipient, channel) pair is settled independently. One failure
@@ -214,6 +263,8 @@ class NotificationService {
       inAppFailed: summary.socket.failed.length,
       whatsappQueued: summary.whatsapp.queued,
       whatsappSkipped: summary.whatsapp.skipped.length,
+      pushSent: summary.push.sent,
+      pushFailed: summary.push.failed,
     });
 
     return summary;
@@ -222,6 +273,15 @@ class NotificationService {
   record(summary, channel, recipient, result) {
     if (channel === "socket") {
       summary.socket.sent.push(result);
+      return;
+    }
+    if (channel === "push") {
+      summary.push.sent += result?.sent || 0;
+      summary.push.failed += result?.failed || 0;
+      summary.push.removed += result?.removed || 0;
+      if (String(result?.outcome || "").startsWith("skipped")) {
+        summary.push.skipped += 1;
+      }
       return;
     }
     if (channel === "whatsapp") {
@@ -252,6 +312,9 @@ class NotificationService {
     if (channel === "socket") {
       logger.count("socketFailed");
       summary.socket.failed.push({ recipient: String(recipient._id), error });
+    } else if (channel === "push") {
+      logger.count("pushFailed");
+      summary.push.failed += 1;
     } else {
       logger.count("whatsappFailed");
       summary.whatsapp.failed.push({
@@ -291,6 +354,7 @@ class NotificationService {
 
     logger.info("Notification layer ready", {
       channels: this.registeredChannels().join(","),
+      push: webPushService.isEnabled() ? "enabled" : "disabled",
       whatsapp: config.channels.whatsapp.enabled ? "enabled" : "disabled",
       provider: config.whatsapp.provider,
       adminRoles: config.recipients.adminRoles.join(","),
