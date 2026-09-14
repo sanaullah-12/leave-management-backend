@@ -1377,6 +1377,368 @@ router.get("/db/status-summary", authenticateToken, async (req, res) => {
   }
 });
 
+/**
+ * GET /api/attendance/db/roster-day?startDate&endDate[&policy][&detail=day|summary]
+ *
+ * The roster, day by day: one row per employee per reported day, carrying the
+ * arrival, the hours between first and last punch, and how the day counted.
+ *
+ * This is /db/status-summary with the rows left in. That route answers "how
+ * many" in a single read; the attendance table and the dashboard need "who",
+ * and the only other way to get that was one /db/frontend request per employee,
+ * which is why the roster table could never load itself.
+ *
+ * No rule is restated here. The cutoff comes from AttendanceSettingsService,
+ * lateness from judgeArrival, weekends from lateHoursService, and an approved
+ * work-from-home or leave day from workModeService, exactly as the summary
+ * resolves them. A punch always decides its own day: the schedule only explains
+ * a day with no punch, which is the precedence the summary already applies.
+ *
+ * A day is reported only once it has either a punch or an approved schedule, so
+ * a closed office and a day still to come count against nobody.
+ *
+ * Admins read the roster; everyone else reads their own row, which is the same
+ * record /db/frontend already lets them read.
+ */
+router.get("/db/roster-day", authenticateToken, async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    if (!startDate || !endDate) {
+      return res.status(400).json({
+        success: false,
+        message: "startDate and endDate are required",
+      });
+    }
+
+    const isAdmin = req.user.role === "admin";
+    const ownCode = req.user.employeeId ? String(req.user.employeeId) : null;
+
+    // An employee with no device code has no attendance to read, and the
+    // roster query below would otherwise widen to the whole company.
+    if (!isAdmin && !ownCode) {
+      return res.json({
+        success: true,
+        dateRange: { startDate, endDate },
+        detail: "day",
+        days: [],
+        rows: [],
+        byEmployee: [],
+        byDate: [],
+        totals: {
+          employees: 0,
+          days: 0,
+          onTime: 0,
+          late: 0,
+          absent: 0,
+          workFromHome: 0,
+          onLeave: 0,
+        },
+        message: "No device ID is linked to this account yet.",
+      });
+    }
+
+    const cutoff = await AttendanceSettingsService.resolveCutoff(null, {
+      previewPolicy: req.query.policy,
+    });
+
+    // The same workforce the summary counts: people with an account, not device
+    // enrolments. A code the device knows and the company does not is neither a
+    // present employee nor an absent one.
+    const roster = await User.find({
+      company: req.user.company._id,
+      employeeId: isAdmin ? { $exists: true, $ne: null } : ownCode,
+      isActive: { $ne: false },
+      status: "active",
+    })
+      .select("employeeId name department")
+      .lean();
+
+    const people = new Map();
+    for (const person of roster) {
+      people.set(String(person.employeeId), {
+        employeeId: String(person.employeeId),
+        name: person.name || `Employee ${person.employeeId}`,
+        department: person.department || null,
+      });
+    }
+
+    const logs = await AttendanceDbService.fetchNormalizedLogs({
+      employeeIds: isAdmin ? null : [ownCode],
+      startDate,
+      endDate,
+    });
+
+    // First and last punch per employee-day. The first is the arrival the rule
+    // judges; the pair is what the hours are measured between, the same way
+    // AttendanceDbService derives a day from punch order.
+    const punchByKey = new Map();
+    const punchedDays = new Set();
+
+    for (const log of logs) {
+      if (log.id === undefined) continue;
+
+      const code = String(log.id);
+      if (!people.has(code)) continue;
+
+      const day = localDateString(log.timestamp);
+      // Weekends are not judged anywhere else either, so they are not judged
+      // here: one Saturday catch-up must not mark the roster absent.
+      if (lateHoursService.isWeekend(day)) continue;
+
+      punchedDays.add(day);
+
+      const key = `${code}|${day}`;
+      const seen = punchByKey.get(key);
+      if (!seen) {
+        punchByKey.set(key, {
+          first: log.timestamp,
+          last: log.timestamp,
+          punches: 1,
+        });
+      } else {
+        if (log.timestamp < seen.first) seen.first = log.timestamp;
+        if (log.timestamp > seen.last) seen.last = log.timestamp;
+        seen.punches += 1;
+      }
+    }
+
+    let schedule = {};
+    try {
+      schedule = await workModeService.getScheduleByEmployeeCode({
+        companyId: req.user.company._id,
+        startDate,
+        endDate,
+      });
+    } catch (workModeError) {
+      // A schedule lookup must never take the attendance read down with it.
+      console.error(
+        "Work mode lookup unavailable for the day roster:",
+        workModeError.message
+      );
+    }
+
+    // The days worth reporting: weekdays already lived through that somebody
+    // punched on or was approved away on.
+    const todayIso = officeToday();
+    const days = workModeService.helpers
+      .eachDay(startDate, endDate)
+      .filter((iso) => {
+        if (iso > todayIso) return false;
+        if (lateHoursService.isWeekend(iso)) return false;
+        if (punchedDays.has(iso)) return true;
+        for (const code of people.keys()) {
+          if (schedule[code] && schedule[code][iso]) return true;
+        }
+        return false;
+      });
+
+    /** Minutes past office midnight as a clock reading. 552 becomes "9:12 AM". */
+    const clockFromMinutes = (minutes) => {
+      const hour24 = Math.floor(minutes / 60);
+      const minute = minutes % 60;
+      const suffix = hour24 >= 12 ? "PM" : "AM";
+      const hour12 = hour24 % 12 === 0 ? 12 : hour24 % 12;
+      return `${hour12}:${String(minute).padStart(2, "0")} ${suffix}`;
+    };
+
+    const totals = {
+      employees: people.size,
+      days: days.length,
+      onTime: 0,
+      late: 0,
+      absent: 0,
+      workFromHome: 0,
+      onLeave: 0,
+    };
+
+    const perEmployee = new Map();
+    const perDate = new Map();
+    const rows = [];
+
+    // A three-month roster is tens of thousands of employee-days, which is a
+    // report rather than a table. The caller asks for the detail it can show;
+    // this only refuses to build a payload nobody could read.
+    const wanted = req.query.detail === "summary" ? "summary" : "day";
+    const detail =
+      wanted === "day" && people.size * days.length > 5000 ? "summary" : wanted;
+
+    const blankCounts = () => ({
+      onTime: 0,
+      late: 0,
+      absent: 0,
+      workFromHome: 0,
+      onLeave: 0,
+    });
+
+    for (const [code, person] of people) {
+      const employeeTotals = {
+        ...person,
+        ...blankCounts(),
+        lateMinutes: 0,
+        workedMinutes: 0,
+        daysWorked: 0,
+        lastCheckIn: null,
+        lastCheckInAt: null,
+      };
+      perEmployee.set(code, employeeTotals);
+
+      for (const day of days) {
+        const punch = punchByKey.get(`${code}|${day}`);
+        const scheduled = schedule[code] ? schedule[code][day] : undefined;
+
+        if (!perDate.has(day)) {
+          perDate.set(day, {
+            date: day,
+            ...blankCounts(),
+            firstCheckIn: null,
+            firstAt: null,
+            lastCheckIn: null,
+            lastAt: null,
+          });
+        }
+        const dateTotals = perDate.get(day);
+
+        let status;
+        let lateMinutes = 0;
+        let lateDisplay = null;
+        let checkIn = null;
+        let checkInAt = null;
+        let checkOut = null;
+        let workedMinutes = null;
+
+        if (punch) {
+          const arrival = judgeArrival(punch.first, cutoff.cutoffTime);
+          lateMinutes = arrival.lateMinutes;
+          lateDisplay = arrival.lateDisplay;
+          status = arrival.isLate ? "Late" : "On time";
+
+          checkInAt = punch.first.toISOString();
+          checkIn = clockFromMinutes(arrivalMinutes(punch.first));
+
+          // Hours need two punches. A single punch is an arrival and nothing
+          // more; reporting it as a zero-hour day would read as a day worked
+          // and lost, which is not what the device recorded.
+          if (punch.punches > 1 && punch.last > punch.first) {
+            checkOut = clockFromMinutes(arrivalMinutes(punch.last));
+            workedMinutes = Math.round((punch.last - punch.first) / 60000);
+          }
+
+          if (arrival.isLate) {
+            totals.late += 1;
+            employeeTotals.late += 1;
+            dateTotals.late += 1;
+            employeeTotals.lateMinutes += arrival.lateMinutes;
+          } else {
+            totals.onTime += 1;
+            employeeTotals.onTime += 1;
+            dateTotals.onTime += 1;
+          }
+
+          employeeTotals.daysWorked += 1;
+          if (workedMinutes) employeeTotals.workedMinutes += workedMinutes;
+
+          if (
+            !employeeTotals.lastCheckInAt ||
+            checkInAt > employeeTotals.lastCheckInAt
+          ) {
+            employeeTotals.lastCheckInAt = checkInAt;
+            employeeTotals.lastCheckIn = checkIn;
+          }
+          if (!dateTotals.firstAt || checkInAt < dateTotals.firstAt) {
+            dateTotals.firstAt = checkInAt;
+            dateTotals.firstCheckIn = checkIn;
+          }
+          if (!dateTotals.lastAt || checkInAt > dateTotals.lastAt) {
+            dateTotals.lastAt = checkInAt;
+            dateTotals.lastCheckIn = checkIn;
+          }
+        } else if (scheduled === workModeService.WORK_MODES.WORK_FROM_HOME) {
+          status = "Work from home";
+          totals.workFromHome += 1;
+          employeeTotals.workFromHome += 1;
+          dateTotals.workFromHome += 1;
+        } else if (scheduled === workModeService.WORK_MODES.ON_LEAVE) {
+          status = "On leave";
+          totals.onLeave += 1;
+          employeeTotals.onLeave += 1;
+          dateTotals.onLeave += 1;
+        } else {
+          status = "Absent";
+          totals.absent += 1;
+          employeeTotals.absent += 1;
+          dateTotals.absent += 1;
+        }
+
+        if (detail !== "day") continue;
+
+        rows.push({
+          employeeId: code,
+          name: person.name,
+          department: person.department,
+          date: day,
+          dateDisplay: displayDate(
+            punch ? punch.first : new Date(`${day}T12:00:00Z`)
+          ),
+          status,
+          checkIn,
+          checkInAt,
+          checkOut,
+          workedMinutes,
+          workedDisplay: workedMinutes ? formatDuration(workedMinutes) : null,
+          lateMinutes,
+          lateDisplay,
+          workMode: workModeService.resolveDayMode(scheduled, !!punch),
+        });
+      }
+    }
+
+    const byEmployee = Array.from(perEmployee.values()).map((entry) => ({
+      ...entry,
+      lateDisplay: entry.lateMinutes ? formatDuration(entry.lateMinutes) : null,
+      workedDisplay: entry.workedMinutes
+        ? formatDuration(entry.workedMinutes)
+        : null,
+      averageWorkedMinutes: entry.daysWorked
+        ? Math.round(entry.workedMinutes / entry.daysWorked)
+        : 0,
+    }));
+
+    const byDate = days.map((day) => {
+      const entry = perDate.get(day) || { date: day, ...blankCounts() };
+      return {
+        ...entry,
+        dateDisplay: displayDate(new Date(`${day}T12:00:00Z`)),
+      };
+    });
+
+    res.json({
+      success: true,
+      dateRange: { startDate, endDate },
+      cutoffTime: cutoff.cutoffTime,
+      policy: cutoff.policy,
+      detail,
+      // Set when the range was too wide to send a row per employee-day, so the
+      // caller can say why the table is showing the grouped view instead.
+      detailTruncated: wanted === "day" && detail !== "day",
+      days,
+      totals,
+      rows,
+      byEmployee,
+      byDate,
+      source: "database",
+      fetchedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error("Day roster read failed:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to build the attendance day roster",
+      error: error.message,
+    });
+  }
+});
+
+
 /** A calendar day either side of another, in office days. YYYY-MM-DD. */
 const shiftOfficeDay = (isoDate, delta) => {
   const day = new Date(`${isoDate}T00:00:00Z`);
