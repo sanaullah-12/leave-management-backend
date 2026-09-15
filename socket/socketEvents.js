@@ -26,6 +26,11 @@ const EVENTS = Object.freeze({
   WFH_NEW: "wfh:new", // employee submitted -> admins
   WFH_REVIEWED: "wfh:reviewed", // admin approved/rejected -> employee
 
+  // A work-from-home day changed state: started, paused, resumed, finished.
+  // Goes to the admins watching the live monitor AND to the employee's own
+  // tabs, so a second tab and a phone never show two different timers.
+  WFH_SESSION: "wfh:session",
+
   // Employee Voice
   VOICE_NEW: "voice:new", // employee submitted → admins
   VOICE_UPDATED: "voice:updated", // reply / status change → both parties
