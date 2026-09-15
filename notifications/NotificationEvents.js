@@ -27,6 +27,14 @@ const NOTIFICATION_EVENTS = Object.freeze({
   WFH_APPROVED: "wfh.approved",
   WFH_REJECTED: "wfh.rejected",
 
+  // -- Work From Home: the working day itself ----------------------------
+  // Four moments in one person's day, all addressed to the back office. They
+  // share the `wfh.` prefix so the push router already opens the right page.
+  WFH_SESSION_STARTED: "wfh.session_started",
+  WFH_SESSION_IDLE: "wfh.session_idle",
+  WFH_SESSION_RESUMED: "wfh.session_resumed",
+  WFH_SESSION_FINISHED: "wfh.session_finished",
+
   // -- Attendance --------------------------------------------------------
   ATTENDANCE_LATE_ARRIVAL: "attendance.late_arrival",
 
@@ -101,6 +109,24 @@ const EVENT_METADATA = Object.freeze({
   [NOTIFICATION_EVENTS.WFH_REJECTED]: {
     audience: AUDIENCE.USER,
     inAppType: "wfh_rejected",
+  },
+  // The working day. All four go to the back office, which is who is
+  // monitoring; the employee is the one causing them and needs no telling.
+  [NOTIFICATION_EVENTS.WFH_SESSION_STARTED]: {
+    audience: AUDIENCE.COMPANY_ADMINS,
+    inAppType: "wfh_session_started",
+  },
+  [NOTIFICATION_EVENTS.WFH_SESSION_IDLE]: {
+    audience: AUDIENCE.COMPANY_ADMINS,
+    inAppType: "wfh_session_idle",
+  },
+  [NOTIFICATION_EVENTS.WFH_SESSION_RESUMED]: {
+    audience: AUDIENCE.COMPANY_ADMINS,
+    inAppType: "wfh_session_resumed",
+  },
+  [NOTIFICATION_EVENTS.WFH_SESSION_FINISHED]: {
+    audience: AUDIENCE.COMPANY_ADMINS,
+    inAppType: "wfh_session_finished",
   },
   [NOTIFICATION_EVENTS.ATTENDANCE_LATE_ARRIVAL]: {
     audience: AUDIENCE.USER,

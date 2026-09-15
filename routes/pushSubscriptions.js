@@ -220,10 +220,6 @@ router.post("/test", authenticateToken, async (req, res) => {
         body: "You will now receive attendance, leave, WFH and HR updates here.",
         url: "/notifications",
         tag: "push-test",
-        // Shown even with the app in front of them - the point of this one is
-        // to prove an OS notification arrives, and they are certainly looking
-        // at the tab they just clicked in.
-        forceShow: true,
       }
     );
 

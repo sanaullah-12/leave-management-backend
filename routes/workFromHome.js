@@ -11,6 +11,7 @@ const {
 } = require("../utils/notifications");
 const workModeService = require("../services/workModeService");
 const wfhPolicyService = require("../services/wfhPolicyService");
+const wfhSessionService = require("../services/wfhSessionService");
 const unreportedAbsenceService = require("../services/unreportedAbsenceService");
 
 /**
@@ -62,7 +63,15 @@ const serialize = (doc) => (doc.toObject ? doc.toObject() : doc);
  */
 router.post("/", authenticateToken, async (req, res) => {
   try {
-    const { startDate, endDate, reason, note } = req.body;
+    const {
+      startDate,
+      endDate,
+      reason,
+      note,
+      plannedStartTime,
+      plannedEndTime,
+      plannedTasks,
+    } = req.body;
 
     if (!startDate || !reason || !String(reason).trim()) {
       return res
@@ -94,6 +103,16 @@ router.post("/", authenticateToken, async (req, res) => {
     });
     if (!verdict.ok) {
       return res.status(400).json({ success: false, message: verdict.message });
+    }
+
+    // The hours the employee means to keep. Optional, and never a constraint on
+    // what the work timer later measures - see models/WorkFromHome.
+    const plan = wfhPolicyService.validatePlannedTimes({
+      plannedStartTime,
+      plannedEndTime,
+    });
+    if (!plan.ok) {
+      return res.status(400).json({ success: false, message: plan.message });
     }
 
     // Overlap with the employee's own live WFH requests.
@@ -142,6 +161,29 @@ router.post("/", authenticateToken, async (req, res) => {
       });
     }
 
+    // What the employee intends to work on. Free text, never parsed - the day's
+    // work timer seeds its task list from it and nothing else reads it. Blank
+    // entries are dropped rather than rejected: a stray empty line in a list of
+    // three real tasks is not worth failing a request over.
+    const tasks = Array.isArray(plannedTasks)
+      ? plannedTasks
+          .map((title) => String(title || "").trim().slice(0, 200))
+          .filter(Boolean)
+          .slice(0, 20)
+      : [];
+
+    // Required, and required here rather than only in the form: a day is
+    // approved against the work it is for, and a rule that lives in a browser
+    // is a rule any other client can ignore. Requests raised before tasks
+    // existed keep their empty list - this guards what is created, not what
+    // was.
+    if (!tasks.length) {
+      return res.status(400).json({
+        success: false,
+        message: "List at least one task you will work on.",
+      });
+    }
+
     const request = new WorkFromHome({
       employee: req.user._id,
       company: req.user.company._id,
@@ -149,6 +191,9 @@ router.post("/", authenticateToken, async (req, res) => {
       endDate: end,
       reason: String(reason).trim(),
       note: note ? String(note).trim() : "",
+      plannedStartTime: plan.plannedStartTime,
+      plannedEndTime: plan.plannedEndTime,
+      plannedTasks: tasks,
       isBackdated: verdict.isBackdated,
     });
 
@@ -309,7 +354,13 @@ router.get("/stats", authenticateToken, async (req, res) => {
 router.get("/policy", authenticateToken, async (req, res) => {
   try {
     const policy = await wfhPolicyService.getPolicy(req.user.company._id);
-    res.json({ success: true, policy });
+    // The work timer's rules ride along with the request rules: the form and
+    // the card read one endpoint, so neither can hold a stale copy of a
+    // threshold the server has since changed.
+    res.json({
+      success: true,
+      policy: { ...policy, session: wfhSessionService.getConfig() },
+    });
   } catch (error) {
     console.error("WFH policy error:", error);
     res.status(500).json({

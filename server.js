@@ -95,6 +95,7 @@ const machinePerformanceRoutes = require("./routes/machinePerformance");
 const notificationRoutes = require("./routes/notifications");
 const employeeVoiceRoutes = require("./routes/employeeVoice");
 const workFromHomeRoutes = require("./routes/workFromHome");
+const wfhSessionRoutes = require("./routes/wfhSessions");
 const unreportedAbsenceRoutes = require("./routes/unreportedAbsence");
 const agentRoutes = require("./routes/agent");
 const pushSubscriptionRoutes = require("./routes/pushSubscriptions");
@@ -418,6 +419,10 @@ app.use("/api/push", pushSubscriptionRoutes);
 // What version is running, and announcing it to everyone when it changes.
 app.use("/api/app-release", appReleaseRoutes);
 app.use("/api/employee-voice", employeeVoiceRoutes);
+// Registered BEFORE the work-from-home router, and that order matters. The
+// other router ends with a GET /:id catch-all; mounted first it would answer
+// /sessions/today with "request not found" instead of letting this one see it.
+app.use("/api/work-from-home/sessions", wfhSessionRoutes);
 app.use("/api/work-from-home", workFromHomeRoutes);
 app.use("/api/unreported-absence", unreportedAbsenceRoutes);
 app.use("/api/announcements", require("./routes/announcements"));
@@ -486,6 +491,11 @@ server.listen(PORT, () => {
   // cutoff. Idempotent and started after the listener, so a boot at any hour
   // catches up without double-charging anyone.
   require("./services/unreportedAbsenceScheduler").start();
+
+  // Work-from-home timers. Not what keeps the numbers correct - reconciliation
+  // on every read does that - but what lets an admin hear that someone went
+  // idle without waiting for anyone to open a page.
+  require("./services/wfhSessionScheduler").start();
 
   // Tell everyone when the version they are using has changed. Once per
   // release rather than once per restart - the claim is made against a
