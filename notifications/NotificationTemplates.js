@@ -18,6 +18,7 @@
  */
 
 const { NOTIFICATION_EVENTS } = require("./NotificationEvents");
+const { APP_TIMEZONE } = require("../utils/timezone");
 const config = require("./config");
 
 // -- Formatting helpers ----------------------------------------------------
@@ -88,6 +89,50 @@ const humanDuration = (totalMinutes) => {
   if (hours) parts.push(`${hours} ${hours === 1 ? "hour" : "hours"}`);
   if (minutes || !hours) parts.push(`${minutes} ${minutes === 1 ? "minute" : "minutes"}`);
   return parts.join(" ");
+};
+
+/**
+ * A time of day as the office reads it: "10:07 AM".
+ *
+ * Pinned to APP_TIMEZONE rather than left to the host process. "Ahmed started
+ * at 10:07 AM" is only true in one timezone, and the server's own is UTC on the
+ * platform and local on a laptop - the same start would otherwise be announced
+ * as two different times depending on which machine sent it.
+ */
+const officeClock = new Intl.DateTimeFormat("en-US", {
+  timeZone: APP_TIMEZONE,
+  hour: "numeric",
+  minute: "2-digit",
+  hour12: true,
+});
+
+const formatClock = (value) => {
+  if (!value) return "";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return officeClock.format(date);
+};
+
+/**
+ * "18:00" -> "6:00 PM".
+ *
+ * A planned time is wall-clock text the employee typed, not an instant, so no
+ * timezone is involved and none is applied.
+ */
+const formatClock12 = (hhmm) => {
+  const [h, m] = String(hhmm || "")
+    .split(":")
+    .map(Number);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return "";
+  const suffix = h >= 12 ? "PM" : "AM";
+  const hour = h % 12 === 0 ? 12 : h % 12;
+  return `${hour}:${String(m).padStart(2, "0")} ${suffix}`;
+};
+
+/** A planned window, or nothing at all when the employee gave none. */
+const formatPlanned = (start, end) => {
+  if (!start || !end) return "";
+  return `${formatClock12(start)} - ${formatClock12(end)}`;
 };
 
 const truncate = (text, max = 300) => {
@@ -462,6 +507,142 @@ Late Arrival`,
       approvedTemplate: {
         name: "wfh_request_rejected",
         params: [formatRange(startDate, endDate)],
+      },
+    }),
+  },
+
+  // ------------------------------------------ Work From Home: the day itself
+  //
+  // These four are status, not requests: nobody has to act on them, so each one
+  // says what happened, when, and how the day stands. Worked time is on every
+  // one of them, so an admin reading only the notification already has the
+  // number they would otherwise have opened the monitor for.
+
+  [NOTIFICATION_EVENTS.WFH_SESSION_STARTED]: {
+    inApp: ({ employeeName, startedAt, plannedStartTime, plannedEndTime }) => {
+      const planned = formatPlanned(plannedStartTime, plannedEndTime);
+      return {
+        title: "Work From Home Started",
+        message: `${employeeName} has started their work from home session at ${formatClock(
+          startedAt
+        )}.${planned ? ` Planned ${planned}.` : ""}`,
+      };
+    },
+    whatsapp: ({ employeeName, startedAt, plannedStartTime, plannedEndTime }) => ({
+      body: compose(
+        `\u{1F3E0} ${brand()}\n\nWork from home session started.`,
+        [
+          ["Employee", employeeName],
+          ["Started", formatClock(startedAt)],
+          ["Planned", formatPlanned(plannedStartTime, plannedEndTime)],
+        ],
+        VIEW_IN_APP
+      ),
+      approvedTemplate: {
+        name: "wfh_session_started",
+        params: [employeeName, formatClock(startedAt)],
+      },
+    }),
+  },
+
+  [NOTIFICATION_EVENTS.WFH_SESSION_IDLE]: {
+    inApp: ({ employeeName, pausedAt, activeMinutes, idleTimeoutMinutes }) => ({
+      title: "Work From Home Paused",
+      message: `${employeeName}'s work timer paused at ${formatClock(
+        pausedAt
+      )} after ${idleTimeoutMinutes} minutes without activity. ${humanDuration(
+        activeMinutes
+      )} counted so far today.`,
+    }),
+    whatsapp: ({ employeeName, pausedAt, activeMinutes, idleTimeoutMinutes }) => ({
+      body: compose(
+        `\u{23F8} ${brand()}\n\nWork from home timer paused.`,
+        [
+          ["Employee", employeeName],
+          ["Paused At", formatClock(pausedAt)],
+          ["Reason", `No activity for ${idleTimeoutMinutes} minutes`],
+          ["Worked So Far", humanDuration(activeMinutes)],
+        ],
+        "Paused time is not counted as working time."
+      ),
+      approvedTemplate: {
+        name: "wfh_session_idle",
+        params: [employeeName, formatClock(pausedAt)],
+      },
+    }),
+  },
+
+  [NOTIFICATION_EVENTS.WFH_SESSION_RESUMED]: {
+    inApp: ({ employeeName, resumedAt, activeMinutes }) => ({
+      title: "Work From Home Resumed",
+      message: `${employeeName} resumed their work from home session at ${formatClock(
+        resumedAt
+      )}. ${humanDuration(activeMinutes)} counted so far today.`,
+    }),
+    whatsapp: ({ employeeName, resumedAt, activeMinutes }) => ({
+      body: compose(
+        `\u{25B6} ${brand()}\n\nWork from home session resumed.`,
+        [
+          ["Employee", employeeName],
+          ["Resumed At", formatClock(resumedAt)],
+          ["Worked So Far", humanDuration(activeMinutes)],
+        ],
+        VIEW_IN_APP
+      ),
+      approvedTemplate: {
+        name: "wfh_session_resumed",
+        params: [employeeName, formatClock(resumedAt)],
+      },
+    }),
+  },
+
+  [NOTIFICATION_EVENTS.WFH_SESSION_FINISHED]: {
+    inApp: ({
+      employeeName,
+      startedAt,
+      endedAt,
+      activeMinutes,
+      idleMinutes,
+      segmentCount,
+      closedBySystem,
+    }) => ({
+      title: closedBySystem
+        ? "Work From Home Day Closed Automatically"
+        : "Work From Home Finished",
+      message: `${employeeName} worked ${humanDuration(
+        activeMinutes
+      )} from home (${formatClock(startedAt)} to ${formatClock(
+        endedAt
+      )}) across ${segmentCount} session${
+        segmentCount === 1 ? "" : "s"
+      }, with ${humanDuration(idleMinutes)} paused.${
+        closedBySystem
+          ? " The day was closed automatically because the session was left open."
+          : ""
+      }`,
+    }),
+    whatsapp: ({
+      employeeName,
+      startedAt,
+      endedAt,
+      activeMinutes,
+      idleMinutes,
+      segmentCount,
+    }) => ({
+      body: compose(
+        `\u{2705} ${brand()}\n\nWork from home day complete.`,
+        [
+          ["Employee", employeeName],
+          ["Worked", `${formatClock(startedAt)} to ${formatClock(endedAt)}`],
+          ["Active Time", humanDuration(activeMinutes)],
+          ["Paused Time", humanDuration(idleMinutes)],
+          ["Sessions", String(segmentCount)],
+        ],
+        VIEW_IN_APP
+      ),
+      approvedTemplate: {
+        name: "wfh_session_finished",
+        params: [employeeName, humanDuration(activeMinutes)],
       },
     }),
   },

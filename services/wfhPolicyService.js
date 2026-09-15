@@ -88,4 +88,45 @@ function validateDates({ startDate, endDate, policy }) {
   return { ok: true, isBackdated: startDate < policy.today };
 }
 
-module.exports = { DEFAULTS, getPolicy, validateDates };
+/**
+ * Checks the hours an employee says they intend to keep.
+ *
+ * Deliberately permissive: the plan is context for a reviewer, not a
+ * constraint the day is judged against, so anything that reads as a real
+ * working window is accepted. Only two things are rejected - a time that is
+ * not a time, and a window that ends before it starts - because both would
+ * render as nonsense on the card and in the summary.
+ *
+ * Giving no plan at all is fine. Requests raised before planned times existed
+ * have none, and a day can still be timed without one.
+ *
+ * @returns {{ ok: true, plannedStartTime: string, plannedEndTime: string }
+ *          | { ok: false, message: string }}
+ */
+function validatePlannedTimes({ plannedStartTime, plannedEndTime }) {
+  const start = String(plannedStartTime || "").trim();
+  const end = String(plannedEndTime || "").trim();
+
+  if (!start && !end) return { ok: true, plannedStartTime: "", plannedEndTime: "" };
+
+  const shape = /^([01]\d|2[0-3]):[0-5]\d$/;
+  if (!shape.test(start) || !shape.test(end)) {
+    return {
+      ok: false,
+      message: "Give both a planned start and a planned end time, as HH:MM.",
+    };
+  }
+
+  // Equal is rejected along with inverted: a window of zero length is not a
+  // plan, and it would render as "10:00 AM - 10:00 AM" on every screen.
+  if (end <= start) {
+    return {
+      ok: false,
+      message: "The planned end time must be later than the planned start time.",
+    };
+  }
+
+  return { ok: true, plannedStartTime: start, plannedEndTime: end };
+}
+
+module.exports = { DEFAULTS, getPolicy, validateDates, validatePlannedTimes };

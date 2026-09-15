@@ -412,8 +412,76 @@ const notifyWfhRejection = async (request, employee, rejectionReason = "") => {
   });
 };
 
+/**
+ * Tells the back office what just happened in someone's work-from-home day.
+ *
+ * One helper for all four moments, because they differ only in which event they
+ * name: the audience (every admin in the company), the payload and the
+ * throttling rule are common to all of them.
+ *
+ * Throttling is expressed as a uniqueness constraint rather than a timer.
+ * Start and Finish happen once a day and are never throttled. Idle and Resume
+ * can flap - someone who steps away four times in an hour is one situation, not
+ * four notifications - so those two carry a dedupe key containing a time
+ * bucket. The unique index on dedupeKey then does the suppressing, which means
+ * the sweeper and a live request deciding to notify in the same instant
+ * produces one notification rather than a race.
+ *
+ * The key includes the recipient id because dedupeKey is unique across the
+ * whole collection: a key shared by every admin would notify exactly one of
+ * them and reject the rest as duplicates.
+ *
+ * @param {object} options
+ * @param {string} options.event      A NOTIFICATION_EVENTS.WFH_SESSION_* value
+ * @param {object} options.session    The serialized session
+ * @param {object} options.employee   { _id, name }
+ * @param {string} options.companyId
+ * @param {number} options.bucket     Throttle bucket from wfhSessionService
+ * @param {object=} options.extra     Event-specific payload additions
+ */
+const notifyWfhSessionEvent = async ({
+  event,
+  session,
+  employee,
+  companyId,
+  bucket,
+  extra = {},
+}) => {
+  const THROTTLED = new Set([
+    NOTIFICATION_EVENTS.WFH_SESSION_IDLE,
+    NOTIFICATION_EVENTS.WFH_SESSION_RESUMED,
+  ]);
+
+  const minutes = (value) => Math.round((Number(value) || 0) / 60000);
+
+  return NotificationService.dispatch({
+    event,
+    companyId,
+    senderId: employee._id,
+    refs: { wfhId: session.request },
+    payload: {
+      employeeName: employee.name || "An employee",
+      employeeId: String(employee._id),
+      sessionId: String(session._id),
+      date: session.date,
+      plannedStartTime: session.plannedStartTime,
+      plannedEndTime: session.plannedEndTime,
+      startedAt: session.startedAt,
+      activeMinutes: minutes(session.activeMs),
+      idleMinutes: minutes(session.idleMs),
+      segmentCount: session.segmentCount,
+      ...extra,
+    },
+    dedupeKey: THROTTLED.has(event)
+      ? (recipient) =>
+          `wfh-session:${session._id}:${event}:${bucket}:${recipient._id}`
+      : undefined,
+  });
+};
+
 module.exports = {
   createNotification,
+  notifyWfhSessionEvent,
   notifyWfhRequest,
   notifyWfhApproval,
   notifyWfhRejection,

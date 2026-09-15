@@ -51,6 +51,67 @@ const workFromHomeSchema = new mongoose.Schema(
       trim: true,
       maxlength: [500, "Reason cannot exceed 500 characters"],
     },
+    /**
+     * The hours the employee intends to keep on a work-from-home day, as plain
+     * "HH:MM" wall-clock text.
+     *
+     * A plan, never a measurement. What was actually worked is measured
+     * separately by the work timer (models/WfhWorkSession), and the two are
+     * kept apart on purpose: an employee stating their hours must not be able
+     * to influence what the system reports they worked.
+     *
+     * Text rather than a Date because a plan is a time of day, not an instant.
+     * Stored as an instant it would need a date to be read back, would shift
+     * under daylight saving, and would silently change meaning for a request
+     * covering a range of days.
+     *
+     * Optional, and empty on every request raised before this existed. Screens
+     * render an absent plan as "not set" rather than inventing one.
+     */
+    plannedStartTime: {
+      type: String,
+      default: "",
+      trim: true,
+      match: [/^$|^([01]\d|2[0-3]):[0-5]\d$/, "Planned start must be HH:MM"],
+    },
+    plannedEndTime: {
+      type: String,
+      default: "",
+      trim: true,
+      match: [/^$|^([01]\d|2[0-3]):[0-5]\d$/, "Planned end must be HH:MM"],
+    },
+    /**
+     * What the employee intends to work on, one line per task.
+     *
+     * Stated with the request so the reviewer is approving a day of known work
+     * rather than an absence, and carried onto the day itself: the work timer
+     * seeds its task list from this when the session starts
+     * (services/wfhSessionService).
+     *
+     * A plan, like the planned hours, and just as powerless over what gets
+     * recorded. The tasks actually worked live on the session, where they carry
+     * server-stamped times; these are only the ones the employee said they
+     * would do.
+     *
+     * At least one is required of a new request, enforced in
+     * routes/workFromHome.js rather than here: every request raised before
+     * tasks existed has an empty list and must stay readable, and a schema
+     * `required` would fail on the next save of any one of them.
+     */
+    plannedTasks: {
+      type: [
+        {
+          type: String,
+          trim: true,
+          maxlength: [200, "A task cannot exceed 200 characters"],
+        },
+      ],
+      default: [],
+      validate: {
+        validator: (value) => !value || value.length <= 20,
+        message: "A request cannot list more than 20 tasks",
+      },
+    },
     /** Optional free-text the employee adds for context. */
     note: {
       type: String,

@@ -145,9 +145,6 @@ class WebPushNotificationService {
       body: message.body,
       url: message.url || "/",
       tag: message.tag || undefined,
-      // Only the test push sets this. A real notification stays suppressed
-      // while the app is on screen, where Socket.IO has already delivered it.
-      forceShow: message.forceShow === true || undefined,
       data: message.data || {},
     };
 
