@@ -29,6 +29,9 @@ const { today } = require("../utils/timezone");
  * A minute. The idle threshold is five, so the worst case is a notification
  * that is one minute late - well inside what "immediately" means to a person
  * watching a monitor, and sixty times less work than polling every second.
+ *
+ * While the idle rule is off the sweep still runs, for the two things that have
+ * nothing to do with inactivity: a day left open overnight and the hard cap.
  */
 const TICK_MS = 60 * 1000;
 
@@ -42,9 +45,11 @@ class WfhSessionScheduler {
     if (this.timer) return;
 
     console.log(
-      `Work from home timers: watching for inactivity (every ${
-        TICK_MS / 1000
-      }s, idle after ${wfhSessionService.CONFIG.idleTimeoutMinutes}m)`
+      `Work from home timers: sweeping every ${TICK_MS / 1000}s (${
+        wfhSessionService.CONFIG.inactivityAutoPause
+          ? `idle after ${wfhSessionService.CONFIG.idleTimeoutMinutes}m`
+          : "inactivity auto-pause off"
+      })`
     );
     // A first pass on boot closes out anything left open while the server was
     // down, rather than waiting a minute to notice a day that ended last night.
@@ -80,13 +85,19 @@ class WfhSessionScheduler {
         Date.now() - wfhSessionService.CONFIG.maxSessionHours * 60 * 60 * 1000
       );
 
-      // Exactly the three things that can change without anyone clicking. Each
-      // is narrow on purpose: a sweep that pulled every open session would walk
+      // Someone stopped being there - a candidate only while the idle rule is
+      // on. With it off those sessions are still running, so asking about them
+      // every minute would walk the company to be told nothing each time.
+      const wentQuiet = wfhSessionService.CONFIG.inactivityAutoPause
+        ? [{ status: "working", lastActivityAt: { $lte: cutoff } }]
+        : [];
+
+      // Exactly the things that can change without anyone clicking. Each is
+      // narrow on purpose: a sweep that pulled every open session would walk
       // the whole company every minute to find that nothing had happened.
       const candidates = await WfhWorkSession.find({
         $or: [
-          // Someone stopped being there.
-          { status: "working", lastActivityAt: { $lte: cutoff } },
+          ...wentQuiet,
           // A day that ended without anyone pressing Finish. Reconciliation
           // completes these, so each one appears in this set exactly once.
           { status: "paused", date: { $lt: today() } },

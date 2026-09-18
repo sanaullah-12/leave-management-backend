@@ -18,7 +18,10 @@ const { today, localDateString } = require("../utils/timezone");
  *    request body and a replayed one all produce the same result as an honest
  *    click, because the only clock consulted is this process's.
  *
- * 2. `lastActivityAt` is what makes inactivity honest.
+ * 2. `lastActivityAt` is what makes inactivity honest - when the rule is on.
+ *    It is currently off (CONFIG.inactivityAutoPause), so a timer stops when
+ *    the employee stops it and at no other time. What follows describes the
+ *    rule as it behaves once it is switched back on.
  *    When a stretch of work is closed for inactivity it is cut back to the last
  *    moment the server saw a sign of life, not to the moment the server
  *    noticed. The idle minutes are therefore never counted - and a closed
@@ -58,6 +61,22 @@ const CONFIG = {
     return minutesEnv("WFH_IDLE_TIMEOUT_MINUTES", 5);
   },
   /**
+   * Whether that silence stops the timer.
+   *
+   * Currently off: the day runs from Start until the employee pauses or
+   * finishes it, and nothing about the mouse or the keyboard is consulted on
+   * either side. Set WFH_INACTIVITY_AUTOPAUSE=true to put the rule back - none
+   * of it has been removed, and the handful of reads of this flag are the only
+   * places it is asked about.
+   */
+  get inactivityAutoPause() {
+    return (
+      String(process.env.WFH_INACTIVITY_AUTOPAUSE || "")
+        .trim()
+        .toLowerCase() === "true"
+    );
+  },
+  /**
    * How often the browser says "still here" while the timer runs.
    *
    * It bounds how much work can be lost when a tab dies: at worst the last
@@ -95,6 +114,8 @@ const CONFIG = {
 };
 
 const idleMs = () => CONFIG.idleTimeoutMinutes * 60 * 1000;
+/** Whether a stretch of silence is allowed to stop the clock. */
+const autoPauses = () => CONFIG.inactivityAutoPause;
 const maxSessionMs = () => CONFIG.maxSessionHours * 60 * 60 * 1000;
 
 /** The settings a client needs to behave correctly, in one object. */
@@ -102,6 +123,12 @@ function getConfig() {
   return {
     idleTimeoutMinutes: CONFIG.idleTimeoutMinutes,
     idleTimeoutMs: idleMs(),
+    /**
+     * False while the idle rule is off. The browser reads this to decide
+     * whether to watch input at all, so the page and the server can never be
+     * doing different things - one switch, both halves.
+     */
+    inactivityAutoPause: CONFIG.inactivityAutoPause,
     heartbeatSeconds: CONFIG.heartbeatSeconds,
     maxSessionHours: CONFIG.maxSessionHours,
   };
@@ -129,6 +156,22 @@ class SessionRuleError extends Error {
 
 const ms = (date) => new Date(date).getTime();
 
+/**
+ * The instant a running stretch is counted up to.
+ *
+ * With the idle rule on it is the last sign of life, never now: counting to now
+ * would mean every total quietly included however long the person had already
+ * been away, and would then jump BACKWARDS by up to the idle timeout the moment
+ * the server noticed - a worked-time figure that decreases is worse than one
+ * that lags.
+ *
+ * With the rule off nothing is ever cut back, so there is no jump to avoid and
+ * the honest end of a running stretch is now. Stopping it at the last heartbeat
+ * would freeze a timer that is still running.
+ */
+const countedUpTo = (session, now = new Date()) =>
+  autoPauses() ? ms(session.lastActivityAt) : ms(now);
+
 /** The one segment still running, if any. The invariant is: at most one. */
 const openSegment = (session) =>
   (session.segments || []).find((segment) => !segment.endedAt) || null;
@@ -136,16 +179,11 @@ const openSegment = (session) =>
 /**
  * Milliseconds actually worked, and the instant that total is current as of.
  *
- * A running segment is counted only up to `lastActivityAt`, never up to now.
- * Counting to now would mean every total quietly included however long the
- * person had already been away, and would then jump BACKWARDS by up to the
- * idle timeout the moment the server noticed - a worked-time figure that
- * decreases is worse than one that lags. Lagging by at most one heartbeat and
- * only ever under-reporting is the honest direction to be wrong in.
+ * A running segment is counted up to `countedUpTo` - now while the idle rule
+ * is off, the last sign of life while it is on.
  *
- * The employee's own card ticks forward from `countingSince` while their
- * browser can see they are active; that is display only, and the next read
- * replaces it with this number.
+ * The employee's own card ticks forward from `countingSince`; that is display
+ * only, and the next read replaces it with this number.
  */
 function totalsFor(session, now = new Date()) {
   const segments = session.segments || [];
@@ -160,7 +198,7 @@ function totalsFor(session, now = new Date()) {
   if (open) {
     // Never below the segment's own start: a session resumed and then read in
     // the same millisecond must contribute zero, not a negative.
-    const countedTo = Math.max(ms(open.startedAt), ms(session.lastActivityAt));
+    const countedTo = Math.max(ms(open.startedAt), countedUpTo(session, now));
     activeMs += countedTo - ms(open.startedAt);
   }
 
@@ -172,7 +210,7 @@ function totalsFor(session, now = new Date()) {
       ? ms(session.finishedAt || session.lastActivityAt)
       : session.status === "paused"
       ? ms(now)
-      : Math.max(ms(session.lastActivityAt), ms(session.startedAt));
+      : Math.max(countedUpTo(session, now), ms(session.startedAt));
 
   const spanMs = Math.max(0, asOf - ms(session.startedAt));
 
@@ -228,8 +266,8 @@ const closeTaskSpans = (session, at) => {
  * and switching tasks cannot change the day's total, because it never touches a
  * segment.
  *
- * A running segment is counted only to `lastActivityAt`, exactly as
- * `totalsFor` does, so the parts can never add up to more than the whole.
+ * A running segment is counted to the same instant `totalsFor` counts it to,
+ * so the parts can never add up to more than the whole.
  *
  * Each span is reported alongside its own worked total, because the admin's
  * report needs both: "9:00 AM to 12:00 PM" says when somebody was on a task,
@@ -243,7 +281,7 @@ function taskBreakdown(session, now = new Date()) {
       from,
       to: segment.endedAt
         ? ms(segment.endedAt)
-        : Math.max(from, ms(session.lastActivityAt)),
+        : Math.max(from, countedUpTo(session, now)),
     };
   });
 
@@ -383,7 +421,10 @@ async function reconcile(session, now = new Date()) {
   }
 
   // -- Nobody has been there for a while ---------------------------------
-  if (session.status === "working") {
+  // Only while the idle rule is on. With it off a running timer is stopped by
+  // the employee and by nothing else, and the hard cap above is all that can
+  // close a day nobody closed.
+  if (autoPauses() && session.status === "working") {
     const silentFor = nowMs - ms(session.lastActivityAt);
     if (silentFor >= idleMs()) {
       const cutAt = new Date(session.lastActivityAt);
@@ -894,13 +935,15 @@ function serialize(session, now = new Date()) {
      * forward from here for display only, and stops the moment the browser
      * stops seeing activity.
      */
-    countingSince: doc.status === "working" && open ? doc.lastActivityAt : null,
+    countingSince:
+      doc.status === "working" && open ? new Date(countedUpTo(doc, now)) : null,
     /**
      * When the server will stop counting if nothing else arrives. Lets the card
-     * show the pause coming rather than announcing it after the fact.
+     * show the pause coming rather than announcing it after the fact. Null
+     * while the idle rule is off - nothing is coming.
      */
     idleDeadline:
-      doc.status === "working"
+      doc.status === "working" && autoPauses()
         ? new Date(ms(doc.lastActivityAt) + idleMs())
         : null,
     segments: (doc.segments || []).map((segment) => ({
@@ -909,7 +952,7 @@ function serialize(session, now = new Date()) {
       endedBy: segment.endedBy || null,
       durationMs: segment.endedAt
         ? Math.max(0, ms(segment.endedAt) - ms(segment.startedAt))
-        : Math.max(0, ms(doc.lastActivityAt) - ms(segment.startedAt)),
+        : Math.max(0, countedUpTo(doc, now) - ms(segment.startedAt)),
     })),
     /**
      * What is being worked on, and what each piece has taken so far.
