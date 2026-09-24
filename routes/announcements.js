@@ -41,6 +41,12 @@ const serialize = (doc, viewer) => {
 };
 
 /** Base query: this company, not expired, audience the viewer may see. */
+const { validate, z, schemas } = require("../middleware/validate");
+const { broadcastLimiter } = require("../middleware/rateLimits");
+const audit = require("../services/auditLog");
+
+const validId = validate({ params: z.object({ id: schemas.objectId }) });
+
 const baseQuery = (user) => {
   const q = { company: user.company._id };
   q.$or = [{ expiresAt: { $exists: false } }, { expiresAt: null }, { expiresAt: { $gt: new Date() } }];
@@ -53,8 +59,8 @@ const baseQuery = (user) => {
 /* ------------------------------------------------------------------ */
 router.get("/", authenticateToken, async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 50;
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
     const skip = (page - 1) * limit;
     const { category, search } = req.query;
 
@@ -122,13 +128,13 @@ router.get("/dashboard", authenticateToken, async (req, res) => {
 /* ------------------------------------------------------------------ */
 /*  Create an announcement (admin/HR only)                             */
 /* ------------------------------------------------------------------ */
-router.post("/", authenticateToken, authorizeRoles("admin"), async (req, res) => {
+router.post("/", authenticateToken, authorizeRoles("admin"), broadcastLimiter, async (req, res) => {
   try {
     const { title, body, category, audience, pinned, expiresAt } = req.body;
-    if (!title || !title.trim()) {
+    if (typeof title !== "string" || !title.trim()) {
       return res.status(400).json({ message: "Title is required" });
     }
-    if (!body || !body.trim()) {
+    if (typeof body !== "string" || !body.trim()) {
       return res.status(400).json({ message: "Content is required" });
     }
     if (category && !VALID_CATEGORIES.includes(category)) {
@@ -152,6 +158,14 @@ router.post("/", authenticateToken, authorizeRoles("admin"), async (req, res) =>
     });
     await announcement.save();
     await announcement.populate("author", "name profilePicture position");
+
+    audit.record({
+      req,
+      action: "announcement.create",
+      targetType: "announcement",
+      targetId: announcement._id,
+      metadata: { audience: announcement.audience },
+    });
 
     res.status(201).json({
       message: "Announcement posted",
@@ -185,7 +199,7 @@ router.post("/", authenticateToken, authorizeRoles("admin"), async (req, res) =>
 /* ------------------------------------------------------------------ */
 /*  Update an announcement (admin/HR only, same company)               */
 /* ------------------------------------------------------------------ */
-router.put("/:id", authenticateToken, authorizeRoles("admin"), async (req, res) => {
+router.put("/:id", authenticateToken, authorizeRoles("admin"), validId, async (req, res) => {
   try {
     const announcement = await Announcement.findOne({
       _id: req.params.id,
@@ -229,7 +243,7 @@ router.put("/:id", authenticateToken, authorizeRoles("admin"), async (req, res) 
 /* ------------------------------------------------------------------ */
 /*  Delete an announcement (admin/HR only, same company)               */
 /* ------------------------------------------------------------------ */
-router.delete("/:id", authenticateToken, authorizeRoles("admin"), async (req, res) => {
+router.delete("/:id", authenticateToken, authorizeRoles("admin"), validId, async (req, res) => {
   try {
     const deleted = await Announcement.findOneAndDelete({
       _id: req.params.id,
@@ -238,6 +252,12 @@ router.delete("/:id", authenticateToken, authorizeRoles("admin"), async (req, re
     if (!deleted) {
       return res.status(404).json({ message: "Announcement not found" });
     }
+    audit.record({
+      req,
+      action: "announcement.delete",
+      targetType: "announcement",
+      targetId: deleted._id,
+    });
     res.status(200).json({ message: "Announcement deleted" });
   } catch (error) {
     res.status(500).json({ message: "Failed to delete announcement", error: error.message });
@@ -247,10 +267,10 @@ router.delete("/:id", authenticateToken, authorizeRoles("admin"), async (req, re
 /* ------------------------------------------------------------------ */
 /*  Mark as read (any authenticated user)                              */
 /* ------------------------------------------------------------------ */
-router.post("/:id/read", authenticateToken, async (req, res) => {
+router.post("/:id/read", authenticateToken, validId, async (req, res) => {
   try {
     const announcement = await Announcement.findOneAndUpdate(
-      { _id: req.params.id, company: req.user.company._id },
+      { ...baseQuery(req.user), _id: req.params.id },
       { $addToSet: { reads: req.user._id } },
       { new: true }
     );
@@ -266,15 +286,15 @@ router.post("/:id/read", authenticateToken, async (req, res) => {
 /* ------------------------------------------------------------------ */
 /*  Toggle an emoji reaction (any authenticated user)                  */
 /* ------------------------------------------------------------------ */
-router.post("/:id/reactions", authenticateToken, async (req, res) => {
+router.post("/:id/reactions", authenticateToken, validId, async (req, res) => {
   try {
     const { emoji } = req.body;
     if (!emoji || !VALID_EMOJIS.includes(emoji)) {
       return res.status(400).json({ message: "Invalid reaction" });
     }
     const announcement = await Announcement.findOne({
+      ...baseQuery(req.user),
       _id: req.params.id,
-      company: req.user.company._id,
     });
     if (!announcement) {
       return res.status(404).json({ message: "Announcement not found" });

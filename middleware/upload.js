@@ -2,64 +2,80 @@ const multer = require('multer');
 const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
+const { detectFileType } = require('../utils/fileSignature');
 
-// Ensure uploads directory exists
+// Profile pictures are public (they are shown in <img> tags, which cannot send
+// an Authorization header) and are therefore always re-encoded server-side:
+// whatever was uploaded, only a freshly generated WebP ever reaches disk.
 const uploadsDir = path.join(__dirname, '../uploads/profiles');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-// Configure multer for memory storage
-const storage = multer.memoryStorage();
+const ALLOWED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
 
-// File filter for images only
-const fileFilter = (req, file, cb) => {
-  if (file.mimetype.startsWith('image/')) {
-    cb(null, true);
-  } else {
-    cb(new Error('Only image files are allowed'), false);
-  }
-};
-
-// Multer configuration
 const upload = multer({
-  storage: storage,
-  fileFilter: fileFilter,
+  storage: multer.memoryStorage(),
+  fileFilter: (req, file, cb) => {
+    // A first, cheap filter on the declared type. The real check is on the
+    // bytes in processProfilePicture.
+    if (ALLOWED_IMAGE_TYPES.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only PNG, JPEG, WebP or GIF images are allowed'), false);
+    }
+  },
   limits: {
     fileSize: 5 * 1024 * 1024, // 5MB limit
-  }
+    files: 1,
+    fields: 5,
+  },
 });
 
-// Middleware to process and save profile pictures
+/** Multer errors (size, type) become 400s instead of generic 500s. */
+const uploadSingle = (req, res, next) =>
+  upload.single('profilePicture')(req, res, (err) => {
+    if (!err) return next();
+    const message =
+      err.code === 'LIMIT_FILE_SIZE' ? 'Image must be 5MB or smaller' : err.message;
+    return res.status(400).json({ message });
+  });
+
 const processProfilePicture = async (req, res, next) => {
   try {
     if (!req.file) {
       return next();
     }
 
-    // Generate unique filename
-    const filename = `profile-${req.user._id}-${Date.now()}.webp`;
+    if (!detectFileType(req.file.buffer, ALLOWED_IMAGE_TYPES)) {
+      return res.status(400).json({ message: 'File is not a valid image' });
+    }
+
+    // Random, server-generated name: not guessable from the user id, and
+    // nothing from the client ever reaches the filesystem path.
+    const filename = `${crypto.randomUUID()}.webp`;
     const filepath = path.join(uploadsDir, filename);
 
-    // Process image with Sharp
-    await sharp(req.file.buffer)
-      .resize(300, 300, {
-        fit: 'cover',
-        position: 'center'
-      })
+    await sharp(req.file.buffer, {
+      // Rejects decompression bombs (a tiny file that decodes to gigapixels).
+      limitInputPixels: 40 * 1000 * 1000,
+      failOn: 'error',
+    })
+      .rotate()
+      .resize(300, 300, { fit: 'cover', position: 'center' })
       .webp({ quality: 85 })
       .toFile(filepath);
 
-    // Store the relative path for the database
     req.profilePicturePath = `/uploads/profiles/${filename}`;
     next();
   } catch (error) {
-    console.error('Profile picture processing error:', error);
+    console.error('Profile picture processing error:', error.message);
     res.status(400).json({ message: 'Failed to process profile picture' });
   }
 };
 
 module.exports = {
-  uploadSingle: upload.single('profilePicture'),
-  processProfilePicture
+  uploadSingle,
+  processProfilePicture,
 };

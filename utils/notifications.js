@@ -182,13 +182,19 @@ const notifyVoiceSubmission = async (voice, admin) => {
 
 // A reply was posted - notify the other party (employee <-> admin).
 const notifyVoiceReply = async (voice, recipientId, sender) => {
-  const senderName = (sender && sender.name) || "Someone";
   const isFromAdmin = sender && sender.role === "admin";
+  // The submitter of an anonymous voice stays anonymous in their replies too:
+  // no name in any channel's text, and no sender reference that the
+  // notification API would later populate.
+  const hideSender = voice.isAnonymous && !isFromAdmin;
+  const senderName = hideSender
+    ? "The submitter"
+    : (sender && sender.name) || "Someone";
 
   return dispatchAndUnwrap({
     event: NOTIFICATION_EVENTS.VOICE_REPLIED,
     companyId: voice.company,
-    senderId: sender && sender._id,
+    senderId: hideSender ? undefined : sender && sender._id,
     userId: recipientId,
     refs: { voiceId: voice._id },
     payload: {

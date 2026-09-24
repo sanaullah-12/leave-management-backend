@@ -27,6 +27,13 @@ router.post("/", authenticateToken, async (req, res) => {
     // Validate dates
     const start = new Date(startDate);
     const end = new Date(endDate);
+    if (
+      Number.isNaN(start.getTime()) ||
+      Number.isNaN(end.getTime()) ||
+      (end - start) / 86400000 > 366
+    ) {
+      return res.status(400).json({ message: "Leave dates must be valid and span at most one year" });
+    }
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -201,7 +208,6 @@ router.post("/", authenticateToken, async (req, res) => {
             ]);
 
             await emailPromise;
-            console.log(`Email notification sent to admin: ${admin.email}`);
           } catch (emailError) {
             console.error(
               `Failed to send email to admin ${admin.email}:`,
@@ -246,7 +252,7 @@ router.post("/", authenticateToken, async (req, res) => {
 router.get("/", authenticateToken, async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 50;
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
     const skip = (page - 1) * limit;
     const status = req.query.status;
     const employeeId = req.query.employeeId;
@@ -312,6 +318,26 @@ router.put(
         return res
           .status(400)
           .json({ message: "Status must be approved or rejected" });
+      }
+
+
+      // Nobody approves their own request while another admin could.
+      const ownRequest = await Leave.exists({
+        _id: req.params.id,
+        company: req.user.company._id,
+        employee: req.user._id,
+      });
+      if (ownRequest) {
+        const otherAdmins = await User.countDocuments({
+          company: req.user.company._id,
+          role: "admin",
+          status: "active",
+          isActive: true,
+          _id: { $ne: req.user._id },
+        });
+        if (otherAdmins > 0) {
+          return res.status(403).json({ message: "Your own request must be reviewed by another admin" });
+        }
       }
 
       const leave = await Leave.findOneAndUpdate(
@@ -628,19 +654,12 @@ router.get(
   authorizeRoles("admin"),
   async (req, res) => {
     try {
-      console.log("=== DASHBOARD STATS DEBUG ===");
-      console.log("req.user exists:", !!req.user);
-      console.log("req.user:", req.user);
 
       if (!req.user) {
-        console.log("ERROR: req.user is undefined!");
         return res
           .status(401)
           .json({ message: "Authentication failed - user not found" });
       }
-      console.log("Dashboard stats request from user:", req.user.email);
-      console.log("User company:", req.user.company);
-      console.log("Company ID:", req.user.company?._id);
 
       const currentMonth = new Date();
       const startOfMonth = new Date(
@@ -704,14 +723,6 @@ router.get(
           },
         },
       ]);
-
-      console.log("Final stats:", {
-        thisMonthLeaves,
-        pendingLeaves,
-        totalEmployees,
-        leavesByType,
-        leavesByStatus,
-      });
 
       res.status(200).json({
         thisMonthLeaves,
@@ -848,12 +859,6 @@ router.put(
       const { employeeId } = req.params;
       const { allocations } = req.body;
 
-      console.log("Allocation update request:", {
-        employeeId,
-        allocations,
-        body: req.body,
-      });
-
       // Find the employee and verify they belong to the same company
       const employee = await User.findOne({
         _id: employeeId,
@@ -968,9 +973,6 @@ router.post(
 // ADD THIS ROUTE - Place it BEFORE any routes with /:id parameter
 router.get("/my-leaves", authenticateToken, async (req, res) => {
   try {
-    console.log("Fetching leaves for employee:", req.user.email);
-    console.log("Employee ID:", req.user._id);
-    console.log("Employee company:", req.user.company);
 
     const leaves = await Leave.find({
       employee: req.user._id,
@@ -980,7 +982,6 @@ router.get("/my-leaves", authenticateToken, async (req, res) => {
       .lean();
 
     console.log("Found leaves for employee:", leaves.length);
-    console.log("Leaves data:", leaves);
 
     res.status(200).json({
       success: true,

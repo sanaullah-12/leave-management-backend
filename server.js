@@ -74,6 +74,32 @@ if (!process.env.JWT_SECRET) {
   console.error("FATAL: JWT_SECRET is not set. Refusing to start.");
   process.exit(1);
 }
+
+// Anyone holding the signing secret can mint a token for any user. A short
+// secret, a placeholder, or one that has been committed to the repository
+// (identified by its SHA-256, never by its value) is refused in production.
+{
+  const secret = process.env.JWT_SECRET;
+  const fingerprint = require("crypto").createHash("sha256").update(secret).digest("hex");
+  const COMPROMISED_SECRET_FINGERPRINTS = new Set([
+    "9087975a53a984116a9309f5f11d6240f8c0ba438a7b4b9bc29e28a32ab873ca",
+  ]);
+  const problem =
+    secret.length < 32
+      ? "is shorter than 32 characters"
+      : COMPROMISED_SECRET_FINGERPRINTS.has(fingerprint)
+      ? "has been exposed in source control and must be rotated"
+      : /your_|replace_with|change_this|change_in_production|secret_key_here/i.test(secret)
+      ? "is a placeholder value"
+      : null;
+  if (problem) {
+    if (isDeployedProduction) {
+      console.error(`FATAL: JWT_SECRET ${problem}. Refusing to start.`);
+      process.exit(1);
+    }
+    console.error(`WARNING: JWT_SECRET ${problem}. This would refuse to start in production.`);
+  }
+}
 if (missingEnv.length) {
   // The one startup line that must survive the mute above.
   console.error(
@@ -101,7 +127,20 @@ const agentRoutes = require("./routes/agent");
 const pushSubscriptionRoutes = require("./routes/pushSubscriptions");
 const appReleaseRoutes = require("./routes/appRelease");
 
+const { authenticateToken, authorizeRoles } = require("./middleware/auth");
+const {
+  requireDeviceOwner,
+  requireDeviceTenant,
+  validateDeviceTarget,
+} = require("./middleware/deviceAccess");
+const { deviceLimiter } = require("./middleware/rateLimits");
+const security = require("./middleware/security");
+
 const app = express();
+app.disable("x-powered-by");
+// Flat query strings only: "?email[$ne]=x" stays the literal key "email[$ne]"
+// instead of becoming a nested object that could reach a Mongo filter.
+app.set("query parser", "simple");
 
 // Railway (and most PaaS hosts) sit behind a reverse proxy that terminates
 // TLS and forwards the real client IP via X-Forwarded-For. Without this,
@@ -115,51 +154,81 @@ const app = express();
 // request logging (morgan), and auth all sit below this line.
 app.set("trust proxy", 1);
 
-// CORS configuration (before other middlewares)
-const allowedOrigins = ["http://localhost:3000"]; // Always allow localhost for development
-
-// Add origins from environment variable
-if (process.env.ALLOWED_ORIGINS) {
-  const envOrigins = process.env.ALLOWED_ORIGINS.split(",").map((origin) =>
-    origin.trim()
+// CORS. Only the configured frontends may call the API from a browser. The
+// localhost dev origins are added outside production only.
+const allowedOrigins = new Set(
+  (process.env.ALLOWED_ORIGINS || "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+);
+if (process.env.FRONTEND_URL) allowedOrigins.add(process.env.FRONTEND_URL.trim());
+if (!isDeployedProduction) {
+  ["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:5173"].forEach((o) =>
+    allowedOrigins.add(o)
   );
-  allowedOrigins.push(...envOrigins);
 }
 
 app.use(
   cors({
     origin: function (origin, callback) {
-      // Allow requests with no origin (like mobile apps, Postman, etc.)
+      // No Origin header: not a browser cross-origin request (the Local Agent,
+      // server-to-server calls, same-origin navigation). CORS does not apply.
       if (!origin) return callback(null, true);
-
-      if (allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      } else {
-        console.log(`CORS blocked origin: ${origin}`);
-        return callback(new Error(`Not allowed by CORS. Origin: ${origin}`));
-      }
+      // Unknown origins get no CORS headers, so the browser blocks the read.
+      return callback(null, allowedOrigins.has(origin));
     },
-    credentials: true,
+    // Authentication is a bearer token, never a cookie, so credentialed
+    // cross-origin requests are not needed.
+    credentials: false,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
+    maxAge: 600,
   })
 );
 
-// Security middlewares (after CORS)
+// Security headers. The API only ever returns JSON or file downloads, so its
+// CSP allows nothing at all; no page served from this origin can run script.
 app.use(
   helmet({
-    crossOriginResourcePolicy: { policy: "cross-origin" },
+    contentSecurityPolicy: {
+      useDefaults: false,
+      directives: {
+        defaultSrc: ["'none'"],
+        frameAncestors: ["'none'"],
+        baseUri: ["'none'"],
+        formAction: ["'none'"],
+      },
+    },
+    crossOriginResourcePolicy: { policy: "same-origin" },
+    crossOriginOpenerPolicy: { policy: "same-origin" },
+    referrerPolicy: { policy: "no-referrer" },
+    strictTransportSecurity: {
+      maxAge: 63072000,
+      includeSubDomains: true,
+      preload: false,
+    },
+    frameguard: { action: "deny" },
   })
 );
+app.use(security.permissionsPolicy);
+
 // Log requests that failed. A line per successful request is thousands of
-// entries an hour that nobody reads; a 4xx/5xx is worth keeping.
+// entries an hour that nobody reads; a 4xx/5xx is worth keeping. Only the
+// path is logged - query strings can carry tokens or personal data.
+morgan.token("path-only", (req) => (req.originalUrl || req.url).split("?")[0]);
 app.use(
-  morgan(isDeployedProduction && !VERBOSE_LOGS ? "tiny" : "combined", {
-    skip: (req, res) =>
-      isDeployedProduction && !VERBOSE_LOGS && res.statusCode < 400,
-    // console.log is muted above, so write straight to the real stream.
-    stream: { write: (line) => process.stdout.write(line) },
-  })
+  morgan(
+    isDeployedProduction && !VERBOSE_LOGS
+      ? ":method :path-only :status :res[content-length] - :response-time ms"
+      : ':remote-addr - :method :path-only :status :res[content-length] ":user-agent" - :response-time ms',
+    {
+      skip: (req, res) =>
+        isDeployedProduction && !VERBOSE_LOGS && res.statusCode < 400,
+      // console.log is muted above, so write straight to the real stream.
+      stream: { write: (line) => process.stdout.write(line) },
+    }
+  )
 );
 
 // Rate limiting. The exemption matches req.PATH against an exact allowlist, not
@@ -194,30 +263,49 @@ const agentLimiter = rateLimit({
 });
 app.use("/api/agent", agentLimiter);
 
-// Body parser middleware
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: true }));
+// Body parsers. Attendance batches from the agent are the only large JSON
+// bodies; everything else is small, so the default ceiling is 1MB. A body
+// already parsed by the agent parser is skipped by the general one.
+app.use("/api/agent", express.json({ limit: "10mb" }));
+app.use(express.json({ limit: "1mb" }));
+app.use(express.urlencoded({ extended: false, limit: "100kb" }));
 
-// Serve static files for profile pictures with better error handling
+// Operator/prototype keys, parameter pollution, and error-detail stripping.
+app.use(security.rejectOperatorKeys);
+app.use(security.collapseQueryArrays);
+app.use(security.safeErrorResponses);
+app.use("/api", security.noStoreApi);
+
+// Profile pictures only. They are public by design (rendered in <img>, which
+// cannot send a bearer token) and are always server-generated WebP files with
+// random names. Nothing else under uploads/ is served: Employee Voice
+// attachments go through their authenticated download route.
 const uploadsPath = path.join(__dirname, "uploads");
-
-// Ensure uploads directory exists
-if (!fs.existsSync(uploadsPath)) {
-  fs.mkdirSync(uploadsPath, { recursive: true });
-  console.log("Created uploads directory");
+const profilesPath = path.join(uploadsPath, "profiles");
+if (!fs.existsSync(profilesPath)) {
+  fs.mkdirSync(profilesPath, { recursive: true });
 }
 
 app.use(
-  "/uploads",
-  express.static(uploadsPath, {
+  "/uploads/profiles",
+  express.static(profilesPath, {
     fallthrough: false,
     index: false,
-    setHeaders: (res, path) => {
+    dotfiles: "deny",
+    redirect: false,
+    setHeaders: (res, filePath) => {
+      if (path.extname(filePath).toLowerCase() !== ".webp") {
+        res.setHeader("Content-Type", "application/octet-stream");
+        res.setHeader("Content-Disposition", "attachment");
+      }
       res.setHeader("Access-Control-Allow-Origin", "*");
       res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Content-Security-Policy", "default-src 'none'; sandbox");
     },
   })
 );
+app.use("/uploads", (req, res) => res.status(404).json({ message: "Not found" }));
 
 // Database connection with retry logic
 const connectDB = async (retryCount = 0) => {
@@ -399,19 +487,27 @@ app.use("/api/auth", authRoutes);
 app.use("/api/leaves", leaveRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/attendance", attendanceRoutes);
+
+// Direct device access: admins of the device-owning company only, to private
+// network addresses only. None of these are reachable by other tenants.
+const deviceOwnerOnly = [authenticateToken, requireDeviceOwner, deviceLimiter, validateDeviceTarget];
 // Device-to-database sync. Previously written but never mounted, which left
 // /api/attendance/sync/manual (a stub returning synced: 0) as the only reachable
 // sync endpoint - so device punches never reached the database.
-app.use("/api/attendance-sync", attendanceSyncRoutes);
-app.use("/api/biometric", biometricRoutes);
-app.use("/api/employees", employeesFixRoutes);
-app.use("/api/employee-performance", employeePerformanceRoutes);
-app.use("/api/machine-performance", machinePerformanceRoutes);
-app.use("/api/simple-performance", require("./routes/simplePerformance"));
+app.use("/api/attendance-sync", ...deviceOwnerOnly, attendanceSyncRoutes);
+app.use("/api/biometric", ...deviceOwnerOnly, biometricRoutes);
+app.use("/api/employees", ...deviceOwnerOnly, employeesFixRoutes);
+app.use("/api/machine-performance", ...deviceOwnerOnly, machinePerformanceRoutes);
 app.use(
   "/api/real-machine-performance",
+  ...deviceOwnerOnly,
   require("./routes/realMachinePerformance")
 );
+// Analytics over the device's attendance: that company's admins only.
+const deviceTenantAdmin = [authenticateToken, authorizeRoles("admin"), requireDeviceTenant];
+app.use("/api/employee-performance", ...deviceTenantAdmin, employeePerformanceRoutes);
+app.use("/api/simple-performance", ...deviceTenantAdmin, require("./routes/simplePerformance"));
+
 app.use("/api/notifications", notificationRoutes);
 // Push transport only - who may be pushed to, from which browser. The
 // notification itself is still created by the notification layer.
@@ -426,6 +522,8 @@ app.use("/api/work-from-home/sessions", wfhSessionRoutes);
 app.use("/api/work-from-home", workFromHomeRoutes);
 app.use("/api/unreported-absence", unreportedAbsenceRoutes);
 app.use("/api/announcements", require("./routes/announcements"));
+// Security audit trail: read-only, admins of the same company.
+app.use("/api/audit-logs", require("./routes/auditLogs"));
 // Local ZKTeco Agent link. The device sits on a private office LAN that this
 // host cannot route to, so an agent on an office PC connects outbound to these
 // endpoints and relays every device operation.
@@ -446,28 +544,31 @@ app.get("/api/health", (req, res) => {
 });
 
 // Global error handler. Registered after every route so any next(err) lands
-// here, including the 404 express.static raises for a missing upload.
+// here. The client gets a status and a generic message; the detail stays in
+// the server log.
 app.use((err, req, res, next) => {
+  const status = err.status || err.statusCode || 500;
   console.error(`Error in ${req.method} ${req.path}:`, err.message);
   if (process.env.NODE_ENV !== "production") {
     console.error(err.stack);
   }
 
-  res.status(err.status || err.statusCode || 500).json({
-    message: "Something went wrong!",
-    error: process.env.NODE_ENV === "production" ? {} : err.message,
-    path: req.path,
-    method: req.method,
-    timestamp: new Date().toISOString(),
+  // Malformed JSON and oversized bodies are the client's fault, not ours.
+  if (err.type === "entity.parse.failed") {
+    return res.status(400).json({ message: "Malformed JSON body" });
+  }
+  if (err.type === "entity.too.large") {
+    return res.status(413).json({ message: "Request body too large" });
+  }
+
+  res.status(status >= 400 && status < 600 ? status : 500).json({
+    message: status < 500 ? "Request could not be processed" : "Something went wrong",
   });
 });
 
 // 404 handler for unknown routes
 app.use("*", (req, res) => {
-  res.status(404).json({
-    message: "Route not found",
-    path: req.originalUrl,
-  });
+  res.status(404).json({ message: "Route not found" });
 });
 
 const PORT = process.env.PORT || 5000;

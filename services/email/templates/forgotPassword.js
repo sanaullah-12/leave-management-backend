@@ -4,12 +4,12 @@
  * Distinct from passwordReset.js, which confirms a password was changed.
  */
 
-const { baseLayout, button, detailsBox, fallbackLink, greeting, p, COLORS } = require("./layout");
+const { baseLayout, button, detailsBox, fallbackLink, greeting, p, COLORS, esc } = require("./layout");
 
 module.exports = ({ user, resetUrl, expiryMinutes = 15 }) => {
   const body = `
     ${greeting(user.name)}
-    ${p(`We received a request to reset the password for your <strong>${user.company}</strong> account.`)}
+    ${p(`We received a request to reset the password for your <strong>${esc(user.company)}</strong> account.`)}
     ${detailsBox(
       [
         ["Account", user.email],

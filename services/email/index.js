@@ -56,7 +56,13 @@ const isRetryable = (error) => {
  * @returns {Promise<{success:true, messageId:string, provider:'Brevo', attempts:number}>}
  * @throws  {Error} with `.emailDiagnosis` describing cause + fix
  */
-const sendEmail = async ({ email, subject, html, text, fromName }) => {
+const sendEmail = async ({ email, subject, html, text, fromName: rawFromName }) => {
+  // The display name can be a tenant-chosen company name. Quotes, angle
+  // brackets and line breaks would let it rewrite the address itself.
+  const fromName =
+    typeof rawFromName === "string"
+      ? rawFromName.replace(/["<>\r\n\\]/g, "").trim().slice(0, 80) || undefined
+      : undefined;
   if (!email) throw new EmailConfigError("Cannot send email: no recipient address provided.");
   if (!subject) {
     throw new EmailConfigError(`Cannot send email to ${maskEmail(email)}: no subject provided.`);
@@ -180,7 +186,6 @@ const sendTemplate = async (templateName, data, { fromName } = {}) => {
 const sendInvitationEmail = async (employee, token, inviterName, role = "employee") => {
   const inviteUrl = `${getFrontendUrl()}/invite/${token}`;
   const { subject, html, text } = templates.invitation({ employee, inviteUrl, inviterName, role });
-  log(`Invite link: ${inviteUrl}`);
   return sendEmail({ email: employee.email, subject, html, text, fromName: employee.company });
 };
 

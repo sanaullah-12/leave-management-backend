@@ -14,12 +14,13 @@ const express = require("express");
 const router = express.Router();
 
 const { authenticateAgent } = require("../middleware/agentAuth");
-const { authenticateToken, authorizeRoles } = require("../middleware/auth");
+const { authenticateToken } = require("../middleware/auth");
+const { requireDeviceOwner } = require("../middleware/deviceAccess");
+const { deviceLimiter } = require("../middleware/rateLimits");
 const agentRegistry = require("../services/agentRegistry");
 const deviceGateway = require("../services/deviceGateway");
 const AttendanceSyncService = require("../services/AttendanceSyncService");
 const AttendanceLog = require("../models/AttendanceLog");
-const Company = require("../models/Company");
 
 /** Upper bound on how long a long-poll is held open. */
 const MAX_POLL_WAIT_MS = 25_000;
@@ -28,42 +29,11 @@ const MAX_POLL_WAIT_MS = 25_000;
 const MAX_BATCH_SIZE = 2000;
 
 /**
- * The company that agent-collected attendance belongs to.
- *
- * The agent authenticates as a machine, so it carries no user and therefore no
- * company. AGENT_COMPANY_ID pins it explicitly; without that, a single-company
- * deployment is unambiguous and resolves on its own. More than one company and
- * no pin is a configuration error, not something to guess - guessing would file
- * one tenant's punches under another.
+ * The company that agent-collected attendance belongs to. The agent
+ * authenticates as a machine, so it carries no user and therefore no company;
+ * see services/deviceOwner.js for how the owner is resolved.
  */
-let cachedCompanyId = null;
-async function resolveAgentCompany() {
-  if (cachedCompanyId) return cachedCompanyId;
-
-  const pinned = (process.env.AGENT_COMPANY_ID || "").trim();
-  if (pinned) {
-    cachedCompanyId = pinned;
-    return cachedCompanyId;
-  }
-
-  const companies = await Company.find({}).select("_id name").limit(2).lean();
-
-  if (companies.length === 1) {
-    cachedCompanyId = companies[0]._id.toString();
-    console.log(
-      `Agent attendance will be filed under the only company present: ${companies[0].name}`
-    );
-    return cachedCompanyId;
-  }
-
-  const error = new Error(
-    companies.length === 0
-      ? "No company exists, so agent attendance cannot be filed."
-      : "Several companies exist. Set AGENT_COMPANY_ID so agent attendance is filed under the right one."
-  );
-  error.code = "COMPANY_UNRESOLVED";
-  throw error;
-}
+const { resolveDeviceCompany: resolveAgentCompany } = require("../services/deviceOwner");
 
 /**
  * POST /api/agent/hello
@@ -251,7 +221,7 @@ router.post("/bye", authenticateAgent, (req, res) => {
  * agent-authenticated - this is the endpoint the app uses to decide whether to
  * offer device actions at all.
  */
-router.get("/status", authenticateToken, authorizeRoles("admin"), async (req, res) => {
+router.get("/status", authenticateToken, requireDeviceOwner, async (req, res) => {
   const availability = deviceGateway.availability();
   const snapshot = agentRegistry.snapshot();
 
@@ -282,7 +252,7 @@ router.get("/status", authenticateToken, authorizeRoles("admin"), async (req, re
  * Ask the connected agent to pull the device log now instead of waiting for its
  * next scheduled sync.
  */
-router.post("/sync", authenticateToken, authorizeRoles("admin"), async (req, res) => {
+router.post("/sync", authenticateToken, requireDeviceOwner, deviceLimiter, async (req, res) => {
   const ip = req.body?.ip || process.env.ZKTECO_IP || "192.168.1.201";
   const port = parseInt(req.body?.port || process.env.ZKTECO_PORT || 4370, 10);
 

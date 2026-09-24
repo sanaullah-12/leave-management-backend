@@ -5,12 +5,12 @@
  * link. If the user didn't do it, this is how they find out.
  */
 
-const { baseLayout, button, detailsBox, greeting, p, COLORS } = require("./layout");
+const { baseLayout, button, detailsBox, greeting, p, COLORS, esc } = require("./layout");
 
 module.exports = ({ user, loginUrl, changedAt = new Date() }) => {
   const body = `
     ${greeting(user.name)}
-    ${p(`The password for your <strong>${user.company}</strong> account was changed successfully.`)}
+    ${p(`The password for your <strong>${esc(user.company)}</strong> account was changed successfully.`)}
     ${detailsBox(
       [
         ["Account", user.email],
