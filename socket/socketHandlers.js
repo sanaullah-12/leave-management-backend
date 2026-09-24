@@ -19,6 +19,9 @@ const registerHandlers = (io, socket) => {
   socket.join(ROOMS.user(id));
   socket.join(ROOMS.company(company));
   socket.join(ROOMS.companyRole(company, role));
+  // Revoking the session (logout, password change, deactivation) disconnects
+  // every socket in this room.
+  socket.join(`session:${socket.user.sessionId}`);
 
   // Presence: broadcast the updated online list to the company on change.
   const cameOnline = presence.add(company, id, socket.id);

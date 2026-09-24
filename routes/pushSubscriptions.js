@@ -34,12 +34,38 @@ const config = require("../notifications/config");
 const fingerprint = (endpoint) =>
   crypto.createHash("sha256").update(endpoint).digest("hex").slice(0, 10);
 
-/** A browser endpoint is a URL from the push service. Anything else is a bug. */
-const isValidEndpoint = (value) =>
-  typeof value === "string" &&
-  value.length > 0 &&
-  value.length <= 2000 &&
-  /^https:\/\//.test(value);
+/**
+ * Hosts of the browser push services (Chrome/Edge/Opera/Samsung via FCM,
+ * Firefox, Windows, Safari). The server makes an outbound request to every
+ * registered endpoint, so accepting any https URL would let a user point it
+ * at internal or third-party hosts.
+ */
+const PUSH_SERVICE_HOSTS = [
+  "fcm.googleapis.com",
+  "android.googleapis.com",
+  "updates.push.services.mozilla.com",
+  "web.push.apple.com",
+];
+const PUSH_SERVICE_SUFFIXES = [".push.services.mozilla.com", ".notify.windows.com", ".push.apple.com"];
+
+const MAX_DEVICES_PER_USER = 10;
+
+/** A browser endpoint is a URL from a known push service. Anything else is refused. */
+const isValidEndpoint = (value) => {
+  if (typeof value !== "string" || value.length === 0 || value.length > 2000) return false;
+  let url;
+  try {
+    url = new URL(value);
+  } catch (_) {
+    return false;
+  }
+  if (url.protocol !== "https:" || url.port !== "" || url.username || url.password) return false;
+  const host = url.hostname.toLowerCase();
+  return (
+    PUSH_SERVICE_HOSTS.includes(host) ||
+    PUSH_SERVICE_SUFFIXES.some((suffix) => host.endsWith(suffix))
+  );
+};
 
 /**
  * GET /api/push/vapid-public-key
@@ -125,7 +151,13 @@ router.post("/subscribe", authenticateToken, async (req, res) => {
       });
     }
 
-    if (!keys || typeof keys.p256dh !== "string" || typeof keys.auth !== "string") {
+    if (
+      !keys ||
+      typeof keys.p256dh !== "string" ||
+      typeof keys.auth !== "string" ||
+      keys.p256dh.length > 200 ||
+      keys.auth.length > 100
+    ) {
       return res.status(400).json({
         success: false,
         code: "BAD_KEYS",
@@ -138,6 +170,18 @@ router.post("/subscribe", authenticateToken, async (req, res) => {
         success: false,
         code: "NO_COMPANY",
         message: "Your account is not attached to a company.",
+      });
+    }
+
+    // Keep the newest devices; the oldest registrations make room.
+    const existing = await PushSubscription.find({ user: req.user._id, endpoint: { $ne: endpoint } })
+      .sort({ updatedAt: -1 })
+      .select("_id")
+      .lean();
+    if (existing.length >= MAX_DEVICES_PER_USER) {
+      await PushSubscription.deleteMany({
+        _id: { $in: existing.slice(MAX_DEVICES_PER_USER - 1).map((d) => d._id) },
+        user: req.user._id,
       });
     }
 

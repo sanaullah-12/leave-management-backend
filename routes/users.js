@@ -6,275 +6,203 @@ const {
 } = require("../middleware/auth");
 const { uploadSingle, processProfilePicture } = require("../middleware/upload");
 const { validatePhoneField } = require("../middleware/phoneValidation");
+const { validate, z, schemas } = require("../middleware/validate");
+const { uploadLimiter, inviteLimiter } = require("../middleware/rateLimits");
 const { serializeAuthUser } = require("../utils/serializeUser");
+const sessions = require("../services/sessionService");
+const audit = require("../services/auditLog");
 const User = require("../models/User");
 const { sendInvitationEmail } = require("../utils/email");
 
 const router = express.Router();
 
+const MAX_PAGE_SIZE = 200;
+
+const pagination = (query) => {
+  const page = Math.max(1, parseInt(query.page, 10) || 1);
+  const limit = Math.min(MAX_PAGE_SIZE, Math.max(1, parseInt(query.limit, 10) || 50));
+  return { page, limit, skip: (page - 1) * limit };
+};
+
+const idParams = z.object({ id: schemas.objectId });
+
+// Fields never returned by the user-management endpoints.
+const PRIVATE_FIELDS =
+  "-password -invitationToken -invitationExpires -passwordResetToken -passwordResetExpires";
+
 // Get all employees (Admin only)
-router.get(
-  "/",
-  authenticateToken,
-  authorizeRoles("admin"),
-  async (req, res) => {
-    try {
-      console.log("=== EMPLOYEES DEBUG ===");
-      console.log("req.user exists:", !!req.user);
-      console.log("req.user:", req.user);
+router.get("/", authenticateToken, authorizeRoles("admin"), async (req, res) => {
+  try {
+    const { page, limit, skip } = pagination(req.query);
+    const companyId = req.user.company._id;
 
-      if (!req.user) {
-        console.log("ERROR: req.user is undefined!");
-        return res
-          .status(401)
-          .json({ message: "Authentication failed - user not found" });
-      }
-      console.log("Employees request from user:", req.user.email);
-      console.log("User company:", req.user.company);
-      console.log("Company ID:", req.user.company?._id);
-
-      const page = parseInt(req.query.page) || 1;
-      const limit = parseInt(req.query.limit) || 50; // Increased default limit for employees
-      const skip = (page - 1) * limit;
-
-      // Include ALL employees (active + inactive) for comprehensive view
-      const companyId = req.user.company._id || req.user.company;
-      console.log("Using company ID for queries:", companyId);
-
-      const users = await User.find({
-        company: companyId,
-        role: "employee",
-      })
-        .select("-password")
+    // Include ALL employees (active + inactive) for comprehensive view
+    const [users, total] = await Promise.all([
+      User.find({ company: companyId, role: "employee" })
+        .select(PRIVATE_FIELDS)
         .populate("company", "name")
         .skip(skip)
         .limit(limit)
-        .sort({ createdAt: -1 });
+        .sort({ createdAt: -1 }),
+      User.countDocuments({ company: companyId, role: "employee" }),
+    ]);
 
-      console.log("Retrieved employees:", users.length);
-      console.log(
-        "Employee statuses:",
-        users.map((u) => ({
-          name: u.name,
-          status: u.status,
-          isActive: u.isActive,
-          email: u.email,
-        }))
-      );
-
-      const total = await User.countDocuments({
-        company: companyId,
-        role: "employee",
-      });
-
-      // Get active employee count for comparison with Dashboard
-      const activeEmployees = await User.countDocuments({
-        company: companyId,
-        role: "employee",
-        isActive: true,
-      });
-
-      console.log(
-        `Employee listing debug - Found ${total} total employees, ${activeEmployees} active employees, returning ${users.length} employees`
-      );
-      console.log(
-        "Employee details:",
-        users.map((u) => ({
-          name: u.name,
-          employeeId: u.employeeId,
-          isActive: u.isActive,
-          status: u.status,
-        }))
-      );
-
-      res.status(200).json({
-        employees: users,
-        pagination: {
-          current: page,
-          pages: Math.ceil(total / limit),
-          total,
-        },
-      });
-    } catch (error) {
-      res.status(500).json({
-        message: "Failed to get employees",
-        error: error.message,
-      });
-    }
-  }
-);
-
-// Get all admins (Admin only)
-router.get(
-  "/admins/list",
-  authenticateToken,
-  authorizeRoles("admin"),
-  async (req, res) => {
-    console.log("Admins request from user:", req.user.email);
-    console.log("User company:", req.user.company);
-    console.log("Company ID:", req.user.company?._id);
-    try {
-      const page = parseInt(req.query.page) || 1;
-      const limit = parseInt(req.query.limit) || 50;
-      const skip = (page - 1) * limit;
-
-      const companyId = req.user.company._id || req.user.company;
-      console.log("Using company ID for admins queries:", companyId);
-      const users = await User.find({
-        company: companyId,
-        role: "admin",
-      })
-        .select("-password")
-        .populate("company", "name")
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit);
-
-      const total = await User.countDocuments({
-        company: companyId,
-        role: "admin",
-      });
-
-      res.status(200).json({
-        admins: users,
-        pagination: {
-          current: page,
-          pages: Math.ceil(total / limit),
-          total,
-        },
-      });
-    } catch (error) {
-      res.status(500).json({
-        message: "Failed to get admins",
-        error: error.message,
-      });
-    }
-  }
-);
-
-// Get single employee (Admin can get any, Employee can get only themselves)
-router.get("/:id", authenticateToken, checkCompanyAccess, async (req, res) => {
-  try {
-    let query = { _id: req.params.id };
-
-    // If user is not admin, they can only see their own profile
-    if (req.user.role !== "admin") {
-      query._id = req.user._id;
-    } else {
-      // Admin can only see employees from their company
-      query.company = req.user.company._id;
-    }
-
-    const user = await User.findOne(query)
-      .select("-password")
-      .populate("company", "name");
-
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-
-    res.status(200).json({ user });
-  } catch (error) {
-    res.status(500).json({
-      message: "Failed to get user",
-      error: error.message,
+    res.status(200).json({
+      employees: users,
+      pagination: { current: page, pages: Math.ceil(total / limit), total },
     });
+  } catch (error) {
+    console.error("List employees error:", error.message);
+    res.status(500).json({ message: "Failed to get employees" });
   }
 });
 
-// Update employee profile (Admin can update any, Employee can update only themselves)
-router.put(
+// Get all admins (Admin only)
+router.get("/admins/list", authenticateToken, authorizeRoles("admin"), async (req, res) => {
+  try {
+    const { page, limit, skip } = pagination(req.query);
+    const companyId = req.user.company._id;
+
+    const [users, total] = await Promise.all([
+      User.find({ company: companyId, role: "admin" })
+        .select(PRIVATE_FIELDS)
+        .populate("company", "name")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      User.countDocuments({ company: companyId, role: "admin" }),
+    ]);
+
+    res.status(200).json({
+      admins: users,
+      pagination: { current: page, pages: Math.ceil(total / limit), total },
+    });
+  } catch (error) {
+    console.error("List admins error:", error.message);
+    res.status(500).json({ message: "Failed to get admins" });
+  }
+});
+
+// Get single employee (Admin can get any in their company, employee only themselves)
+router.get(
   "/:id",
   authenticateToken,
+  validate({ params: idParams }),
   checkCompanyAccess,
-  validatePhoneField("phone"),
   async (req, res) => {
     try {
-      const { name, phone, department, position } = req.body;
+      const query =
+        req.user.role === "admin"
+          ? { _id: req.params.id, company: req.user.company._id }
+          : { _id: req.user._id };
 
-      let query = { _id: req.params.id };
-
-      // If user is not admin, they can only update their own profile
-      if (req.user.role !== "admin") {
-        query._id = req.user._id;
-        // Employees can only update limited fields
-        const allowedUpdates = { name, phone };
-        Object.keys(allowedUpdates).forEach(
-          (key) =>
-            allowedUpdates[key] === undefined && delete allowedUpdates[key]
-        );
-        req.body = allowedUpdates;
-      } else {
-        // Admin can update more fields
-        query.company = req.user.company._id;
-        const allowedUpdates = { name, phone, department, position };
-        Object.keys(allowedUpdates).forEach(
-          (key) =>
-            allowedUpdates[key] === undefined && delete allowedUpdates[key]
-        );
-        req.body = allowedUpdates;
-      }
-
-      const user = await User.findOneAndUpdate(query, req.body, {
-        new: true,
-        runValidators: true,
-      })
-        .select("-password")
+      const user = await User.findOne(query)
+        .select(PRIVATE_FIELDS)
         .populate("company", "name");
 
       if (!user) {
         return res.status(404).json({ message: "User not found" });
       }
 
+      res.status(200).json({ user });
+    } catch (error) {
+      console.error("Get user error:", error.message);
+      res.status(500).json({ message: "Failed to get user" });
+    }
+  }
+);
+
+// Update profile. Employees may change their own name and phone; admins may
+// also change department and position of anyone in their company. Nothing else
+// (role, company, status, quotas...) is writable here.
+const profileUpdateSchema = z.object({
+  name: schemas.personName.optional(),
+  phone: z.union([z.literal(""), schemas.phone, z.null()]).optional(),
+  department: schemas.shortText(100).pipe(z.string().min(1)).optional(),
+  position: schemas.shortText(100).pipe(z.string().min(1)).optional(),
+});
+
+router.put(
+  "/:id",
+  authenticateToken,
+  validate({ params: idParams }),
+  checkCompanyAccess,
+  validatePhoneField("phone"),
+  validate({ body: profileUpdateSchema }),
+  async (req, res) => {
+    try {
+      const { name, phone, department, position } = req.body;
+      const isAdmin = req.user.role === "admin";
+
+      const query = isAdmin
+        ? { _id: req.params.id, company: req.user.company._id }
+        : { _id: req.user._id };
+      const update = isAdmin ? { name, phone, department, position } : { name, phone };
+      Object.keys(update).forEach((key) => update[key] === undefined && delete update[key]);
+
+      const user = await User.findOneAndUpdate(query, update, {
+        new: true,
+        runValidators: true,
+      })
+        .select(PRIVATE_FIELDS)
+        .populate("company", "name");
+
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      audit.record({
+        req,
+        action: "user.profile.update",
+        targetType: "user",
+        targetId: user._id,
+        metadata: { fields: Object.keys(update) },
+      });
+
       // Serialised, not the raw document: the client writes this straight into
-      // its auth context. The document form has `_id` but no `id`, and
-      // `company` as an object rather than its name, which silently corrupted
-      // the stored session.
+      // its auth context.
       res.status(200).json({
         message: "Profile updated successfully",
         user: serializeAuthUser(user),
       });
     } catch (error) {
-      res.status(500).json({
-        message: "Failed to update profile",
-        error: error.message,
-      });
+      if (error.name === "ValidationError") {
+        return res.status(400).json({
+          message: Object.values(error.errors)[0]?.message || "Validation failed",
+        });
+      }
+      console.error("Update profile error:", error.message);
+      res.status(500).json({ message: "Failed to update profile" });
     }
   }
 );
 
-// Deactivate employee (Admin only)
+// Deactivate employee (Admin only). Takes effect immediately: every session
+// the employee has is revoked.
 router.put(
   "/:id/deactivate",
   authenticateToken,
   authorizeRoles("admin"),
+  validate({ params: idParams }),
   async (req, res) => {
     try {
-      const companyId = req.user.company._id || req.user.company; // Add this line
-
       const user = await User.findOneAndUpdate(
-        {
-          _id: req.params.id,
-          company: companyId,
-          role: "employee", // Can't deactivate other admins
-        },
+        { _id: req.params.id, company: req.user.company._id, role: "employee" },
         { isActive: false },
         { new: true }
-      ).select("-password");
+      ).select(PRIVATE_FIELDS);
 
       if (!user) {
         return res.status(404).json({ message: "Employee not found" });
       }
 
-      res.status(200).json({
-        message: "Employee deactivated successfully",
-        user,
-      });
+      await sessions.revokeAllForUser(user._id, "account_deactivated");
+      audit.record({ req, action: "user.deactivate", targetType: "user", targetId: user._id });
+
+      res.status(200).json({ message: "Employee deactivated successfully", user });
     } catch (error) {
-      res.status(500).json({
-        message: "Failed to deactivate employee",
-        error: error.message,
-      });
+      console.error("Deactivate employee error:", error.message);
+      res.status(500).json({ message: "Failed to deactivate employee" });
     }
   }
 );
@@ -284,33 +212,24 @@ router.put(
   "/:id/activate",
   authenticateToken,
   authorizeRoles("admin"),
+  validate({ params: idParams }),
   async (req, res) => {
     try {
-      const companyId = req.user.company._id || req.user.company; // Add this line
-
       const user = await User.findOneAndUpdate(
-        {
-          _id: req.params.id,
-          company: companyId,
-          role: "employee",
-        },
+        { _id: req.params.id, company: req.user.company._id, role: "employee" },
         { isActive: true },
         { new: true }
-      ).select("-password");
+      ).select(PRIVATE_FIELDS);
 
       if (!user) {
         return res.status(404).json({ message: "Employee not found" });
       }
 
-      res.status(200).json({
-        message: "Employee activated successfully",
-        user,
-      });
+      audit.record({ req, action: "user.activate", targetType: "user", targetId: user._id });
+      res.status(200).json({ message: "Employee activated successfully", user });
     } catch (error) {
-      res.status(500).json({
-        message: "Failed to activate employee",
-        error: error.message,
-      });
+      console.error("Activate employee error:", error.message);
+      res.status(500).json({ message: "Failed to activate employee" });
     }
   }
 );
@@ -320,29 +239,33 @@ router.delete(
   "/:id",
   authenticateToken,
   authorizeRoles("admin"),
+  validate({ params: idParams }),
   async (req, res) => {
     try {
-      const companyId = req.user.company._id || req.user.company; // Add this line
       const employeeId = req.params.id;
-
-      // Check if employee exists and belongs to the same company
       const employee = await User.findOne({
         _id: employeeId,
-        company: companyId,
+        company: req.user.company._id,
         role: "employee", // Can't delete other admins
-      }).select("-password");
+      }).select(PRIVATE_FIELDS);
 
       if (!employee) {
         return res.status(404).json({ message: "Employee not found" });
       }
 
-      // Delete all leaves for this employee (including pending/approved ones)
       // Admin has full control to delete employees regardless of leave status
       const Leave = require("../models/Leave");
-      await Leave.deleteMany({ employee: employeeId });
+      await Leave.deleteMany({ employee: employee._id, company: req.user.company._id });
+      await User.deleteOne({ _id: employee._id, company: req.user.company._id });
+      await sessions.revokeAllForUser(employee._id, "account_deleted");
 
-      // Delete the employee
-      await User.findByIdAndDelete(employeeId);
+      audit.record({
+        req,
+        action: "user.delete",
+        targetType: "user",
+        targetId: employee._id,
+        metadata: { employeeId: employee.employeeId },
+      });
 
       res.status(200).json({
         message: "Employee deleted successfully",
@@ -354,19 +277,17 @@ router.delete(
         },
       });
     } catch (error) {
-      console.error("Delete employee error:", error);
-      res.status(500).json({
-        message: "Failed to delete employee",
-        error: error.message,
-      });
+      console.error("Delete employee error:", error.message);
+      res.status(500).json({ message: "Failed to delete employee" });
     }
   }
 );
 
-// Upload profile picture
+// Upload profile picture (always the caller's own)
 router.post(
   "/profile-picture",
   authenticateToken,
+  uploadLimiter,
   uploadSingle,
   processProfilePicture,
   async (req, res) => {
@@ -375,73 +296,68 @@ router.post(
         return res.status(400).json({ message: "No file uploaded" });
       }
 
-      // Update user's profile picture
       const user = await User.findByIdAndUpdate(
         req.user._id,
-        {
-          profilePicture: req.profilePicturePath,
-          profilePictureUploadedAt: new Date(), // Track when file was uploaded
-        },
+        { profilePicture: req.profilePicturePath },
         { new: true }
       )
-        .select("-password")
+        .select(PRIVATE_FIELDS)
         .populate("company", "name");
 
       res.status(200).json({
         message: "Profile picture updated successfully",
         profilePicture: req.profilePicturePath,
-        warning:
-          "Note: On Railway, uploaded files may be lost on app restart. Consider using a cloud storage service for persistent file storage.",
         user: serializeAuthUser(user),
       });
     } catch (error) {
-      console.error("Profile picture upload error:", error);
-      res.status(500).json({
-        message: "Failed to upload profile picture",
-        error: error.message,
-      });
+      console.error("Profile picture upload error:", error.message);
+      res.status(500).json({ message: "Failed to upload profile picture" });
     }
   }
 );
 
 // POST /api/users - Create user (used for invitations)
+const createUserSchema = z.object({
+  name: schemas.personName,
+  email: schemas.email,
+  phone: z.union([z.literal(""), schemas.phone, z.null()]).optional(),
+  role: z.enum(["admin", "employee"]).optional(),
+  department: schemas.shortText(100).pipe(z.string().min(1, "is required")),
+  position: schemas.shortText(100).pipe(z.string().min(1, "is required")),
+  joinDate: schemas.isoDate,
+  employeeId: z
+    .string()
+    .trim()
+    .max(32)
+    .regex(/^[A-Za-z0-9_-]*$/, "may only contain letters, numbers, - and _")
+    .optional(),
+  tags: z.array(z.string().trim().max(40)).max(20).optional(),
+  sendInviteEmail: z.boolean().optional(),
+});
+
 router.post(
   "/",
   authenticateToken,
   authorizeRoles("admin"),
+  inviteLimiter,
   validatePhoneField("phone"),
+  validate({ body: createUserSchema }),
   async (req, res) => {
     try {
-      console.log("=== DEBUG START ===");
-      console.log("req.body:", JSON.stringify(req.body, null, 2));
-      console.log("req.user:", JSON.stringify(req.user, null, 2));
-      console.log("req.user.company:", req.user.company);
-      console.log("req.user.company._id:", req.user.company?._id);
-      console.log("=== DEBUG END ===");
+      const { name, email, phone, department, position, joinDate, tags, sendInviteEmail } =
+        req.body;
+      const role = req.body.role || "employee";
+      const employeeId = req.body.employeeId || undefined;
+      const companyId = req.user.company._id;
 
-      const {
-        name,
-        email,
-        phone,
-        role,
-        department,
-        position,
-        joinDate,
-        employeeId,
-        tags,
-        sendInviteEmail,
-      } = req.body;
-
-      console.log("Creating new user:", { name, email, role, department });
-      console.log("Request user:", req.user.email);
-      console.log("Company from req.user:", req.user.company);
-
-      // A still-pending record means the invite was created but never
-      // accepted - commonly because an earlier email send failed, which left
-      // the address permanently un-invitable. Only an accepted account is a
-      // real conflict; pending ones are re-invited below.
-      const existingUser = await User.findOne({ email: email.toLowerCase() });
-      if (existingUser && existingUser.status !== "pending") {
+      // Only a still-pending invite in THIS company may be re-sent; anything
+      // else (an active account, or a pending one elsewhere) is a conflict.
+      const existingUser = await User.findOne({ email });
+      if (
+        existingUser &&
+        (existingUser.status !== "pending" ||
+          String(existingUser.company) !== String(companyId))
+      ) {
         return res.status(400).json({
           message: "User with this email already exists",
           hint: "This person has already accepted an invitation and has an active account.",
@@ -449,99 +365,70 @@ router.post(
       }
       const isResend = !!existingUser;
 
-      // Get company ID properly - CRITICAL FIX
-      const companyId = req.user.company?._id || req.user.company;
-
-      // Verify companyId is valid
-      if (!companyId) {
-        console.error("No company ID found for admin:", req.user.email);
-        return res.status(400).json({
-          message: "Admin user has no company association",
-        });
-      }
-
-      console.log("Using company ID:", companyId);
-
-      // Reuse the pending record on a resend so we don't create duplicates.
       let user;
       if (isResend) {
         user = existingUser;
         Object.assign(user, {
           name,
-          role: role || "employee",
+          role,
           status: "pending",
           department,
           position,
           joinDate,
-          company: companyId,
           invitedBy: req.user._id,
           tags: tags || [],
           ...(employeeId && { employeeId }),
-          // Only overwrite a stored number when a new one was supplied, so a
-          // resend does not wipe a number the employee set themselves.
           ...(phone && { phone }),
         });
-        await user.save({ validateBeforeSave: false });
-        console.log("Existing PENDING invite updated:", user.employeeId);
+        await user.save();
       } else {
         user = await User.create({
           name,
-          email: email.toLowerCase(),
+          email,
           phone: phone || undefined,
-          role: role || "employee",
+          role,
           status: "pending",
           department,
           position,
           joinDate,
-          employeeId: employeeId || undefined,
-          company: companyId, // Use extracted company ObjectId
+          employeeId,
+          company: companyId,
           invitedBy: req.user._id,
           tags: tags || [],
         });
-        console.log("User created successfully:", user.employeeId);
       }
-      console.log("User company:", user.company);
 
-      // Generate invitation token
       const invitationToken = user.generateInvitationToken();
       await user.save({ validateBeforeSave: false });
 
-      console.log("Invitation token generated");
+      audit.record({
+        req,
+        action: isResend ? "user.invite.resend" : "user.invite",
+        targetType: "user",
+        targetId: user._id,
+        metadata: { role },
+      });
 
-      // Populate company name for email
       await user.populate("company", "name");
       const companyName = user.company?.name || "Your Company";
 
-      console.log("Company name for email:", companyName);
-
-      // Send invitation email if requested
       let emailSent = false;
-      let emailError = null;
+      let emailFailed = false;
       let emailMessageId = null;
 
       if (sendInviteEmail !== false) {
         try {
-          console.log("Sending invitation email to:", email);
-
-          // Create email-friendly user object
-          const emailUser = {
-            ...user.toObject(),
-            company: companyName, // Use string name for email
-          };
-
           const emailResult = await sendInvitationEmail(
-            emailUser,
+            { ...user.toObject(), company: companyName },
             invitationToken,
             req.user.name,
             role
           );
           emailSent = true;
           emailMessageId = emailResult?.messageId;
-          console.log("Invitation email sent successfully");
         } catch (error) {
           console.error("Failed to send invitation email:", error.message);
-          emailError = error.message;
-          // Don't fail the request if email fails
+          emailFailed = true;
         }
       }
 
@@ -560,17 +447,19 @@ router.post(
         },
         emailSent,
         emailMessageId,
-        emailError,
-        warning: emailError ? "User created but invitation email failed" : null,
+        warning: emailFailed ? "User created but invitation email failed" : null,
       });
     } catch (error) {
-      console.error("Error creating user:", error);
-      console.error("Error stack:", error.stack);
-      res.status(500).json({
-        message: "Failed to create user",
-        error: error.message,
-        details: error.stack,
-      });
+      if (error.name === "ValidationError") {
+        return res.status(400).json({
+          message: Object.values(error.errors)[0]?.message || "Validation failed",
+        });
+      }
+      if (error.code === 11000) {
+        return res.status(400).json({ message: "Employee ID or email already exists" });
+      }
+      console.error("Error creating user:", error.message);
+      res.status(500).json({ message: "Failed to create user" });
     }
   }
 );

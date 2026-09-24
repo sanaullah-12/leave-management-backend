@@ -436,6 +436,26 @@ router.put(
         });
       }
 
+
+      // Nobody approves their own request while another admin could.
+      const ownRequest = await WorkFromHome.exists({
+        _id: req.params.id,
+        company: req.user.company._id,
+        employee: req.user._id,
+      });
+      if (ownRequest) {
+        const otherAdmins = await User.countDocuments({
+          company: req.user.company._id,
+          role: "admin",
+          status: "active",
+          isActive: true,
+          _id: { $ne: req.user._id },
+        });
+        if (otherAdmins > 0) {
+          return res.status(403).json({ message: "Your own request must be reviewed by another admin" });
+        }
+      }
+
       const request = await WorkFromHome.findOneAndUpdate(
         {
           _id: req.params.id,

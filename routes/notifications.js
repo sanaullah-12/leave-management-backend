@@ -1,5 +1,7 @@
 const express = require('express');
-const { authenticateToken, authorizeRoles } = require('../middleware/auth');
+const { authenticateToken } = require('../middleware/auth');
+const { requireDeviceOwner } = require('../middleware/deviceAccess');
+const { broadcastLimiter } = require('../middleware/rateLimits');
 const Notification = require('../models/Notification');
 const {
   WhatsAppNotificationService,
@@ -21,7 +23,7 @@ const router = express.Router();
 router.get(
   '/whatsapp/health',
   authenticateToken,
-  authorizeRoles('admin'),
+  requireDeviceOwner,
   (req, res) => {
     const health = WhatsAppNotificationService.health();
     res.status(200).json({
@@ -42,7 +44,7 @@ router.get(
 router.get(
   '/whatsapp/queue',
   authenticateToken,
-  authorizeRoles('admin'),
+  requireDeviceOwner,
   (req, res) => {
     const limit = Math.min(parseInt(req.query.limit, 10) || 25, 100);
     res.status(200).json({
@@ -57,15 +59,15 @@ router.get(
 router.post(
   '/whatsapp/test',
   authenticateToken,
-  authorizeRoles('admin'),
+  requireDeviceOwner,
+  broadcastLimiter,
   async (req, res) => {
-    const { to, message } = req.body || {};
-
-    const destination = to || req.user.phone;
+    // Never an arbitrary recipient or text: that would make the platform's
+    // WhatsApp sender an open relay for spam and phishing.
+    const destination = req.user.phone;
     if (!destination) {
       return res.status(400).json({
-        message:
-          'Provide a "to" number, or add a phone number to your own profile to test against it.',
+        message: 'Add a phone number to your own profile to send a test message to it.',
       });
     }
 
@@ -80,7 +82,6 @@ router.post(
       const result = await WhatsAppNotificationService.sendDirect({
         to: destination,
         body:
-          message ||
           'Nexora HRMS test message. If you can read this, WhatsApp notifications are configured correctly.',
       });
 
@@ -93,9 +94,9 @@ router.post(
     } catch (error) {
       // A failed test is expected output here, not a server fault: report the
       // provider's own reason so the admin can act on it.
+      console.error('WhatsApp test send failed:', error.message);
       res.status(502).json({
         message: 'Test message was not accepted',
-        reason: error.message,
         retryable: error.retryable !== false,
         provider: error.provider || null,
       });
@@ -106,7 +107,9 @@ router.post(
 // Get user notifications
 router.get('/', authenticateToken, async (req, res) => {
   try {
-    const { page = 1, limit = 20, unread = false } = req.query;
+    const { unread = false } = req.query;
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
     
     const query = {
       recipient: req.user._id,

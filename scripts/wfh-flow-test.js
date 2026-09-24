@@ -24,7 +24,7 @@ require("dotenv").config();
 const mongoose = require("mongoose");
 const { io } = require("../../frontend/node_modules/socket.io-client");
 
-const { generateToken } = require("../utils/jwt");
+const { createSession } = require("../services/sessionService");
 const User = require("../models/User");
 const Company = require("../models/Company");
 const WorkFromHome = require("../models/WorkFromHome");
@@ -204,9 +204,9 @@ async function main() {
     isActive: true,
   });
 
-  // The auth middleware reads `id` off the decoded payload.
-  const employeeToken = generateToken({ id: String(employee._id) });
-  const adminToken = generateToken({ id: String(admin._id) });
+  // Access tokens are bound to a server-side session.
+  const employeeToken = (await createSession(employee)).token;
+  const adminToken = (await createSession(admin)).token;
   /** Ids created by this run, for the assertions that reference them. */
   const createdIds = [];
   /**

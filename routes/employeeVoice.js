@@ -6,7 +6,11 @@ const {
 const {
   uploadVoiceAttachments,
   mapUploadedFiles,
+  resolveAttachmentPath,
 } = require("../middleware/voiceUpload");
+const { validate, z, schemas } = require("../middleware/validate");
+const { submissionLimiter } = require("../middleware/rateLimits");
+const audit = require("../services/auditLog");
 const EmployeeVoice = require("../models/EmployeeVoice");
 const User = require("../models/User");
 const {
@@ -52,6 +56,16 @@ const serializeVoice = (voiceDoc, viewer) => {
   const ownerId = (v.employee && (v.employee._id || v.employee))?.toString();
   const isOwner = ownerId && viewer && ownerId === viewer._id.toString();
 
+  // Attachments are served only through the authenticated download route;
+  // the on-disk name is never exposed.
+  v.attachments = (v.attachments || []).map((a, index) => ({
+    _id: a._id,
+    originalName: a.originalName,
+    mimetype: a.mimetype,
+    size: a.size,
+    path: `/api/employee-voice/${v._id}/attachments/${index}`,
+  }));
+
   if (v.isAnonymous && !isOwner) {
     v.employee = { name: "Anonymous", anonymous: true };
     v.replies = (v.replies || []).map((r) =>
@@ -66,13 +80,19 @@ const serializeVoice = (voiceDoc, viewer) => {
 /* ------------------------------------------------------------------ */
 /*  Create a new Employee Voice (any authenticated user)              */
 /* ------------------------------------------------------------------ */
-router.post("/", authenticateToken, uploadVoiceAttachments, async (req, res) => {
+router.post("/", authenticateToken, submissionLimiter, uploadVoiceAttachments, async (req, res) => {
   try {
     const { category, title, description, priority } = req.body;
     const isAnonymous =
       req.body.isAnonymous === true || req.body.isAnonymous === "true";
-    const department = req.body.department || req.user.department;
+    const department =
+      typeof req.body.department === "string" && req.body.department.trim()
+        ? req.body.department.trim().slice(0, 100)
+        : req.user.department;
 
+    if (typeof title !== "string" || typeof description !== "string") {
+      return res.status(400).json({ message: "Title and description are required" });
+    }
     // Validation (manual - matches the codebase convention).
     if (!category || !VALID_CATEGORIES.includes(category)) {
       return res.status(400).json({ message: "Please select a valid category" });
@@ -96,7 +116,7 @@ router.post("/", authenticateToken, uploadVoiceAttachments, async (req, res) => 
       priority: priority || "medium",
       department,
       isAnonymous,
-      attachments: mapUploadedFiles(req.files),
+      attachments: mapUploadedFiles(req.voiceAttachments),
     });
 
     await voice.save();
@@ -150,8 +170,8 @@ router.post("/", authenticateToken, uploadVoiceAttachments, async (req, res) => 
 /* ------------------------------------------------------------------ */
 router.get("/", authenticateToken, async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 50;
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
     const skip = (page - 1) * limit;
     const { status, category, priority } = req.query;
 
@@ -274,9 +294,59 @@ router.get(
 );
 
 /* ------------------------------------------------------------------ */
+/*  Attachment download (owner or admin, company-scoped)               */
+/* ------------------------------------------------------------------ */
+router.get(
+  "/:id/attachments/:index",
+  authenticateToken,
+  validate({
+    params: z.object({
+      id: schemas.objectId,
+      index: z.string().regex(/^\d{1,2}$/).transform(Number),
+    }),
+  }),
+  async (req, res) => {
+    try {
+      const query = { _id: req.params.id, company: req.user.company._id };
+      if (req.user.role === "employee") query.employee = req.user._id;
+
+      const voice = await EmployeeVoice.findOne(query).select("attachments employee isAnonymous");
+      const attachment = voice && voice.attachments[req.params.index];
+      const filePath = attachment && resolveAttachmentPath(attachment.filename);
+      if (!filePath) {
+        return res.status(404).json({ message: "Attachment not found" });
+      }
+
+      audit.record({
+        req,
+        action: "voice.attachment.download",
+        targetType: "employee_voice",
+        targetId: voice._id,
+        metadata: { index: req.params.index },
+      });
+
+      // Always a download, never rendered by the browser in the API's origin.
+      const safeType = ["image/png", "image/jpeg", "image/webp", "image/gif", "application/pdf"]
+        .includes(attachment.mimetype)
+        ? attachment.mimetype
+        : "application/octet-stream";
+      res.setHeader("Content-Type", safeType);
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Content-Security-Policy", "default-src 'none'; sandbox");
+      res.setHeader("Cache-Control", "private, no-store");
+      res.attachment(attachment.originalName || `attachment-${req.params.index}`);
+      res.sendFile(filePath);
+    } catch (error) {
+      console.error("Voice attachment download error:", error.message);
+      res.status(500).json({ message: "Failed to load attachment" });
+    }
+  }
+);
+
+/* ------------------------------------------------------------------ */
 /*  Single voice (owner or admin, company-scoped)                      */
 /* ------------------------------------------------------------------ */
-router.get("/:id", authenticateToken, async (req, res) => {
+router.get("/:id", authenticateToken, validate({ params: z.object({ id: schemas.objectId }) }), async (req, res) => {
   try {
     const query = { _id: req.params.id, company: req.user.company._id };
     if (req.user.role === "employee") query.employee = req.user._id;
@@ -302,10 +372,10 @@ router.get("/:id", authenticateToken, async (req, res) => {
 /* ------------------------------------------------------------------ */
 /*  Post a reply (owner or admin)                                      */
 /* ------------------------------------------------------------------ */
-router.post("/:id/reply", authenticateToken, async (req, res) => {
+router.post("/:id/reply", authenticateToken, submissionLimiter, validate({ params: z.object({ id: schemas.objectId }) }), async (req, res) => {
   try {
     const { message } = req.body;
-    if (!message || !message.trim()) {
+    if (typeof message !== "string" || !message.trim()) {
       return res.status(400).json({ message: "Reply message is required" });
     }
 
@@ -393,6 +463,7 @@ router.put(
   "/:id/status",
   authenticateToken,
   authorizeRoles("admin"),
+  validate({ params: z.object({ id: schemas.objectId }) }),
   async (req, res) => {
     try {
       const { status } = req.body;
@@ -425,6 +496,14 @@ router.put(
       // Real-time: the submitting employee sees the status change instantly,
       // and every admin (including the actor's other tabs) refreshes the list,
       // the status filter counts and the stat chips.
+      audit.record({
+        req,
+        action: "voice.status.update",
+        targetType: "employee_voice",
+        targetId: voice._id,
+        metadata: { status },
+      });
+
       const statusPayload = { _id: voice._id, status: voice.status };
       SocketService.toUser(
         voice.employee._id || voice.employee,
@@ -466,6 +545,7 @@ router.delete(
   "/:id",
   authenticateToken,
   authorizeRoles("admin"),
+  validate({ params: z.object({ id: schemas.objectId }) }),
   async (req, res) => {
     try {
       const voice = await EmployeeVoice.findOneAndDelete({
@@ -478,6 +558,20 @@ router.delete(
 
       // Real-time: drop the removed item from every other client's list and
       // counters instead of leaving a ghost row behind.
+      audit.record({
+        req,
+        action: "voice.delete",
+        targetType: "employee_voice",
+        targetId: voice._id,
+      });
+
+      // The attachments go with the record.
+      const fs = require("fs");
+      (voice.attachments || []).forEach((a) => {
+        const filePath = resolveAttachmentPath(a.filename);
+        if (filePath) fs.promises.unlink(filePath).catch(() => {});
+      });
+
       const deletedPayload = { _id: voice._id, deleted: true };
       SocketService.toUser(
         voice.employee._id || voice.employee,

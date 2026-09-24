@@ -17,7 +17,14 @@ class EmailQueue {
   }
 
   // Add email job to queue
-  add(jobType, data, priority = 'normal') {
+  /**
+   * @param {string} jobType
+   * @param {object} data
+   * @param {string} priority
+   * @param {object} [scope] { companyId, createdBy } - who may read the job back.
+   *   Jobs carry invite links, so status reads are filtered by this.
+   */
+  add(jobType, data, priority = 'normal', scope = {}) {
     // Ids are strings and monotonic. The previous `Date.now() + Math.random()`
     // produced a float, and the status route looked it up with parseInt(), so
     // the truncated integer never matched and every lookup 404'd.
@@ -25,6 +32,8 @@ class EmailQueue {
       id: `job_${this.nextId++}`,
       type: jobType,
       data: data,
+      companyId: scope.companyId ? String(scope.companyId) : null,
+      createdBy: scope.createdBy ? String(scope.createdBy) : null,
       priority: priority,
       attempts: 0,
       maxAttempts: 3,
@@ -171,8 +180,12 @@ class EmailQueue {
     }
   }
 
-  /** Public shape of a job - never leaks the rendered email or recipient data. */
-  describe(job) {
+  /**
+   * Public shape of a job - never leaks the rendered email or recipient data.
+   * The fallback link (a live invitation credential) is only included for the
+   * admin who queued the job.
+   */
+  describe(job, viewerId) {
     if (!job) return null;
     return {
       id: job.id,
@@ -187,26 +200,34 @@ class EmailQueue {
       diagnosis: job.diagnosis,
       // Set by the caller when a job carries a usable fallback (e.g. an invite
       // link an admin can pass on by hand when delivery fails).
-      fallbackUrl: job.data && job.data.fallbackUrl,
+      fallbackUrl:
+        viewerId && job.createdBy === String(viewerId)
+          ? job.data && job.data.fallbackUrl
+          : undefined,
     };
   }
 
-  // Get queue status
-  getStatus() {
+  // Queue status, limited to one company's jobs.
+  getStatus({ companyId, viewerId } = {}) {
+    const mine = (job) => companyId && job.companyId === String(companyId);
     return {
-      queueSize: this.queue.length,
+      queueSize: this.queue.filter(mine).length,
       processing: this.processing,
-      jobs: this.queue.map((job) => this.describe(job)),
-      recent: this.history.slice(0, 20).map((job) => this.describe(job)),
+      jobs: this.queue.filter(mine).map((job) => this.describe(job, viewerId)),
+      recent: this.history
+        .filter(mine)
+        .slice(0, 20)
+        .map((job) => this.describe(job, viewerId)),
     };
   }
 
-  // Get job by ID - pending or already finished.
-  getJob(jobId) {
+  // Get job by ID - pending or already finished - within one company.
+  getJob(jobId, { companyId, viewerId } = {}) {
     const id = String(jobId);
     const job =
       this.queue.find((j) => j.id === id) || this.history.find((j) => j.id === id);
-    return this.describe(job);
+    if (!job || !companyId || job.companyId !== String(companyId)) return null;
+    return this.describe(job, viewerId);
   }
 }
 

@@ -1,12 +1,12 @@
 /** Welcome email - sent once an invited user has completed registration. */
 
-const { baseLayout, button, detailsBox, greeting, p, COLORS } = require("./layout");
+const { baseLayout, button, detailsBox, greeting, p, COLORS, esc } = require("./layout");
 
 module.exports = ({ user, loginUrl }) => {
   const body = `
     ${greeting(user.name)}
     ${p(
-      `Your account at <strong>${user.company}</strong> is now active. You can sign in and start using the system right away.`
+      `Your account at <strong>${esc(user.company)}</strong> is now active. You can sign in and start using the system right away.`
     )}
     ${detailsBox(
       [
