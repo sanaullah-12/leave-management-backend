@@ -37,6 +37,9 @@ const NOTIFICATION_EVENTS = Object.freeze({
 
   // -- Attendance --------------------------------------------------------
   ATTENDANCE_LATE_ARRIVAL: "attendance.late_arrival",
+  ATTENDANCE_TIME_CHANGE_REQUESTED: "attendance.time_change_requested",
+  ATTENDANCE_TIME_CHANGE_APPROVED: "attendance.time_change_approved",
+  ATTENDANCE_TIME_CHANGE_REJECTED: "attendance.time_change_rejected",
 
   // -- Employee Voice ----------------------------------------------------
   VOICE_SUBMITTED: "voice.submitted",
@@ -131,6 +134,18 @@ const EVENT_METADATA = Object.freeze({
   [NOTIFICATION_EVENTS.ATTENDANCE_LATE_ARRIVAL]: {
     audience: AUDIENCE.USER,
     inAppType: "attendance_late",
+  },
+  [NOTIFICATION_EVENTS.ATTENDANCE_TIME_CHANGE_REQUESTED]: {
+    audience: AUDIENCE.COMPANY_ADMINS,
+    inAppType: "time_change_request",
+  },
+  [NOTIFICATION_EVENTS.ATTENDANCE_TIME_CHANGE_APPROVED]: {
+    audience: AUDIENCE.USER,
+    inAppType: "time_change_approved",
+  },
+  [NOTIFICATION_EVENTS.ATTENDANCE_TIME_CHANGE_REJECTED]: {
+    audience: AUDIENCE.USER,
+    inAppType: "time_change_rejected",
   },
   [NOTIFICATION_EVENTS.VOICE_SUBMITTED]: {
     audience: AUDIENCE.COMPANY_ADMINS,

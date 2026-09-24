@@ -35,6 +35,9 @@ const notificationSchema = new mongoose.Schema({
       'leave_auto_marked',
       'leave_auto_reversed',
       'attendance_late',
+      'time_change_request',
+      'time_change_approved',
+      'time_change_rejected',
       'app_update'
     ],
     required: [true, 'Notification type is required']

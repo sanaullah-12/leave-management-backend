@@ -137,6 +137,7 @@ async function notifyOne({ user, code, date }) {
     startDate: date,
     endDate: date,
     employee,
+    companyId: user.company,
   });
 
   const entry = today.entries.find((candidate) => candidate.date === date);
@@ -149,6 +150,7 @@ async function notifyOne({ user, code, date }) {
     startDate: accumulationStart(date),
     endDate: date,
     employee,
+    companyId: user.company,
   });
 
   await NotificationService.dispatch({

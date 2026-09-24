@@ -17,7 +17,10 @@
  *   - weekends are not judged at all, matching the day-by-day view, where a
  *     weekend is listed but never counted against anyone;
  *   - a day with no punch is not late - it is an absence, a leave day or a
- *     work-from-home day, all of which are somebody else's metric.
+ *     work-from-home day, all of which are somebody else's metric;
+ *   - an approved time change replaces the machine arrival for its day, via
+ *     attendanceCorrectionService. The machine time rides along on the entry
+ *     so it is never lost.
  *
  * Late minutes are never charged against a leave balance here or anywhere
  * else. This is an attendance metric on its own.
@@ -25,6 +28,7 @@
 
 const AttendanceDbService = require("./attendanceDbService");
 const AttendanceSettingsService = require("./AttendanceSettingsService");
+const attendanceCorrectionService = require("./attendanceCorrectionService");
 const { judgeArrival, formatLateness } = require("../utils/lateness");
 const { summariseEntries, emptySummary } = require("../utils/lateHours");
 const {
@@ -136,11 +140,15 @@ function judgeDay(timestamp, dayPolicy) {
 /**
  * One judged day, in the shape the daily table renders:
  * date, expected start, punch in, late.
+ *
+ * `arrival` is the resolved arrival from attendanceCorrectionService. Without
+ * one, the timestamp is judged as the device recorded it.
  */
-function buildEntry({ timestamp, dayPolicy }) {
+function buildEntry({ timestamp, dayPolicy, arrival = null }) {
   const date = localDateString(timestamp);
+  const effective = arrival && arrival.corrected ? arrival.at : timestamp;
   const { isLate, lateMinutes, lateDisplay, effectiveCutoff } = judgeDay(
-    timestamp,
+    effective,
     dayPolicy
   );
 
@@ -152,12 +160,13 @@ function buildEntry({ timestamp, dayPolicy }) {
     officeCutoff: dayPolicy.cutoffTime,
     graceMinutes: dayPolicy.graceMinutes,
     policySource: dayPolicy.source,
-    punchIn: localTimeString(timestamp),
-    punchInDisplay: displayTime(timestamp),
-    timestamp,
+    punchIn: localTimeString(effective),
+    punchInDisplay: displayTime(effective),
+    timestamp: effective,
     isLate,
     lateMinutes,
     lateDisplay: lateDisplay || formatLateness(lateMinutes) || null,
+    ...attendanceCorrectionService.correctionFields(arrival),
   };
 }
 
@@ -188,14 +197,22 @@ async function getEmployeeLateHours({
   endDate,
   previewPolicy,
   employee = null,
+  companyId = null,
 }) {
-  const base = await resolveBasePolicy({ previewPolicy });
-
-  const logs = await AttendanceDbService.fetchNormalizedLogs({
-    employeeIds: [employeeId],
-    startDate,
-    endDate,
-  });
+  const [base, logs, corrections] = await Promise.all([
+    resolveBasePolicy({ previewPolicy }),
+    AttendanceDbService.fetchNormalizedLogs({
+      employeeIds: [employeeId],
+      startDate,
+      endDate,
+    }),
+    attendanceCorrectionService.loadApprovedCorrections({
+      companyId,
+      employeeCodes: [employeeId],
+      startDate,
+      endDate,
+    }),
+  ]);
 
   const punches = firstPunchPerDay(logs);
 
@@ -204,6 +221,12 @@ async function getEmployeeLateHours({
       buildEntry({
         timestamp,
         dayPolicy: resolveDayPolicy({ date, employee, base }),
+        arrival: attendanceCorrectionService.resolveArrival(
+          corrections,
+          employeeId,
+          date,
+          timestamp
+        ),
       })
     )
     // Newest first: a late list is read from the most recent day back.
@@ -236,14 +259,21 @@ async function getRosterLateHours({
   previewPolicy,
   employees = [],
   recentLimit = 20,
+  companyId = null,
 }) {
-  const base = await resolveBasePolicy({ previewPolicy });
-
-  const logs = await AttendanceDbService.fetchNormalizedLogs({
-    employeeIds: null,
-    startDate,
-    endDate,
-  });
+  const [base, logs, corrections] = await Promise.all([
+    resolveBasePolicy({ previewPolicy }),
+    AttendanceDbService.fetchNormalizedLogs({
+      employeeIds: null,
+      startDate,
+      endDate,
+    }),
+    attendanceCorrectionService.loadApprovedCorrections({
+      companyId,
+      startDate,
+      endDate,
+    }),
+  ]);
 
   const byEmployee = new Map();
   for (const log of logs) {
@@ -268,6 +298,12 @@ async function getRosterLateHours({
       buildEntry({
         timestamp,
         dayPolicy: resolveDayPolicy({ date, employee: person, base }),
+        arrival: attendanceCorrectionService.resolveArrival(
+          corrections,
+          code,
+          date,
+          timestamp
+        ),
       })
     );
 

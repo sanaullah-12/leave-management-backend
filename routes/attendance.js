@@ -5,6 +5,7 @@ const {
   displayDate,
   displayTime,
   localDateString,
+  localTimeString,
   today: officeToday,
 } = require("../utils/timezone");const router = express.Router();
 const { authenticateToken, authorizeRoles } = require("../middleware/auth");
@@ -33,11 +34,8 @@ const AttendanceDbService = require("../services/attendanceDbService");
 const AttendanceSettingsService = require("../services/AttendanceSettingsService");
 const workModeService = require("../services/workModeService");
 const lateHoursService = require("../services/lateHoursService");
-const {
-  judgeArrival,
-  cutoffToMinutes,
-  arrivalMinutes,
-} = require("../utils/lateness");
+const attendanceCorrectionService = require("../services/attendanceCorrectionService");
+const { judgeArrival, arrivalMinutes } = require("../utils/lateness");
 const { formatDuration } = require("../utils/lateHours");
 const User = require("../models/User");
 
@@ -1288,13 +1286,19 @@ router.get("/db/status-summary", authenticateToken, authorizeRoles("admin"), asy
     const cutoff = await AttendanceSettingsService.resolveCutoff(null, {
       previewPolicy: req.query.policy,
     });
-    const cutoffMinutes = cutoffToMinutes(cutoff.cutoffTime);
 
-    const logs = await AttendanceDbService.fetchNormalizedLogs({
-      employeeIds: null,
-      startDate,
-      endDate,
-    });
+    const [logs, corrections] = await Promise.all([
+      AttendanceDbService.fetchNormalizedLogs({
+        employeeIds: null,
+        startDate,
+        endDate,
+      }),
+      attendanceCorrectionService.loadApprovedCorrections({
+        companyId: req.user.company._id,
+        startDate,
+        endDate,
+      }),
+    ]);
 
     /**
      * Who the company actually employs.
@@ -1356,8 +1360,15 @@ router.get("/db/status-summary", authenticateToken, authorizeRoles("admin"), asy
       activeDays.add(entry.day);
       employees.add(String(entry.id));
 
-      // Same minute-granular rule the per-employee read applies.
-      if (arrivalMinutes(entry.timestamp) > cutoffMinutes) late += 1;
+      // Same rule and same effective arrival the per-employee read applies,
+      // so an approved time change counts here the moment it is approved.
+      const arrival = attendanceCorrectionService.resolveArrival(
+        corrections,
+        entry.id,
+        entry.day,
+        entry.timestamp
+      );
+      if (judgeArrival(arrival.at, cutoff.cutoffTime).isLate) late += 1;
       else onTime += 1;
 
       attendedByEmployee.set(
@@ -1531,11 +1542,19 @@ router.get("/db/roster-day", authenticateToken, async (req, res) => {
       });
     }
 
-    const logs = await AttendanceDbService.fetchNormalizedLogs({
-      employeeIds: isAdmin ? null : [ownCode],
-      startDate,
-      endDate,
-    });
+    const [logs, corrections] = await Promise.all([
+      AttendanceDbService.fetchNormalizedLogs({
+        employeeIds: isAdmin ? null : [ownCode],
+        startDate,
+        endDate,
+      }),
+      attendanceCorrectionService.loadApprovedCorrections({
+        companyId: req.user.company._id,
+        employeeCodes: isAdmin ? null : [ownCode],
+        startDate,
+        endDate,
+      }),
+    ]);
 
     // First and last punch per employee-day. The first is the arrival the rule
     // judges; the pair is what the hours are measured between, the same way
@@ -1674,22 +1693,34 @@ router.get("/db/roster-day", authenticateToken, async (req, res) => {
         let checkInAt = null;
         let checkOut = null;
         let workedMinutes = null;
+        let correction = { timeCorrected: false };
 
         if (punch) {
-          const arrival = judgeArrival(punch.first, cutoff.cutoffTime);
+          // The effective arrival: an approved time change where there is
+          // one, the device punch otherwise. Hours run from it too, so a
+          // corrected day reads the same in every column.
+          const effective = attendanceCorrectionService.resolveArrival(
+            corrections,
+            code,
+            day,
+            punch.first
+          );
+          correction = attendanceCorrectionService.correctionFields(effective);
+
+          const arrival = judgeArrival(effective.at, cutoff.cutoffTime);
           lateMinutes = arrival.lateMinutes;
           lateDisplay = arrival.lateDisplay;
           status = arrival.isLate ? "Late" : "On time";
 
-          checkInAt = punch.first.toISOString();
-          checkIn = clockFromMinutes(arrivalMinutes(punch.first));
+          checkInAt = effective.at.toISOString();
+          checkIn = clockFromMinutes(arrivalMinutes(effective.at));
 
           // Hours need two punches. A single punch is an arrival and nothing
           // more; reporting it as a zero-hour day would read as a day worked
           // and lost, which is not what the device recorded.
           if (punch.punches > 1 && punch.last > punch.first) {
             checkOut = clockFromMinutes(arrivalMinutes(punch.last));
-            workedMinutes = Math.round((punch.last - punch.first) / 60000);
+            workedMinutes = Math.round((punch.last - effective.at) / 60000);
           }
 
           if (arrival.isLate) {
@@ -1757,6 +1788,7 @@ router.get("/db/roster-day", authenticateToken, async (req, res) => {
           lateMinutes,
           lateDisplay,
           workMode: workModeService.resolveDayMode(scheduled, !!punch),
+          ...correction,
         });
       }
     }
@@ -1855,6 +1887,7 @@ router.get(
         endDate: endDateStr,
         previewPolicy: req.query.policy,
         employee,
+        companyId: req.user.company._id,
       });
 
       res.json({
@@ -1911,6 +1944,7 @@ router.get(
         previewPolicy: req.query.policy,
         employees,
         recentLimit: Math.min(100, parseInt(req.query.limit, 10) || 20),
+        companyId: req.user.company._id,
       });
 
       res.json({ success: true, ...result });
@@ -2027,6 +2061,23 @@ router.get(
           endDateStr
         );
 
+      // Approved time changes decide the arrival; every request, whatever its
+      // state, is shown against its day so the employee can see where it is.
+      const [corrections, timeChangeRequests] = await Promise.all([
+        attendanceCorrectionService.loadApprovedCorrections({
+          companyId: req.user.company._id,
+          employeeCodes: [employeeId],
+          startDate: startDateStr,
+          endDate: endDateStr,
+        }),
+        attendanceCorrectionService.loadRequestsByDay({
+          companyId: req.user.company._id,
+          employeeCode: employeeId,
+          startDate: startDateStr,
+          endDate: endDateStr,
+        }),
+      ]);
+
       // Transform data to match frontend expected format with late time detection
       const transformedData = transformToFrontendFormat(
         result,
@@ -2034,7 +2085,15 @@ router.get(
         startDateStr,
         endDateStr,
         parseInt(days),
-        cutoffTime
+        cutoffTime,
+        corrections
+      );
+
+      transformedData.records = (transformedData.records || []).map(
+        (record) => ({
+          ...record,
+          timeChange: timeChangeRequests.get(record.date) || null,
+        })
       );
 
       // Work mode: an approved WFH day is a working day, and an approved
@@ -2199,7 +2258,8 @@ function transformToFrontendFormat(
   startDate,
   endDate,
   days,
-  cutoffTime = "09:00"
+  cutoffTime = "09:00",
+  corrections = null
 ) {
   const { attendance, employeeId, totalRecords } = attendanceResult;
 
@@ -2329,6 +2389,36 @@ function transformToFrontendFormat(
       filteredRecords.push(record);
     }
   });
+
+  // Each kept record is its day's arrival. Where an approved time change
+  // applies, the day is re-judged at the effective time before anything below
+  // counts it; the device reading stays on the record as machineTime.
+  for (let index = 0; index < filteredRecords.length; index += 1) {
+    const record = filteredRecords[index];
+    const arrival = attendanceCorrectionService.resolveArrival(
+      corrections,
+      employeeId,
+      record.date,
+      record.timestamp
+    );
+    if (!arrival.corrected) continue;
+
+    const verdict = calculateLateTime(arrival.at, cutoffTime);
+    filteredRecords[index] = {
+      ...record,
+      time: localTimeString(arrival.at),
+      timeDisplay: displayTime(arrival.at),
+      timestamp: arrival.at,
+      fullTimestamp: arrival.at.toISOString(),
+      isLate: verdict.isLate,
+      lateMinutes: verdict.lateMinutes,
+      lateDisplay: verdict.lateDisplay,
+      machineTime: record.time,
+      machineTimeDisplay: record.timeDisplay,
+      machineTimestamp: record.fullTimestamp,
+      ...attendanceCorrectionService.correctionFields(arrival),
+    };
+  }
 
   // Calculate late days count from filtered records
   const lateDaysCount = filteredRecords.filter(
