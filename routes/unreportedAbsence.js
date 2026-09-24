@@ -1,5 +1,7 @@
 const express = require("express");
 const { authenticateToken, authorizeRoles } = require("../middleware/auth");
+const { requireDeviceOwner } = require("../middleware/deviceAccess");
+const audit = require("../services/auditLog");
 const AttendanceSettings = require("../models/AttendanceSettings");
 const Leave = require("../models/Leave");
 const unreportedAbsenceService = require("../services/unreportedAbsenceService");
@@ -36,7 +38,7 @@ router.get("/policy", authenticateToken, async (req, res) => {
 router.put(
   "/policy",
   authenticateToken,
-  authorizeRoles("admin"),
+  requireDeviceOwner,
   async (req, res) => {
     try {
       const { enabled, cutoffTime, leaveType, fallbackLeaveType } = req.body;
@@ -112,9 +114,19 @@ router.get(
 router.post(
   "/run",
   authenticateToken,
-  authorizeRoles("admin"),
+  requireDeviceOwner,
   async (req, res) => {
     try {
+      // Only recent days may be (re)run: forcing an old date would charge
+      // leave for days long past.
+      if (req.body.date !== undefined) {
+        const requested = Date.parse(String(req.body.date).slice(0, 10));
+        const ageDays = (Date.now() - requested) / 86400000;
+        if (Number.isNaN(requested) || ageDays < -1 || ageDays > 31) {
+          return res.status(400).json({ message: "date must be within the last 31 days" });
+        }
+      }
+      audit.record({ req, action: "absence.rule.run", metadata: { date: req.body.date } });
       const report = await unreportedAbsenceService.markUnreportedAbsences({
         companyId: req.user.company._id,
         date: String(req.body.date || localDateString(new Date())).slice(0, 10),

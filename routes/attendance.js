@@ -125,6 +125,75 @@ const allowSelfOrAdmin = (req, res, next) => {
   });
 };
 
+/*
+ * Tenant and device guards, applied by path before any handler below runs.
+ *
+ * There is one physical device (attendance + door) per deployment. Controlling
+ * it, reading its roster, or changing the deployment-wide lateness policy is
+ * reserved for admins of the company that owns it; reading the attendance it
+ * produced is reserved for that company's users. Every device address must be
+ * a private-network IPv4 address, so the server cannot be pointed at arbitrary
+ * hosts.
+ */
+const {
+  requireDeviceOwner,
+  requireDeviceTenant,
+  validateDeviceTarget,
+} = require("../middleware/deviceAccess");
+const { deviceLimiter } = require("../middleware/rateLimits");
+const audit = require("../services/auditLog");
+
+router.use(
+  [
+    "/connect",
+    "/status",
+    "/machines",
+    "/force-reconnect-zklib",
+    "/disconnect",
+    "/employees",
+    "/attendance",
+    "/sync",
+    "/realtime",
+    "/diagnostic",
+    "/fetch-attendance-range",
+    "/fetch-real",
+    "/door",
+  ],
+  authenticateToken,
+  requireDeviceOwner,
+  deviceLimiter,
+  validateDeviceTarget
+);
+
+// Date ranges on attendance reads: parseable dates, at most ~13 months. An
+// unbounded range loads every punch in the collection.
+const MAX_RANGE_DAYS = 400;
+const boundedRange = (req, res, next) => {
+  const { startDate, endDate, days } = req.query;
+  if (startDate !== undefined || endDate !== undefined) {
+    const start = Date.parse(startDate);
+    const end = Date.parse(endDate);
+    if (Number.isNaN(start) || Number.isNaN(end)) {
+      return res.status(400).json({ success: false, message: "startDate and endDate must be valid dates" });
+    }
+    if (end < start || (end - start) / 86400000 > MAX_RANGE_DAYS) {
+      return res.status(400).json({
+        success: false,
+        message: `Date range must be ascending and at most ${MAX_RANGE_DAYS} days`,
+      });
+    }
+  }
+  if (days !== undefined) {
+    const n = Number(days);
+    if (!Number.isInteger(n) || n < 1 || n > MAX_RANGE_DAYS) {
+      return res.status(400).json({ success: false, message: `days must be 1-${MAX_RANGE_DAYS}` });
+    }
+  }
+  next();
+};
+
+router.use(["/db", "/my-attendance", "/settings"], authenticateToken, requireDeviceTenant, boundedRange);
+
 // Helper function to test basic TCP connectivity
 const testBasicTCPConnection = (ip, port) => {
   return new Promise((resolve, reject) => {
@@ -1206,7 +1275,7 @@ router.get(
  * office was closed does not count against anyone. It is still a statement
  * about missing data, not about leave - the device cannot tell those apart.
  */
-router.get("/db/status-summary", authenticateToken, async (req, res) => {
+router.get("/db/status-summary", authenticateToken, authorizeRoles("admin"), async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
     if (!startDate || !endDate) {
@@ -2068,13 +2137,6 @@ router.get(
               strictCutoff: cutoffResolution.strictCutoff,
             }
           : { cutoffTime, policy: "fallback", isPreview: false },
-        databaseInfo: {
-          host: mongoose.connection.host,
-          database: mongoose.connection.db.databaseName,
-          isLocal:
-            mongoose.connection.host === "127.0.0.1" ||
-            mongoose.connection.host === "localhost",
-        },
       });
     } catch (error) {
       console.error(
@@ -2083,10 +2145,7 @@ router.get(
       );
       res.status(500).json({
         success: false,
-        message: "Failed to fetch attendance records from LOCAL database",
-        error: error.message,
-        databaseHost: mongoose.connection.host,
-        databaseName: mongoose.connection.db?.databaseName,
+        message: "Failed to fetch attendance records",
       });
     }
   }
@@ -2371,7 +2430,7 @@ function transformToFrontendFormat(
 router.put(
   "/settings/late-time",
   authenticateToken,
-  authorizeRoles("admin"),
+  requireDeviceOwner,
   async (req, res) => {
     try {
       const { cutoffTime, useCustomCutoff, policy, flexibleCutoff, strictCutoff } =
@@ -2394,6 +2453,11 @@ router.put(
       );
 
       if (result.success) {
+        audit.record({
+          req,
+          action: "attendance.settings.update",
+          metadata: patch,
+        });
         res.json({
           success: true,
           message: result.message,

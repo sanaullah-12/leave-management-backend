@@ -18,6 +18,9 @@ const router = express.Router();
 
 const { authenticateToken, authorizeRoles } = require("../middleware/auth");
 const appReleaseNotifier = require("../services/appReleaseNotifier");
+const { requireDeviceOwner } = require("../middleware/deviceAccess");
+const { broadcastLimiter } = require("../middleware/rateLimits");
+const audit = require("../services/auditLog");
 
 /**
  * GET /api/app-release
@@ -50,10 +53,22 @@ router.get("/", authenticateToken, async (req, res) => {
 router.post(
   "/announce",
   authenticateToken,
-  authorizeRoles("admin"),
+  requireDeviceOwner,
+  broadcastLimiter,
   async (req, res) => {
     try {
       const { version, notes, force } = req.body || {};
+
+      if (
+        (version !== undefined && (typeof version !== "string" || version.length > 32)) ||
+        (notes !== undefined && (typeof notes !== "string" || notes.length > 300))
+      ) {
+        return res.status(400).json({
+          success: false,
+          code: "BAD_INPUT",
+          message: "version (max 32 chars) and notes (max 300 chars) must be strings.",
+        });
+      }
 
       if (version !== undefined && (typeof version !== "string" || !version.trim())) {
         return res.status(400).json({
@@ -78,6 +93,7 @@ router.post(
         force: force === true,
       });
 
+      audit.record({ req, action: "release.announce", metadata: { version, force: force === true } });
       res.json({ success: true, ...result });
     } catch (error) {
       console.error("Release announcement failed:", error.message);

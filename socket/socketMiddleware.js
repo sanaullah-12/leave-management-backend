@@ -6,14 +6,17 @@
  * so the rest of the socket layer can trust `socket.user`.
  *
  * The token is read from the handshake `auth.token` (preferred) or the
- * Authorization header - matching how the REST API authenticates.
+ * Authorization header - matching how the REST API authenticates. The session
+ * behind the token must be live, and each socket joins a room named after it
+ * so revoking the session disconnects the socket immediately.
  */
-const { verifyToken } = require("../utils/jwt");
+const { verifyAccessToken } = require("../utils/jwt");
+const { findActiveSession } = require("../services/sessionService");
 const User = require("../models/User");
 
 const extractToken = (socket) => {
   const authToken = socket.handshake?.auth?.token;
-  if (authToken) return authToken;
+  if (typeof authToken === "string" && authToken) return authToken;
   const header = socket.handshake?.headers?.authorization || "";
   return header.startsWith("Bearer ") ? header.slice(7) : null;
 };
@@ -27,12 +30,13 @@ const socketAuthMiddleware = async (socket, next) => {
     const token = extractToken(socket);
     if (!token) return next(new Error("UNAUTHORIZED: missing token"));
 
-    const decoded = verifyToken(token);
-    const user = await User.findById(decoded.id).select(
-      "_id name role company isActive status"
-    );
+    const decoded = verifyAccessToken(token);
+    const [session, user] = await Promise.all([
+      findActiveSession(decoded.sid, decoded.sub),
+      User.findById(decoded.sub).select("_id name role company isActive status"),
+    ]);
 
-    if (!user || !user.isActive || user.status !== "active") {
+    if (!session || !user || !user.isActive || user.status !== "active") {
       return next(new Error("UNAUTHORIZED: invalid or inactive user"));
     }
 
@@ -45,6 +49,7 @@ const socketAuthMiddleware = async (socket, next) => {
       name: user.name,
       role: user.role, // 'admin' | 'employee'
       company: companyId.toString(),
+      sessionId: String(session._id),
     };
 
     return next();
