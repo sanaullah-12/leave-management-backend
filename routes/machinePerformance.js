@@ -3,6 +3,7 @@ const router = express.Router();
 const mongoose = require("mongoose");
 const { authenticateToken, authorizeRoles } = require("../middleware/auth");
 const { judgeArrival } = require("../utils/lateness");
+const attendanceCorrectionService = require("../services/attendanceCorrectionService");
 
 /**
  * The arrival time these reports measure against.
@@ -77,6 +78,13 @@ router.get(
       // Step 2: Analyze performance for each machine employee
       const leaderboardData = [];
 
+      const corrections =
+        await attendanceCorrectionService.loadApprovedCorrections({
+          companyId,
+          startDate: queryStartDate,
+          endDate: queryEndDate,
+        });
+
       for (const employeeId of uniqueEmployees) {
         try {
           // Get attendance logs for this employee from this machine
@@ -91,6 +99,13 @@ router.get(
               ...(companyId && { company: companyId }),
             })
             .toArray();
+
+          // An approved time change replaces the day's first punch.
+          const judgedAt = attendanceCorrectionService.effectivePunchTimes(
+            attendanceLogs,
+            employeeId,
+            corrections
+          );
 
           // Calculate working days in the range
           const totalWorkingDays = calculateWorkingDays(
@@ -116,7 +131,7 @@ router.get(
 
               // Judged to the minute in the office timezone by
               // utils/lateness.js, so this agrees with the attendance page.
-              const verdict = judgeArrival(log.timestamp, PERFORMANCE_CUTOFF);
+              const verdict = judgeArrival(judgedAt(log), PERFORMANCE_CUTOFF);
               if (verdict.isLate) {
                 totalLateMinutes += verdict.lateMinutes;
                 if (!logsByDate[date].hasLateMarked) {

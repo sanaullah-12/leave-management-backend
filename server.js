@@ -487,6 +487,8 @@ app.use("/api/auth", authRoutes);
 app.use("/api/leaves", leaveRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/attendance", attendanceRoutes);
+// Time change requests: an employee's own late days, reviewed by an admin.
+app.use("/api/attendance-corrections", require("./routes/attendanceCorrections"));
 
 // Direct device access: admins of the device-owning company only, to private
 // network addresses only. None of these are reachable by other tenants.

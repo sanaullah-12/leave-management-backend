@@ -4,6 +4,7 @@ const mongoose = require("mongoose");
 const { authenticateToken, authorizeRoles } = require("../middleware/auth");
 const User = require("../models/User");
 const { judgeArrival } = require("../utils/lateness");
+const attendanceCorrectionService = require("../services/attendanceCorrectionService");
 
 /**
  * The arrival time these reports measure against.
@@ -75,6 +76,13 @@ router.get(
       // Analyze performance for each employee
       const leaderboardData = [];
 
+      const corrections =
+        await attendanceCorrectionService.loadApprovedCorrections({
+          companyId,
+          startDate: queryStartDate,
+          endDate: queryEndDate,
+        });
+
       for (const employee of employees) {
         try {
           // Get attendance logs for this employee
@@ -88,6 +96,13 @@ router.get(
               ...(companyId && { company: companyId }),
             })
             .toArray();
+
+          // An approved time change replaces the day's first punch.
+          const judgedAt = attendanceCorrectionService.effectivePunchTimes(
+            attendanceLogs,
+            employee.employeeId,
+            corrections
+          );
 
           // Calculate working days in the range
           const totalWorkingDays = calculateWorkingDays(
@@ -111,7 +126,7 @@ router.get(
             // setHours() applied the SERVER's zone, and comparing timestamps
             // counted seconds - so 09:00:10 read as late here while the
             // attendance page called it on time.
-            const verdict = judgeArrival(log.timestamp, PERFORMANCE_CUTOFF);
+            const verdict = judgeArrival(judgedAt(log), PERFORMANCE_CUTOFF);
             if (verdict.isLate) {
               totalLateMinutes += verdict.lateMinutes;
               if (!logsByDate[date].hasLateMarked) {
@@ -293,6 +308,13 @@ router.get(
         mongoose.connection.db.collection("attendancelogs");
       const departmentPerformance = [];
 
+      const corrections =
+        await attendanceCorrectionService.loadApprovedCorrections({
+          companyId,
+          startDate: queryStartDate,
+          endDate: queryEndDate,
+        });
+
       for (const dept of employeesByDepartment) {
         const departmentName = dept._id;
         const employees = dept.employees;
@@ -317,6 +339,12 @@ router.get(
               })
               .toArray();
 
+            const judgedAt = attendanceCorrectionService.effectivePunchTimes(
+              attendanceLogs,
+              employee.employeeId,
+              corrections
+            );
+
             const workingDays = calculateWorkingDays(
               queryStartDate,
               queryEndDate
@@ -334,7 +362,7 @@ router.get(
 
               // Same minute-granular rule as everywhere else.
               lateMinutes += judgeArrival(
-                log.timestamp,
+                judgedAt(log),
                 PERFORMANCE_CUTOFF
               ).lateMinutes;
             });

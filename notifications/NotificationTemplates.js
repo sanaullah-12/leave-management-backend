@@ -237,6 +237,35 @@ Late Arrival`,
     }),
   },
 
+  /**
+   * Time change requests. In-app only: push falls back to this copy, and the
+   * decision is not urgent enough to be worth a WhatsApp template.
+   */
+  [NOTIFICATION_EVENTS.ATTENDANCE_TIME_CHANGE_REQUESTED]: {
+    inApp: ({ employeeName, date, machineTime, requestedTime }) => ({
+      title: "Time Change Request",
+      message:
+        `${employeeName} asked for ${formatDate(date)} to be recorded from ` +
+        `${requestedTime} instead of the machine check-in at ${machineTime}.`,
+    }),
+  },
+  [NOTIFICATION_EVENTS.ATTENDANCE_TIME_CHANGE_APPROVED]: {
+    inApp: ({ date, requestedTime }) => ({
+      title: "Time Change Approved",
+      message:
+        `Your check-in for ${formatDate(date)} is now recorded as ` +
+        `${requestedTime}. Your attendance has been recalculated.`,
+    }),
+  },
+  [NOTIFICATION_EVENTS.ATTENDANCE_TIME_CHANGE_REJECTED]: {
+    inApp: ({ date, reviewComments }) => ({
+      title: "Time Change Rejected",
+      message:
+        `Your time change request for ${formatDate(date)} was not approved.` +
+        (reviewComments ? ` Reason: ${reviewComments}` : ""),
+    }),
+  },
+
   // ---------------------------------------------------------------- Leave
   [NOTIFICATION_EVENTS.LEAVE_REQUESTED]: {
     inApp: ({ employeeName, leaveType, totalDays, startDate, endDate }) => ({
@@ -865,6 +894,7 @@ const hasTemplate = (event, channel) =>
 const PUSH_ROUTES = [
   // A release announcement is about the app as a whole, so it opens the app.
   ["app.", "/"],
+  ["attendance.time_change", "/attendance/time-changes"],
   ["attendance.", "/attendance/late-time"],
   ["leave.", "/leaves"],
   ["wfh.", "/work-from-home"],
