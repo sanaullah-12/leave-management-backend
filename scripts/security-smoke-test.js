@@ -38,7 +38,11 @@ const call = async (method, path, { token, body, raw, headers = {} } = {}) => {
 };
 
 const uniq = Date.now().toString(36);
-const PW = "Str0ngPassw0rd!";
+// Generated per run: no credential-like literals live in the repository, and
+// the fixtures cannot be reused against any other environment.
+const randomPassword = () => `T${require("crypto").randomBytes(12).toString("base64url")}9`;
+const PW = randomPassword();
+const WRONG_PW = randomPassword();
 
 (async () => {
   // ---------- fixtures ----------
@@ -99,8 +103,8 @@ const PW = "Str0ngPassw0rd!";
   const proto = await call("PUT", `/users/${emp1Id}`, { token: emp1, raw: '{"__proto__":{"role":"admin"}}', headers: { "Content-Type": "application/json" } });
   check("prototype-pollution key rejected", proto.status === 400, proto.status);
 
-  const bad1 = await call("POST", "/auth/login", { body: { email: `emp1-${uniq}@example.com`, password: "REMOVED" } });
-  const bad2 = await call("POST", "/auth/login", { body: { email: `nobody-${uniq}@example.com`, password: "REMOVED" } });
+  const bad1 = await call("POST", "/auth/login", { body: { email: `emp1-${uniq}@example.com`, password: WRONG_PW } });
+  const bad2 = await call("POST", "/auth/login", { body: { email: `nobody-${uniq}@example.com`, password: WRONG_PW } });
   check("no account enumeration on login", bad1.status === 401 && bad2.status === 401 && bad1.data.message === bad2.data.message, `${bad1.data.message} | ${bad2.data.message}`);
 
   const forged = await call("GET", "/auth/profile", {
@@ -248,7 +252,7 @@ const PW = "Str0ngPassw0rd!";
   // Brute force lockout (per account)
   let locked = false;
   for (let i = 0; i < 7; i++) {
-    const r = await call("POST", "/auth/login", { body: { email: `emp2-${uniq}@example.com`, password: "REMOVED" } });
+    const r = await call("POST", "/auth/login", { body: { email: `emp2-${uniq}@example.com`, password: WRONG_PW } });
     if (r.status === 429) locked = true;
   }
   check("account locked after repeated failures", locked);
