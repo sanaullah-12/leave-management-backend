@@ -1,6 +1,7 @@
 const BiometricService = require('./BiometricService');
 const AttendanceLog = require('../models/AttendanceLog');
 const lateArrivalNotifier = require('./lateArrivalNotifier');
+const unreportedAbsenceService = require('./unreportedAbsenceService');
 
 /**
  * The window a device punch must fall in to be believed.
@@ -116,8 +117,31 @@ class AttendanceSyncService {
         console.error('Late-arrival notification pass failed:', error.message)
       );
 
+    // Punches for a day the agent was not running arrive only when it is next
+    // started, after the unreported absence rule has already charged everyone
+    // present as on leave. Those days are returned here, as the proof lands.
+    // Awaited so the agent's response reports it; a failure never fails the
+    // ingest, because the punches themselves are already stored.
+    let autoLeaveRevoked = 0;
+    try {
+      const { revoked } = await unreportedAbsenceService.revokeForArrivedAttendance({
+        companyId,
+        logs: transformedLogs
+      });
+      autoLeaveRevoked = revoked.length;
+      if (revoked.length) {
+        console.log(
+          `Revoked ${revoked.length} auto-marked leave day(s) now that attendance arrived: ` +
+            revoked.map((r) => `${r.employeeId}@${r.date}`).join(', ')
+        );
+      }
+    } catch (error) {
+      console.error('Auto-marked leave reconciliation failed:', error.message);
+    }
+
     return {
       ...result,
+      autoLeaveRevoked,
       total: deviceLogs.length,
       rejected: rejected.length,
       errors: [...(result.errors || []), ...rejected]

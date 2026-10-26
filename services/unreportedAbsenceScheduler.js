@@ -22,6 +22,7 @@ class UnreportedAbsenceScheduler {
   constructor() {
     this.timer = null;
     this.lastRunDate = null;
+    this.lastMissingWarning = null;
     this.running = false;
   }
 
@@ -45,22 +46,44 @@ class UnreportedAbsenceScheduler {
 
   async tick() {
     if (this.running) return;
-
-    const day = localDateString(new Date());
-    if (this.lastRunDate === day) return;
+    this.running = true;
 
     try {
       const policy = await unreportedAbsenceService.getPolicy();
       if (!policy.enabled) return;
+
+      // Earlier days set aside while the attendance feed was down are judged
+      // as soon as their punches have arrived, on every tick rather than once a
+      // day: the agent can be started again at any hour.
+      const caughtUp = await unreportedAbsenceService.catchUpAwaitingDays();
+      for (const report of caughtUp) {
+        if (!report.ran) continue;
+        console.log(
+          `Unreported absence rule: attendance for ${report.date} has arrived; ` +
+            `judged it now, ${report.marked.length} day(s) recorded as leave`
+        );
+      }
+
+      const day = localDateString(new Date());
+      if (this.lastRunDate === day) return;
       if (!unreportedAbsenceService.cutoffHasPassed(day, policy.cutoffTime)) {
         return;
       }
 
-      this.running = true;
       const reports = await unreportedAbsenceService.runForAllCompanies({
         date: day,
       });
-      this.lastRunDate = day;
+      // A company whose attendance has not arrived is checked again on the next
+      // tick, so punches the agent uploads late in the day are still counted.
+      // Past midnight the day is left to catchUpAwaitingDays.
+      if (!reports.some((r) => r.attendanceMissing)) {
+        this.lastRunDate = day;
+      } else if (this.lastMissingWarning !== day) {
+        this.lastMissingWarning = day;
+        console.warn(
+          `Unreported absence rule: no attendance yet for ${day}; nobody charged, will re-check`
+        );
+      }
 
       const marked = reports.reduce((sum, r) => sum + r.marked.length, 0);
       if (marked) {
